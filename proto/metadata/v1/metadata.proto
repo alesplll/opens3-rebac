@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+package opens3.metadata.v1;
+
+option go_package = "github.com/alesplll/opens3-rebac/gen/metadata/v1;metadatav1";
+
+// MetadataService — единственный источник правды о том, что существует в системе.
+// Хранит метаданные бакетов, объектов, версий и blob_id без хранения самих байт.
+// Вызывается только Gateway.
+//
+// Порт: 50052 (конфигурируется через GRPC_PORT)
+//
+// PostgreSQL схема:
+//   buckets (id UUID, name TEXT UNIQUE, owner_id UUID, created_at TIMESTAMPTZ)
+//   objects (id UUID, bucket_id UUID→buckets, key TEXT, current_version_id UUID, UNIQUE(bucket_id, key))
+//   versions (id UUID, object_id UUID→objects, blob_id UUID, size_bytes BIGINT,
+//             etag TEXT, content_type TEXT, created_at TIMESTAMPTZ, is_deleted BOOLEAN)
+//
+// Kafka:
+//   Публикует → object-deleted: при DeleteObjectMeta (запускает async-очистку в Data Node и AuthZ)
+//   Публикует → bucket-deleted: при DeleteBucket (запускает async-очистку графа в AuthZ)
+//   Потребляет ← object-stored: резервный путь для подтверждения версии объекта
+service MetadataService {
+  // ─── Bucket Management ────────────────────────────────────────────────────
+
+  // CreateBucket регистрирует новый бакет в метаданных.
+  // Ошибки: ALREADY_EXISTS (имя занято), INVALID_ARGUMENT (пустое имя).
+  rpc CreateBucket(CreateBucketRequest) returns (CreateBucketResponse);
+
+  // DeleteBucket удаляет метаданные бакета.
+  // Ошибки: NOT_FOUND, FAILED_PRECONDITION (бакет не пуст).
+  // После успешного удаления публикует событие bucket-deleted в Kafka.
+  rpc DeleteBucket(DeleteBucketRequest) returns (DeleteBucketResponse);
+
+  // GetBucket возвращает метаданные бакета по имени.
+  // Ошибки: NOT_FOUND.
+  rpc GetBucket(GetBucketRequest) returns (GetBucketResponse);
+
+  // ListBuckets возвращает все бакеты, принадлежащие пользователю.
+  rpc ListBuckets(ListBucketsRequest) returns (ListBucketsResponse);
+
+  // HeadBucket проверяет, существует ли бакет (для S3 HEAD /{bucket}).
+  rpc HeadBucket(HeadBucketRequest) returns (HeadBucketResponse);
+
+  // ─── Object Management ────────────────────────────────────────────────────
+
+  // CreateObjectVersion регистрирует новую версию объекта после того, как Data Node
+  // подтвердил запись blob'а на диск. Вызывается Gateway сразу после StoreObject.
+  // Ошибки: NOT_FOUND (бакет не существует), INVALID_ARGUMENT.
+  rpc CreateObjectVersion(CreateObjectVersionRequest) returns (CreateObjectVersionResponse);
+
+  // GetObjectMeta возвращает метаданные актуальной (или конкретной) версии объекта.
+  // blob_id в ответе используется Gateway для вызова Data Node RetrieveObject.
+  // Ошибки: NOT_FOUND (бакет или объект не существуют).
+  rpc GetObjectMeta(GetObjectMetaRequest) returns (GetObjectMetaResponse);
+
+  // DeleteObjectMeta помечает объект удалённым и публикует ObjectDeleted в Kafka.
+  // Асинхронно запускает: удаление файла в Data Node + очистку графа в AuthZ.
+  // Ошибки: NOT_FOUND.
+  rpc DeleteObjectMeta(DeleteObjectMetaRequest) returns (DeleteObjectMetaResponse);
+
+  // ListObjects возвращает постранично объекты бакета с опциональной фильтрацией по префиксу.
+  // Аналог S3 ListObjectsV2. Только метаданные — Data Node не вызывается.
+  // Ошибки: NOT_FOUND (бакет не существует).
+  rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);
+}
+
+// ─── Общие структуры ─────────────────────────────────────────────────────────
+
+// BucketInfo — метаданные бакета.
+message BucketInfo {
+  string bucket_id  = 1; // UUID
+  string name       = 2; // Уникальное имя бакета
+  string owner_id   = 3; // UUID пользователя-владельца (соответствует user:<uuid> в AuthZ)
+  int64  created_at = 4; // Unix timestamp в миллисекундах
+}
+
+// ObjectInfo — метаданные объекта (краткая форма для ListObjects).
+message ObjectInfo {
+  string object_id     = 1; // UUID
+  string version_id    = 2; // UUID актуальной версии
+  string key           = 3; // S3 ключ объекта (напр. "path/to/file.jpg")
+  string etag          = 4; // MD5, обёрнутый в кавычки по спецификации S3 ("\"abc123\"")
+  int64  size_bytes    = 5;
+  string content_type  = 6; // MIME тип (напр. "image/jpeg")
+  int64  last_modified = 7; // Unix timestamp в миллисекундах последней модификации
+}
+
+// ─── Bucket ───────────────────────────────────────────────────────────────────
+
+message CreateBucketRequest {
+  string name     = 1; // Глобально уникальное имя бакета
+  string owner_id = 2; // UUID пользователя, создающего бакет (из JWT sub)
+}
+
+message CreateBucketResponse {
+  string bucket_id  = 1; // UUID созданного бакета
+  int64  created_at = 2; // Unix timestamp в миллисекундах
+}
+
+message DeleteBucketRequest {
+  string bucket_name = 1;
+}
+
+message DeleteBucketResponse {
+  bool success = 1;
+}
+
+message GetBucketRequest {
+  string bucket_name = 1;
+}
+
+message GetBucketResponse {
+  BucketInfo bucket = 1;
+}
+
+message ListBucketsRequest {
+  // UUID пользователя. Возвращает только бакеты, принадлежащие ему.
+  string owner_id = 1;
+}
+
+message ListBucketsResponse {
+  repeated BucketInfo buckets = 1;
+}
+
+message HeadBucketRequest {
+  string bucket_name = 1;
+}
+
+message HeadBucketResponse {
+  bool   exists    = 1;
+  string bucket_id = 2; // Заполняется только если exists = true
+  string owner_id  = 3; // Заполняется только если exists = true
+}
+
+// ─── Object ───────────────────────────────────────────────────────────────────
+
+message CreateObjectVersionRequest {
+  string bucket_name  = 1; // Имя бакета
+  string key          = 2; // S3 ключ объекта (напр. "2024/january/cat.jpg")
+  string blob_id      = 3; // UUID, возвращённый Data Node из StoreObject / CompleteMultipartUpload
+  int64  size_bytes   = 4; // Размер blob в байтах
+  string etag         = 5; // MD5 содержимого в hex без кавычек
+  string content_type = 6; // MIME тип (напр. "image/jpeg")
+}
+
+message CreateObjectVersionResponse {
+  string object_id   = 1; // UUID объекта (создаётся при первой загрузке, повторно используется)
+  string version_id  = 2; // UUID новой версии
+  int64  created_at  = 3; // Unix timestamp в миллисекундах
+}
+
+message GetObjectMetaRequest {
+  string bucket_name = 1;
+  string key         = 2;
+  // UUID конкретной версии. Если пусто — возвращается актуальная версия (current_version_id).
+  string version_id  = 3;
+}
+
+message GetObjectMetaResponse {
+  string object_id     = 1;
+  string version_id    = 2;
+  // blob_id — ключ для вызова Data Node DataStorageService.RetrieveObject.
+  string blob_id       = 3;
+  int64  size_bytes    = 4;
+  string etag          = 5;
+  string content_type  = 6;
+  int64  last_modified = 7; // Unix timestamp в миллисекундах
+}
+
+message DeleteObjectMetaRequest {
+  string bucket_name = 1;
+  string key         = 2;
+}
+
+message DeleteObjectMetaResponse {
+  string object_id = 1; // UUID удалённого объекта
+  string blob_id   = 2; // UUID blob'а — включается в событие ObjectDeleted в Kafka
+  bool   success   = 3;
+}
+
+message ListObjectsRequest {
+  string bucket_name        = 1;
+  // Опциональный фильтр по префиксу ключа (напр. "images/" для ListObjects с prefix=images/).
+  string prefix             = 2;
+  // Токен для постраничной навигации из предыдущего ответа ListObjectsResponse.
+  // Пустая строка — запрос первой страницы.
+  string continuation_token = 3;
+  // Максимальное количество объектов в ответе. По умолчанию и максимум: 1000.
+  int32  max_keys           = 4;
+}
+
+message ListObjectsResponse {
+  repeated ObjectInfo objects                = 1;
+  // Токен для следующей страницы. Пустая строка — данных больше нет.
+  string              next_continuation_token = 2;
+  // true, если есть ещё объекты после текущей страницы.
+  bool                is_truncated           = 3;
+}

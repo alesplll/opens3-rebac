@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package opens3.authz.v1;
+
+option go_package = "github.com/alesplll/opens3-rebac/gen/authz/v1;authzv1";
+
+// AuthZService — ReBAC-движок авторизации для OpenS3.
+// Отвечает на вопрос: "может ли <subject> выполнить <action> над <object>?"
+//
+// ─── Формат Entity ID ────────────────────────────────────────────────────────
+//   user:<uuid>               — пользователь (UUID из JWT sub, напр. "user:550e8400-...")
+//   group:<name>              — логическая группа (напр. "group:devops")
+//   bucket:<name>             — S3 бакет (напр. "bucket:my-photos")
+//   object:<bucket>/<key>     — S3 объект (напр. "object:my-photos/2024/cat.jpg")
+//
+// ─── Маппинг S3 операций → action ────────────────────────────────────────────
+//   read    → GetObject, HeadObject, ListObjects, HeadBucket, ListBuckets
+//   write   → PutObject, UploadPart, CompleteMultipartUpload
+//   delete  → DeleteObject
+//   create  → CreateBucket, CreateMultipartUpload, AbortMultipartUpload
+//   admin   → DeleteBucket, выдача/отзыв прав
+//
+// ─── Иерархия уровней HAS_PERMISSION ─────────────────────────────────────────
+//   admin > delete > create > write > read
+//   (каждый уровень включает все нижестоящие)
+service AuthZService {
+  // Check проверяет, разрешено ли действие.
+  // Вызывается Gateway перед каждой S3-операцией.
+  // Сначала проверяет кэш Redis (TTL ~30 с), при промахе — обходит граф Neo4j.
+  // Публикует аудит-событие (ACCESS_GRANTED / ACCESS_DENIED) в топик auth-audit.
+  rpc Check(CheckRequest) returns (CheckResponse);
+
+  // WriteTuple создаёт ребро в графе прав.
+  // Использование:
+  //   — назначить владельца бакета при CreateBucket:
+  //       subject=user:<id>, relation=OWNER_OF, object=bucket:<name>
+  //   — связать объект с бакетом после PutObject:
+  //       subject=bucket:<name>, relation=PARENT_OF, object=object:<bucket>/<key>
+  //   — выдать права пользователю/группе:
+  //       subject=user:<id>, relation=HAS_PERMISSION, object=bucket:<name>, level=read
+  //   — добавить пользователя в группу:
+  //       subject=user:<id>, relation=MEMBER_OF, object=group:<name>
+  // После записи публикует событие tuple_written в топик auth-changes (инвалидация кэша).
+  rpc WriteTuple(WriteTupleRequest) returns (WriteTupleResponse);
+
+  // DeleteTuple удаляет ребро из графа прав.
+  // Используется для отзыва прав или исключения из группы.
+  // После удаления публикует событие tuple_removed в топик auth-changes (инвалидация кэша).
+  rpc DeleteTuple(DeleteTupleRequest) returns (DeleteTupleResponse);
+
+  // Read возвращает все прямые (не транзитивные) исходящие связи subject'а.
+  // Полезно для ответа на вопрос "куда у пользователя есть доступ" без знания конкретных ресурсов.
+  // Примеры результатов:
+  //   subject=user:alice, relation=MEMBER_OF, object=group:devops
+  //   subject=user:alice, relation=OWNER_OF,  object=bucket:my-photos
+  //   subject=user:alice, relation=HAS_PERMISSION, object=bucket:shared, level=read
+  // Используется в админском UI, при отладке, при отображении "мои права".
+  rpc Read(ReadRequest) returns (ReadResponse);
+}
+
+// ─── Примечание: удаление ресурсов из графа ──────────────────────────────────
+// Очистка графа при удалении объектов и бакетов выполняется НЕ через gRPC,
+// а через внутренний Kafka-консьюмер AuthZ-сервиса:
+//   Топик object-deleted (Producer: Metadata) → AuthZ-консьюмер удаляет узел объекта + все его рёбра из Neo4j
+//   Топик bucket-deleted (Producer: Metadata) → AuthZ-консьюмер удаляет узел бакета + все его рёбра из Neo4j
+// Операции идемпотентны: повторное удаление несуществующего узла — не ошибка (at-least-once delivery).
+
+// ─── Check ────────────────────────────────────────────────────────────────────
+
+message CheckRequest {
+  // Субъект, выполняющий действие.
+  // Формат: "user:<uuid>" или "group:<name>".
+  // Пример: "user:550e8400-e29b-41d4-a716-446655440000"
+  string subject = 1;
+
+  // Выполняемое действие. Одно из: read, write, delete, create, admin.
+  // См. таблицу маппинга S3 операций в комментарии к сервису.
+  string action = 2;
+
+  // Объект, над которым выполняется действие.
+  // Формат: "bucket:<name>" или "object:<bucket>/<key>".
+  // Пример: "bucket:my-photos" или "object:my-photos/2024/cat.jpg"
+  string object = 3;
+}
+
+message CheckResponse {
+  // true — действие разрешено, false — запрещено.
+  bool allowed = 1;
+
+  // Читаемое пояснение решения (для отладки, не для клиента).
+  // Примеры: "owner access", "member of group:devops via HAS_PERMISSION{write}",
+  //          "no path in graph", "cache hit"
+  string reason = 2;
+}
+
+// ─── WriteTuple ───────────────────────────────────────────────────────────────
+
+message WriteTupleRequest {
+  // Subject отношения. Формат: "user:<uuid>" или "group:<name>".
+  string subject = 1;
+
+  // Тип ребра в графе. Допустимые значения:
+  //   MEMBER_OF      — user/group является членом group
+  //   HAS_PERMISSION — subject имеет явные права на ресурс (нужен level)
+  //   OWNER_OF       — subject является владельцем ресурса (подразумевает admin)
+  //   PARENT_OF      — ресурс является родителем другого (bucket→object для наследования прав)
+  string relation = 2;
+
+  // Object отношения. Формат: "group:<name>", "bucket:<name>", "object:<bucket>/<key>".
+  string object = 3;
+
+  // Уровень прав. Обязателен при relation = HAS_PERMISSION.
+  // Допустимые значения: "read" | "write" | "create" | "delete" | "admin"
+  // Иерархия (каждый уровень включает нижестоящие): admin > delete > create > write > read
+  string level = 4;
+}
+
+message WriteTupleResponse {
+  bool success = 1;
+}
+
+// ─── DeleteTuple ──────────────────────────────────────────────────────────────
+
+message DeleteTupleRequest {
+  string subject  = 1;
+  string relation = 2;
+  string object   = 3;
+}
+
+message DeleteTupleResponse {
+  bool success = 1;
+}
+
+// ─── Read ─────────────────────────────────────────────────────────────────────
+
+message ReadRequest {
+  // Subject для получения связей. Формат: "user:<uuid>" или "group:<name>".
+  string subject = 1;
+}
+
+message ReadResponse {
+  repeated RelationTuple tuples = 1;
+}
+
+// RelationTuple — единица хранения прав в графе.
+message RelationTuple {
+  string subject  = 1;
+  string relation = 2;
+  string object   = 3;
+  // Заполняется только при relation = HAS_PERMISSION.
+  string level    = 4;
+}

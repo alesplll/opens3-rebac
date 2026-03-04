@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+package opens3.storage.v1;
+
+option go_package = "github.com/alesplll/opens3-rebac/gen/storage/v1;storagev1";
+
+// DataStorageService — единственный сервис, хранящий байты на диске.
+// Работает только с blob_id (UUID) и не знает о S3 API, бакетах, ключах или правах доступа.
+// Вызывается только Gateway.
+//
+// Порт: 50053 (конфигурируется через GRPC_PORT)
+//
+// Структура хранилища на диске:
+//   /data/blobs/{blob_id}           — готовые объекты
+//   /data/multipart/{upload_id}/    — временные части multipart-загрузки
+//
+// Kafka:
+//   Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)
+//   Публикует  → object-stored:  после успешного StoreObject (резервный путь для Metadata)
+service DataStorageService {
+  // StoreObject принимает поток байт и сохраняет их как blob на диск.
+  // Client-streaming: Gateway отправляет файл чанками, сервис собирает и сохраняет.
+  // Возвращает blob_id (UUID) и MD5 для последующей регистрации в Metadata.
+  // Ошибки: RESOURCE_EXHAUSTED (недостаточно места), INTERNAL.
+  rpc StoreObject(stream StoreObjectRequest) returns (StoreObjectResponse);
+
+  // RetrieveObject читает blob с диска и стримит байты в Gateway.
+  // Server-streaming: сервис отправляет файл чанками.
+  // Поддерживает range-запросы (для HTTP Range-заголовка).
+  // Ошибки: NOT_FOUND (blob_id не существует), INTERNAL.
+  rpc RetrieveObject(RetrieveObjectRequest) returns (stream RetrieveObjectResponse);
+
+  // DeleteObject удаляет blob с диска по blob_id.
+  // Как правило, вызывается из Kafka-консьюмера при получении object-deleted, не напрямую.
+  // Идемпотентен: удаление несуществующего blob_id — не ошибка, возвращает success=true.
+  rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
+
+  // ─── Multipart Upload ─────────────────────────────────────────────────────
+
+  // InitiateMultipartUpload открывает новую сессию составной загрузки.
+  // Возвращает upload_id для последующих вызовов UploadPart.
+  rpc InitiateMultipartUpload(InitiateMultipartUploadRequest) returns (InitiateMultipartUploadResponse);
+
+  // UploadPart сохраняет одну часть multipart-загрузки.
+  // Client-streaming: Gateway отправляет байты одной части.
+  // Части хранятся как /data/multipart/{upload_id}/part_{part_number}.
+  // Ошибки: NOT_FOUND (upload_id не существует), INVALID_ARGUMENT (неверный part_number).
+  rpc UploadPart(stream UploadPartRequest) returns (UploadPartResponse);
+
+  // CompleteMultipartUpload склеивает все загруженные части в единый blob.
+  // Возвращает итоговый blob_id и MD5 для регистрации в Metadata.
+  // Удаляет временные файлы частей после склейки.
+  // Ошибки: NOT_FOUND (upload_id не существует), INVALID_ARGUMENT (несовпадение чексумм).
+  rpc CompleteMultipartUpload(CompleteMultipartUploadRequest) returns (CompleteMultipartUploadResponse);
+
+  // AbortMultipartUpload отменяет multipart-загрузку и удаляет все временные части.
+  // Идемпотентен: отмена несуществующего upload_id — не ошибка.
+  rpc AbortMultipartUpload(AbortMultipartUploadRequest) returns (AbortMultipartUploadResponse);
+}
+
+// ─── StoreObject ──────────────────────────────────────────────────────────────
+
+// StoreObjectRequest — один чанк стримингового запроса.
+message StoreObjectRequest {
+  // Чанк байт файла. Отправляется в нескольких сообщениях для больших файлов.
+  bytes  data         = 1;
+  // Ожидаемый итоговый размер файла в байтах.
+  // Передаётся только в первом сообщении потока — используется для предварительного выделения.
+  int64  size         = 2;
+  // MIME тип (напр. "image/jpeg", "application/octet-stream").
+  // Передаётся только в первом сообщении потока.
+  string content_type = 3;
+}
+
+message StoreObjectResponse {
+  // UUID нового blob'а. Gateway передаёт его в Metadata CreateObjectVersion.
+  string blob_id      = 1;
+  // Hex-encoded MD5 сохранённого контента. Gateway использует его как ETag.
+  string checksum_md5 = 2;
+}
+
+// ─── RetrieveObject ───────────────────────────────────────────────────────────
+
+message RetrieveObjectRequest {
+  // UUID blob'а, полученный из Metadata GetObjectMeta.
+  string blob_id     = 1;
+  // Начальный байт (включительно) для range-запроса. 0 = начало файла.
+  int64  range_start = 2;
+  // Конечный байт (не включается в ответ) для range-запроса. -1 = конец файла.
+  int64  range_end   = 3;
+}
+
+// RetrieveObjectResponse — один чанк стримингового ответа.
+message RetrieveObjectResponse {
+  // Чанк байт файла.
+  bytes data       = 1;
+  // Полный размер blob'а в байтах. Передаётся только в первом сообщении потока.
+  int64 total_size = 2;
+}
+
+// ─── DeleteObject ─────────────────────────────────────────────────────────────
+
+message DeleteObjectRequest {
+  // UUID blob'а для удаления.
+  string blob_id = 1;
+}
+
+message DeleteObjectResponse {
+  bool success = 1;
+}
+
+// ─── Multipart Upload ─────────────────────────────────────────────────────────
+
+message InitiateMultipartUploadRequest {
+  // Ожидаемое количество частей — подсказка для предварительного выделения (не обязательно).
+  int32  expected_parts = 1;
+  // MIME тип итогового объекта (напр. "video/mp4").
+  string content_type   = 2;
+}
+
+message InitiateMultipartUploadResponse {
+  // UUID сессии multipart-загрузки. Используется во всех последующих вызовах.
+  string upload_id = 1;
+}
+
+// UploadPartRequest — один чанк стримингового запроса части.
+message UploadPartRequest {
+  // UUID сессии из InitiateMultipartUpload.
+  string upload_id   = 1;
+  // Порядковый номер части (начиная с 1). Определяет порядок склейки в CompleteMultipartUpload.
+  int32  part_number = 2;
+  // Чанк байт данной части.
+  bytes  data        = 3;
+}
+
+message UploadPartResponse {
+  // MD5 данной части в hex. Передаётся в CompleteMultipartUpload для верификации целостности.
+  string part_checksum_md5 = 1;
+}
+
+// PartInfo описывает одну часть при CompleteMultipartUpload.
+message PartInfo {
+  // Порядковый номер части (1-based), совпадает с part_number из UploadPart.
+  int32  part_number  = 1;
+  // MD5 части, полученный из UploadPartResponse. Используется для верификации.
+  string checksum_md5 = 2;
+}
+
+message CompleteMultipartUploadRequest {
+  // UUID сессии из InitiateMultipartUpload.
+  string            upload_id = 1;
+  // Все части в правильном порядке (по part_number).
+  repeated PartInfo parts     = 2;
+}
+
+message CompleteMultipartUploadResponse {
+  // UUID итогового собранного blob'а. Gateway передаёт его в Metadata CreateObjectVersion.
+  string blob_id      = 1;
+  // MD5 итогового собранного файла в hex. Gateway использует как ETag.
+  string checksum_md5 = 2;
+}
+
+message AbortMultipartUploadRequest {
+  // UUID сессии для отмены.
+  string upload_id = 1;
+}
+
+message AbortMultipartUploadResponse {
+  bool success = 1;
+}
