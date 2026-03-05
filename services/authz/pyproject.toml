@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.9.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rebac-auth-service"
+version = "0.1.0"
+dependencies = [
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "grpcio-health-checking>=1.60.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pytest>=7.4.0",
+    "confluent-kafka==2.5.0",
+    "neo4j>=5.0.0",
+    "redis>=4.0.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest-cov>=4.0.0"]
+
+[project.scripts]
+rebac-server = "entrypoints.server.main:run_server"
+
+[tool.hatch.build.targets.wheel]
+packages = ["internal", "entrypoints"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: integration tests (require Neo4j, run with: pytest -m integration)",
+]
+filterwarnings = ["ignore:.*grpc.*"]
+

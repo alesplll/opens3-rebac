@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package rebac.authz.v1;
+
+service PermissionService {
+  // Check if subject can perform action on object
+  rpc Check(CheckRequest) returns (CheckResponse);
+
+  // Write a relationship tuple (user:alice MEMBER_OF group:dev)
+  rpc WriteTuple(WriteTupleRequest) returns (WriteTupleResponse);
+
+  // Delete a relationship tuple
+  rpc DeleteTuple(DeleteTupleRequest) returns (DeleteTupleResponse);
+
+  // Read relationships for subject
+  rpc Read(ReadRequest) returns (ReadResponse);
+}
+
+message CheckRequest {
+  string subject = 1;     // "user:alice"
+  string action = 2;      // "read", "write", "delete"
+  string object = 3;      // "doc:123"
+}
+
+message CheckResponse {
+  bool allowed = 1;
+  string reason = 2;      // Debug info (optional)
+}
+
+message WriteTupleRequest {
+  string subject = 1;
+  string relation = 2;    // "MEMBER_OF", "HAS_PERMISSION", "OWNER_OF", "VIEWER"
+  string object = 3;
+  string level = 4;       // For HAS_PERMISSION: "read" | "write" | "create" | "delete" | "admin"
+}
+
+message WriteTupleResponse {
+  bool success = 1;
+}
+
+message DeleteTupleRequest {
+  string subject = 1;
+  string relation = 2;
+  string object = 3;
+}
+
+message DeleteTupleResponse {
+  bool success = 1;
+}
+
+message ReadRequest {
+  string subject = 1;
+}
+
+message ReadResponse {
+  repeated RelationTuple tuples = 1;
+}
+
+message RelationTuple {
+  string subject = 1;
+  string relation = 2;
+  string object = 3;
+  string level = 4;       // Present when relation is HAS_PERMISSION
+}
+

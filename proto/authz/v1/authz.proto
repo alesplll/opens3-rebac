@@ -23,7 +23,7 @@ option go_package = "github.com/alesplll/opens3-rebac/gen/authz/v1;authzv1";
 // ─── Иерархия уровней HAS_PERMISSION ─────────────────────────────────────────
 //   admin > delete > create > write > read
 //   (каждый уровень включает все нижестоящие)
-service AuthZService {
+service PermissionService {
   // Check проверяет, разрешено ли действие.
   // Вызывается Gateway перед каждой S3-операцией.
   // Сначала проверяет кэш Redis (TTL ~30 с), при промахе — обходит граф Neo4j.
@@ -56,6 +56,11 @@ service AuthZService {
   //   subject=user:alice, relation=HAS_PERMISSION, object=bucket:shared, level=read
   // Используется в админском UI, при отладке, при отображении "мои права".
   rpc Read(ReadRequest) returns (ReadResponse);
+
+  // HealthCheck — стандартный gRPC Health Checking Protocol.
+  // Используется Kubernetes liveness/readiness probe и Gateway /ready.
+  // service="" проверяет весь процесс; service="PermissionService" — конкретный сервис.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
 // ─── Примечание: удаление ресурсов из графа ──────────────────────────────────
@@ -149,4 +154,22 @@ message RelationTuple {
   string object   = 3;
   // Заполняется только при relation = HAS_PERMISSION.
   string level    = 4;
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────────
+
+// HealthCheckRequest — запрос проверки состояния сервиса.
+// Следует стандарту gRPC Health Checking Protocol (grpc.health.v1).
+message HealthCheckRequest {
+  // Имя сервиса. Пустая строка — проверить весь процесс.
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN     = 0; // Статус неизвестен (не инициализирован)
+    SERVING     = 1; // Сервис готов принимать запросы
+    NOT_SERVING = 2; // Сервис не готов (зависимость недоступна: Neo4j, Redis)
+  }
+  ServingStatus status = 1;
 }

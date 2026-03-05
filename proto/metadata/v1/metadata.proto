@@ -63,6 +63,11 @@ service MetadataService {
   // Аналог S3 ListObjectsV2. Только метаданные — Data Node не вызывается.
   // Ошибки: NOT_FOUND (бакет не существует).
   rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);
+
+  // HealthCheck — стандартный gRPC Health Checking Protocol.
+  // Используется Kubernetes liveness/readiness probe и Gateway /ready.
+  // NOT_SERVING возвращается если PostgreSQL или Kafka недоступны.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
 // ─── Общие структуры ─────────────────────────────────────────────────────────
@@ -196,4 +201,20 @@ message ListObjectsResponse {
   string              next_continuation_token = 2;
   // true, если есть ещё объекты после текущей страницы.
   bool                is_truncated           = 3;
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────────
+
+message HealthCheckRequest {
+  // Имя сервиса. Пустая строка — проверить весь процесс.
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN     = 0; // Статус неизвестен
+    SERVING     = 1; // Сервис готов
+    NOT_SERVING = 2; // Зависимость недоступна (PostgreSQL, Kafka)
+  }
+  ServingStatus status = 1;
 }
