@@ -56,6 +56,11 @@ service DataStorageService {
   // AbortMultipartUpload отменяет multipart-загрузку и удаляет все временные части.
   // Идемпотентен: отмена несуществующего upload_id — не ошибка.
   rpc AbortMultipartUpload(AbortMultipartUploadRequest) returns (AbortMultipartUploadResponse);
+
+  // HealthCheck — стандартный gRPC Health Checking Protocol.
+  // Используется Kubernetes liveness/readiness probe и Gateway /ready.
+  // NOT_SERVING возвращается если DATA_DIR недоступна или недостаточно места (RESOURCE_EXHAUSTED).
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
 // ─── StoreObject ──────────────────────────────────────────────────────────────
@@ -167,4 +172,20 @@ message AbortMultipartUploadRequest {
 
 message AbortMultipartUploadResponse {
   bool success = 1;
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────────
+
+message HealthCheckRequest {
+  // Имя сервиса. Пустая строка — проверить весь процесс.
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN     = 0; // Статус неизвестен
+    SERVING     = 1; // Сервис готов
+    NOT_SERVING = 2; // DATA_DIR недоступна или заканчивается место
+  }
+  ServingStatus status = 1;
 }
