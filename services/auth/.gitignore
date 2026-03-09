@@ -1,8 +1,0 @@
-.idea
-/bin/
-.env
-/vendor.protogen/
-*.key
-*.srl
-*.csr
-*.DS_Store

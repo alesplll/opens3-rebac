@@ -14,7 +14,6 @@
 - **RPC:** gRPC + gRPC-Gateway (HTTP/JSON → gRPC mapping)
 - **Message Broker:** Kafka
 - **Мониторинг:** OpenTelemetry (OTEL)
-- **Proxy:** Envoy
 
 ## Архитектура
 Сервис построен на основе **трёхслойной архитектуры**:

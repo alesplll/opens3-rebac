@@ -17,7 +17,6 @@
   - **Logging:** uber-go/zap → Elasticsearch → Kibana
   - **Tracing:** Jaeger
 - **JWT:** github.com/golang-jwt/jwt (алгоритм HS256)
-- **Envoy Proxy** - маршрутизация и load balancing
 
 ## Архитектура
 
