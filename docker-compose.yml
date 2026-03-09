@@ -11,6 +11,7 @@ volumes:
   jaeger-data:
   prometheus-data:
   grafana-data:
+  es_data:
 
 services:
 
@@ -117,12 +118,8 @@ services:
     build:
       context: ./services/users
       dockerfile: migrator.Dockerfile
-    environment:
-      DB_HOST: postgres-users
-      PG_PORT_INNER: 5432
-      PG_DATABASE_NAME: ${USERS_DB_NAME:-users_db}
-      PG_USER: ${USERS_DB_USER:-users_user}
-      PG_PASSWORD: ${USERS_DB_PASSWORD:-users_password}
+    env_file:
+      - services/users/.env
     networks:
       - opens3-network
     restart: on-failure
@@ -137,10 +134,8 @@ services:
       dockerfile: services/users/Dockerfile
     ports:
       - "50054:50054"
-    environment:
-      GRPC_HOST: "0.0.0.0"
-      GRPC_PORT: "50054"
-      PG_DSN: "host=postgres-users port=5432 dbname=${USERS_DB_NAME:-users_db} user=${USERS_DB_USER:-users_user} password=${USERS_DB_PASSWORD:-users_password} sslmode=disable"
+    env_file:
+      - services/users/.env
     networks:
       - opens3-network
     restart: unless-stopped
@@ -157,13 +152,8 @@ services:
       dockerfile: services/auth/Dockerfile
     ports:
       - "50050:50050"
-    environment:
-      GRPC_HOST: "0.0.0.0"
-      GRPC_PORT: "50050"
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      USER_GRPC_HOST: users
-      USER_GRPC_PORT: "50054"
+    env_file:
+      - services/auth/.env
     networks:
       - opens3-network
     restart: unless-stopped
@@ -178,14 +168,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "50051:50051"
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password123}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP: kafka:29092
-      GRPC_PORT: 50051
+    env_file:
+      - services/authz/.env
     networks:
       - opens3-network
     restart: unless-stopped
@@ -226,6 +210,8 @@ services:
     profiles: [observability]
     image: otel/opentelemetry-collector-contrib:0.123.0
     command: ["--config=/etc/otel-collector-config.yaml"]
+    env_file:
+      - infra/otel/.env
     volumes:
       - ./infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
@@ -235,6 +221,13 @@ services:
     networks:
       - opens3-network
     restart: unless-stopped
+    depends_on:
+      jaeger:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
 
   jaeger:
     profiles: [observability]
@@ -252,11 +245,19 @@ services:
       - jaeger-data:/badger/data
     networks:
       - opens3-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:${JAEGER_UI_PORT:-16686}"] # UI availability check
+      interval: 5s # Check interval
+      timeout: 3s # Check timeout
+      retries: 3 # Retry attempts
+      start_period: 5s # Delay before starting checks
     restart: unless-stopped
 
   prometheus:
     profiles: [observability]
     image: prom/prometheus:v3.3.1
+    env_file:
+      - infra/otel/.env
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
@@ -269,21 +270,153 @@ services:
       - "--web.enable-remote-write-receiver"
     networks:
       - opens3-network
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--spider", "http://localhost:${PROMETHEUS_PORT:-9090}/-/healthy" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     restart: unless-stopped
 
   grafana:
     profiles: [observability]
     image: grafana/grafana:12.0.0
+    env_file:
+      - infra/otel/.env
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./infra/otel/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/otel/grafana/dashboards:/var/lib/grafana/dashboards
     networks:
       - opens3-network
+
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--spider", "http://localhost:${GRAFANA_PORT:-3000}/api/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
     restart: unless-stopped
     depends_on:
       - prometheus
+
+  elasticsearch:
+    profiles: [observability]
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.4
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - cluster.name=es-docker-cluster
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+    env_file:
+      - infra/otel/.env
+
+    ports:
+      - "${ES_PORT:-9200}:9200"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+    restart: unless-stopped
+
+    networks:
+      - opens3-network
+
+  kibana:
+    profiles: [observability]
+    image: docker.elastic.co/kibana/kibana:9.0.4
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - xpack.encryptedSavedObjects.encryptionKey=REPLACE_WITH_32+_CHAR_STRING
+    
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    
+    env_file:
+      - infra/otel/.env
+
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/api/status >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    
+    restart: unless-stopped
+    networks:
+      - opens3-network
+
+  kibana-init:
+    profiles: [observability]
+    image: alpine:3.21
+    container_name: kibana-init
+    depends_on:
+      kibana:
+        condition: service_healthy
+    env_file:
+      - infra/otel/.env
+
+    command: 
+      - sh
+      - -c
+      - |
+        set -e # stop scipt after first error
+        
+        echo "Installing curl and jq..."
+        apk add --no-cache curl jq >/dev/null 2>&1
+        
+        echo "Waiting for Kibana..."
+        # max 60 attempts with delay 2 seconds
+        for i in $$(seq 1 60); do
+          if curl -sSf http://kibana:5601/api/status >/dev/null; then break; fi
+          sleep 2
+        done
+        
+        echo "Creating Data View logs* ..."
+        RESPONSE=$$(curl -sS -X POST http://kibana:5601/api/data_views/data_view \
+          -H "kbn-xsrf: true" \
+          -H "Content-Type: application/json" \
+          --data '{"data_view":{"title":"logs*","name":"Logs","timeFieldName":"@timestamp","allowNoIndex":true},"override":true}' || echo "{}")
+        
+        echo "Response: $$RESPONSE"
+        DATA_VIEW_ID=$$(echo "$$RESPONSE" | jq -r ".data_view.id // empty")
+        echo "Data View ID: $$DATA_VIEW_ID"
+        
+        # Making Data View default in Kibana
+        if [ -n "$$DATA_VIEW_ID" ]; then
+          echo "Setting as default data view..."
+          curl -sS -X POST http://kibana:5601/api/data_views/default \
+            -H "kbn-xsrf: true" \
+            -H "Content-Type: application/json" \
+            -d "{\"data_view_id\": \"$$DATA_VIEW_ID\", \"force\": true}" || true
+          echo "Default data view set successfully."
+        else
+          echo "Failed to get data view ID"
+        fi
+        echo "Done."
+    
+    networks:
+      - opens3-network
+    
+    restart: "no"
