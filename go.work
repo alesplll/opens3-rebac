@@ -1,0 +1,7 @@
+go 1.24.1
+
+use (
+    ./shared
+    ./services/auth
+    ./services/users
+)
