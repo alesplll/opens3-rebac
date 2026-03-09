@@ -1,0 +1,289 @@
+networks:
+  opens3-network:
+    driver: bridge
+
+volumes:
+  pgdata-users:
+  pgdata-metadata:
+  neo4j-data:
+  neo4j-logs:
+  neo4j-plugins:
+  jaeger-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+  # Стартует всегда: docker compose up
+  # Только инфра:   docker compose up (без --profile)
+
+  postgres-users:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${USERS_DB_NAME:-users_db}
+      POSTGRES_USER: ${USERS_DB_USER:-users_user}
+      POSTGRES_PASSWORD: ${USERS_DB_PASSWORD:-users_password}
+    ports:
+      - "${USERS_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata-users:/var/lib/postgresql/data
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USERS_DB_USER:-users_user} -d ${USERS_DB_NAME:-users_db}"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 5s
+
+  postgres-metadata:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${METADATA_DB_NAME:-metadata_db}
+      POSTGRES_USER: ${METADATA_DB_USER:-metadata_user}
+      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD:-metadata_password}
+    ports:
+      - "${METADATA_DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata-metadata:/var/lib/postgresql/data
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${METADATA_DB_USER:-metadata_user} -d ${METADATA_DB_NAME:-metadata_db}"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 5s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - opens3-network
+
+  neo4j:
+    image: neo4j:5.21.0
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-password123}
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_memory_pagecache_size: 512M
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-plugins:/plugins
+    networks:
+      - opens3-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - opens3-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    hostname: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - opens3-network
+
+  # ── Services ───────────────────────────────────────────────────────────────
+  # docker compose --profile services up
+
+  migrator-users:
+    profiles: [services]
+    build:
+      context: ./services/users
+      dockerfile: migrator.Dockerfile
+    environment:
+      DB_HOST: postgres-users
+      PG_PORT_INNER: 5432
+      PG_DATABASE_NAME: ${USERS_DB_NAME:-users_db}
+      PG_USER: ${USERS_DB_USER:-users_user}
+      PG_PASSWORD: ${USERS_DB_PASSWORD:-users_password}
+    networks:
+      - opens3-network
+    restart: on-failure
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+
+  users:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    ports:
+      - "50054:50054"
+    environment:
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50054"
+      PG_DSN: "host=postgres-users port=5432 dbname=${USERS_DB_NAME:-users_db} user=${USERS_DB_USER:-users_user} password=${USERS_DB_PASSWORD:-users_password} sslmode=disable"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+      migrator-users:
+        condition: service_completed_successfully
+
+  auth:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    ports:
+      - "50050:50050"
+    environment:
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50050"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      USER_GRPC_HOST: users
+      USER_GRPC_PORT: "50054"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - users
+
+  authz:
+    profiles: [services]
+    build:
+      context: ./services/authz
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password123}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP: kafka:29092
+      GRPC_PORT: 50051
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      - neo4j
+      - redis
+      - kafka
+
+  # placeholder — раскомментировать когда сервис будет готов
+  # metadata:
+  #   profiles: [services]
+  #   build:
+  #     context: ./services/metadata
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "50052:50052"
+  #   environment:
+  #     DATABASE_URL: "postgresql://${METADATA_DB_USER:-metadata_user}:${METADATA_DB_PASSWORD:-metadata_password}@postgres-metadata:5432/${METADATA_DB_NAME:-metadata_db}"
+  #     KAFKA_BOOTSTRAP: kafka:29092
+  #   networks:
+  #     - opens3-network
+  #   depends_on:
+  #     - postgres-metadata
+  #     - kafka
+
+  # data-node:
+  #   profiles: [services]
+  #   ...
+
+  # gateway:
+  #   profiles: [services]
+  #   ...
+
+  # ── Observability ──────────────────────────────────────────────────────────
+  # docker compose --profile observability up
+
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.123.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/jaeger:2.6.0
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_VALUE: /badger/data
+      BADGER_DIRECTORY_KEY: /badger/key
+      BADGER_TTL: 168h
+    volumes:
+      - jaeger-data:/badger/data
+    networks:
+      - opens3-network
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.3.1
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/otel/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.0.0
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
