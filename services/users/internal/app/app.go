@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -24,7 +23,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -118,13 +117,8 @@ func (a *App) initMetrics(ctx context.Context) error {
 }
 
 func (a *App) initGRPCServer(ctx context.Context) error {
-	creds, err := credentials.NewServerTLSFromFile("service.pem", "service.key")
-	if err != nil {
-		log.Fatalf("failed to load TLS keys: %v", err)
-	}
-
 	a.grpcServer = grpc.NewServer(
-		grpc.Creds(creds),
+		grpc.Creds(insecure.NewCredentials()),
 		grpc.UnaryInterceptor(
 			grpcMiddleware.ChainUnaryServer(
 				rateLimiterInterceptor.NewRateLimiterInterceptor(ctx, config.AppConfig().RateLimiter).Unary,
@@ -154,16 +148,12 @@ func (a *App) initGRPCServer(ctx context.Context) error {
 
 func (a *App) initHTTPServer(ctx context.Context) error {
 	mux := runtime.NewServeMux()
-	creds, err := credentials.NewServerTLSFromFile("service.pem", "service.key")
-	if err != nil {
-		log.Fatalf("failed to load TLS keys: %v", err)
-	}
 
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
-	err = desc.RegisterUserV1HandlerFromEndpoint(ctx, mux, config.AppConfig().GRPC.Address(), opts)
+	err := desc.RegisterUserV1HandlerFromEndpoint(ctx, mux, config.AppConfig().GRPC.Address(), opts)
 	if err != nil {
 		return err
 	}

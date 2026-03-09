@@ -2,11 +2,8 @@ package app
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"os"
 
-	"github.com/alesplll/opens3-rebac/services/auth/internal/client/cache"
+"github.com/alesplll/opens3-rebac/services/auth/internal/client/cache"
 	redis_client "github.com/alesplll/opens3-rebac/services/auth/internal/client/cache/redis"
 	grpc_clients "github.com/alesplll/opens3-rebac/services/auth/internal/client/grpc"
 	userClient "github.com/alesplll/opens3-rebac/services/auth/internal/client/grpc/user"
@@ -27,7 +24,7 @@ import (
 	"github.com/gomodule/redigo/redis"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -111,26 +108,9 @@ func (s *serviceProvider) TokenService(ctx context.Context) tokens.TokenService 
 
 func (s *serviceProvider) UserClient(ctx context.Context) grpc_clients.UserClient {
 	if s.userClient == nil {
-		caCert, err := os.ReadFile("ca.cert")
-		if err != nil {
-			logger.Fatal(ctx, "could not read ca certificate", zap.Error(err))
-		}
-
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			logger.Fatal(ctx, "failed to append ca certificate")
-		}
-
-		tlsConfig := &tls.Config{
-			ServerName: "localhost",
-			RootCAs:    certPool,
-		}
-
-		creds := credentials.NewTLS(tlsConfig)
-
 		conn, err := grpc.NewClient(
 			config.AppConfig().UserClient.Address(),
-			grpc.WithTransportCredentials(creds),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithUnaryInterceptor(
 				tracing.UnaryClientInterceptor("user-server-client"),
 			),

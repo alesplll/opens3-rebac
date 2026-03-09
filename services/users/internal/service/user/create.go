@@ -7,7 +7,9 @@ import (
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/users/internal/model"
 	"github.com/alesplll/opens3-rebac/services/users/internal/validator"
+	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"go.uber.org/zap"
 )
 
 func (s *userService) Create(ctx context.Context, userInfo model.UserInfo, password, passwordConfirm string) (string, error) {
@@ -32,6 +34,8 @@ func (s *userService) Create(ctx context.Context, userInfo model.UserInfo, passw
 	if err != nil {
 		return "", err
 	}
+
+	logger.Debug(ctx, "user has been created", zap.String("id", id))
 
 	return id, nil
 }
