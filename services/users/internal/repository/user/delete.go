@@ -6,7 +6,7 @@ import (
 	"github.com/Masterminds/squirrel"
 	sq "github.com/Masterminds/squirrel"
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/client/db"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 )
 
 func (r *repo) Delete(ctx context.Context, id string) error {

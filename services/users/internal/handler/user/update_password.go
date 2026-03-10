@@ -4,7 +4,7 @@ import (
 	"context"
 
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/contextx/ipctx"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx/ipctx"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

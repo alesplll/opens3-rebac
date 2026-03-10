@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/contextx/claimsctx"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/tracing"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx/claimsctx"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"

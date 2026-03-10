@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/alesplll/opens3-rebac/services/users/internal/app"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"go.uber.org/zap"
 )
 

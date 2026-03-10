@@ -6,7 +6,7 @@ import (
 
 	"github.com/alesplll/opens3-rebac/services/auth/internal/client/cache"
 	"github.com/alesplll/opens3-rebac/services/auth/internal/config"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/gomodule/redigo/redis"
 	"go.uber.org/zap"
 )

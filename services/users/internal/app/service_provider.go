@@ -10,11 +10,11 @@ import (
 	"github.com/alesplll/opens3-rebac/services/users/internal/service"
 	userService "github.com/alesplll/opens3-rebac/services/users/internal/service/user"
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/client/db"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/client/db/pg"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/client/db/transaction"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/closer"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db/pg"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db/transaction"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 )
 
 type serviceProvider struct {

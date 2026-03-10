@@ -5,7 +5,7 @@ import (
 	"github.com/alesplll/opens3-rebac/services/auth/internal/config"
 	"github.com/alesplll/opens3-rebac/services/auth/internal/repository"
 	"github.com/alesplll/opens3-rebac/services/auth/internal/service"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/tokens"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tokens"
 )
 
 type authService struct {

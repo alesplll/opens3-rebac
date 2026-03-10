@@ -5,7 +5,7 @@ import (
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/users/internal/utils"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
 )
 
 func ValidateNotEmptyString(text string, err error) validate.Condition {

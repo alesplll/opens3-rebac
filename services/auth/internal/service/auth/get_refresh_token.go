@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/alesplll/opens3-rebac/services/auth/internal/model"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/contextx/claimsctx"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/codes"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx/claimsctx"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/codes"
 	"go.uber.org/zap"
 )
 

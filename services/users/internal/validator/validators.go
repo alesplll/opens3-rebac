@@ -2,7 +2,7 @@ package validator
 
 import (
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
 	"golang.org/x/net/context"
 )
 

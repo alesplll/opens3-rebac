@@ -7,8 +7,8 @@ import (
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/users/internal/model"
 	"github.com/alesplll/opens3-rebac/services/users/internal/validator"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
 	"go.uber.org/zap"
 )
 

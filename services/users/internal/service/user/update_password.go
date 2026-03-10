@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/alesplll/opens3-rebac/services/users/internal/validator"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/contextx/ipctx"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/logger"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx/ipctx"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"golang.org/x/crypto/bcrypt"
 )
 

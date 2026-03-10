@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/codes"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/codes"
 
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"

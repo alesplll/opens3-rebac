@@ -3,7 +3,7 @@ package conditions
 import (
 	"context"
 
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
 )
 
 func ValidateNotEmptyEmailAndPassword(email, password string) validate.Condition {

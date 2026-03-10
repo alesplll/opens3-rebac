@@ -5,7 +5,7 @@ import (
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/users/internal/validator"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/sys/validate"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
 )
 
 func (s *userService) Update(ctx context.Context, userID string, name, email *string) error {

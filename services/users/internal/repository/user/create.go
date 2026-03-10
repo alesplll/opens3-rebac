@@ -9,7 +9,7 @@ import (
 	domainerrors "github.com/alesplll/opens3-rebac/services/users/internal/errors/domain_errors"
 	model "github.com/alesplll/opens3-rebac/services/users/internal/model"
 	"github.com/alesplll/opens3-rebac/services/users/internal/repository/user/conventer"
-	"github.com/alesplll/opens3-rebac/shared/pkg/kit/client/db"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 	"github.com/jackc/pgconn"
 )
 
