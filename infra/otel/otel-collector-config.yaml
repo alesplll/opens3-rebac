@@ -1,0 +1,97 @@
+# Receivers define how the Collector ingests telemetry
+receivers:
+  otlp: # Standard OpenTelemetry protocol (traces/metrics/logs)
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:${OTEL_GRPC_PORT} # Bind on all interfaces
+        max_recv_msg_size_mib: 64
+        read_buffer_size: 512_000
+      http:
+        endpoint: 0.0.0.0:${OTEL_HTTP_PORT} # OTLP over HTTP
+        cors:
+          allowed_origins: ["*"]
+          allowed_headers: ["*"]
+
+# Processors transform and control data flow
+
+processors:
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: dev
+        action: insert
+
+  batch:
+    send_batch_size: ${OTEL_BATCH_SIZE} # Max items per batch
+    timeout: ${OTEL_BATCH_TIMEOUT} # Flush interval
+    send_batch_max_size: 1000
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75 # Cap memory usage
+    spike_limit_percentage: 15
+  resourcedetection:
+    detectors: [env, system] # Enrich with env/system metadata
+    timeout: 5s
+  probabilistic_sampler:
+    sampling_percentage: 100 # 100% for dev; lower in prod
+
+# Exporters send processed data to backends
+
+exporters:
+  otlp/jaeger:
+    endpoint: ${JAEGER_HOST}:${JAEGER_PORT} # Jaeger OTLP gRPC endpoint
+    tls:
+      insecure: true # Disable TLS for local dev
+
+  elasticsearch:
+    endpoints: ["http://elasticsearch:9200"]
+
+    tls:
+      insecure: true
+
+    logs_index: "logs"
+
+    mapping:
+      mode: ecs
+
+  prometheusremotewrite:
+    endpoint: http://${PROMETHEUS_HOST}:${PROMETHEUS_PORT}/api/v1/write
+
+  debug:
+    verbosity: ${OTEL_LOG_LEVEL} # Useful for troubleshooting
+
+# Extensions add auxiliary functionality
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:${OTEL_HEALTH_CHECK_PORT} # Liveness/readiness
+    path: /health
+    check_collector_pipeline:
+      enabled: true
+  pprof:
+    endpoint: 0.0.0.0:${OTEL_PPROF_PORT} # Go profiler
+  zpages:
+    endpoint: 0.0.0.0:${OTEL_ZPAGES_PORT} # In-process diagnostics
+
+# Service wires components into pipelines
+
+service:
+  extensions: [health_check, pprof, zpages]
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      address: 0.0.0.0:8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, probabilistic_sampler, batch, resourcedetection]
+      exporters: [otlp/jaeger, debug]
+    logs:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [elasticsearch]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheusremotewrite]

@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package user_v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+import "google/api/annotations.proto";
+
+
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/user/v1;user_v1";
+
+service UserV1 {
+  rpc Create(CreateRequest) returns (CreateResponse){
+    option (google.api.http) = {
+      post: "/api/v1/user"
+      body: "*"
+    };
+  };
+  rpc Get(GetRequest) returns (GetResponse){
+    option (google.api.http) = {
+      get: "/api/v1/user/{id}"
+    };
+  };
+  rpc Update(UpdateRequest) returns (google.protobuf.Empty){
+    option (google.api.http) = {
+      patch: "/api/v1/user"
+      body: "*"
+    };
+  };
+  rpc UpdatePassword(UpdatePasswordRequest) returns (google.protobuf.Empty){
+    option (google.api.http) = {
+      post: "/api/v1/user/update_password"
+      body: "*"
+    };
+  };
+  rpc Delete(DeleteRequest) returns (google.protobuf.Empty){
+    option (google.api.http) = {
+      delete: "/api/v1/user"
+    };
+  };
+  rpc ValidateCredentials(ValidateCredentialsRequest) returns (ValidateCredentialsResponse){
+    option (google.api.http) = {
+      post: "/user/v1/user/validate"
+      body: "*"
+    };
+  };
+}
+
+
+message UserInfo {
+  string name = 1;
+  string email = 2;
+}
+
+message User {
+  string id = 1;
+  UserInfo user_info = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message CreateRequest {
+  UserInfo user_info = 1;
+  string password = 2;
+  string password_confirm = 3;
+}
+message CreateResponse {
+  string id = 1;
+}
+
+message GetRequest {
+  string id = 1;
+}
+message GetResponse {
+  User user = 1;
+}
+
+message UpdateRequest {
+  string user_id = 1;
+  google.protobuf.StringValue name = 2;
+  google.protobuf.StringValue email = 3;
+}
+
+message UpdatePasswordRequest {
+  string user_id = 1;
+  string password = 2;
+  string password_confirm = 3;
+}
+
+message DeleteRequest {
+  string user_id = 1;
+}
+
+message ValidateCredentialsRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message ValidateCredentialsResponse {
+    bool valid = 1;
+    string user_id = 2;
+}
