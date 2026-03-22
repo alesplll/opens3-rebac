@@ -1,0 +1,422 @@
+networks:
+  opens3-network:
+    driver: bridge
+
+volumes:
+  pgdata-users:
+  pgdata-metadata:
+  neo4j-data:
+  neo4j-logs:
+  neo4j-plugins:
+  jaeger-data:
+  prometheus-data:
+  grafana-data:
+  es_data:
+
+services:
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+  # Стартует всегда: docker compose up
+  # Только инфра:   docker compose up (без --profile)
+
+  postgres-users:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${USERS_DB_NAME:-users_db}
+      POSTGRES_USER: ${USERS_DB_USER:-users_user}
+      POSTGRES_PASSWORD: ${USERS_DB_PASSWORD:-users_password}
+    ports:
+      - "${USERS_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata-users:/var/lib/postgresql/data
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USERS_DB_USER:-users_user} -d ${USERS_DB_NAME:-users_db}"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 5s
+
+  postgres-metadata:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${METADATA_DB_NAME:-metadata_db}
+      POSTGRES_USER: ${METADATA_DB_USER:-metadata_user}
+      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD:-metadata_password}
+    ports:
+      - "${METADATA_DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata-metadata:/var/lib/postgresql/data
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${METADATA_DB_USER:-metadata_user} -d ${METADATA_DB_NAME:-metadata_db}"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 5s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - opens3-network
+
+  neo4j:
+    image: neo4j:5.21.0
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-password123}
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_memory_pagecache_size: 512M
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-plugins:/plugins
+    networks:
+      - opens3-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - opens3-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    hostname: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - opens3-network
+
+  # ── Services ───────────────────────────────────────────────────────────────
+  # docker compose --profile services up
+
+  migrator-users:
+    profiles: [services]
+    build:
+      context: ./services/users
+      dockerfile: migrator.Dockerfile
+    env_file:
+      - services/users/.env
+    networks:
+      - opens3-network
+    restart: on-failure
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+
+  users:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    ports:
+      - "50054:50054"
+    env_file:
+      - services/users/.env
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+      migrator-users:
+        condition: service_completed_successfully
+
+  auth:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    ports:
+      - "50050:50050"
+    env_file:
+      - services/auth/.env
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - users
+
+  authz:
+    profiles: [services]
+    build:
+      context: ./services/authz
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    env_file:
+      - services/authz/.env
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      - neo4j
+      - redis
+      - kafka
+
+  # placeholder — раскомментировать когда сервис будет готов
+  # metadata:
+  #   profiles: [services]
+  #   build:
+  #     context: ./services/metadata
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "50052:50052"
+  #   environment:
+  #     DATABASE_URL: "postgresql://${METADATA_DB_USER:-metadata_user}:${METADATA_DB_PASSWORD:-metadata_password}@postgres-metadata:5432/${METADATA_DB_NAME:-metadata_db}"
+  #     KAFKA_BOOTSTRAP: kafka:29092
+  #   networks:
+  #     - opens3-network
+  #   depends_on:
+  #     - postgres-metadata
+  #     - kafka
+
+  # data-node:
+  #   profiles: [services]
+  #   ...
+
+  # gateway:
+  #   profiles: [services]
+  #   ...
+
+  # ── Observability ──────────────────────────────────────────────────────────
+  # docker compose --profile observability up
+
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.123.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    env_file:
+      - infra/otel/.env
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      jaeger:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/jaeger:2.6.0
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_VALUE: /badger/data
+      BADGER_DIRECTORY_KEY: /badger/key
+      BADGER_TTL: 168h
+    volumes:
+      - jaeger-data:/badger/data
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:${JAEGER_UI_PORT:-16686}"] # UI availability check
+      interval: 5s # Check interval
+      timeout: 3s # Check timeout
+      retries: 3 # Retry attempts
+      start_period: 5s # Delay before starting checks
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.3.1
+    env_file:
+      - infra/otel/.env
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/otel/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    networks:
+      - opens3-network
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--spider", "http://localhost:${PROMETHEUS_PORT:-9090}/-/healthy" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.0.0
+    env_file:
+      - infra/otel/.env
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/otel/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/otel/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - opens3-network
+
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--spider", "http://localhost:${GRAFANA_PORT:-3000}/api/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  elasticsearch:
+    profiles: [observability]
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.4
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - cluster.name=es-docker-cluster
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+    env_file:
+      - infra/otel/.env
+
+    ports:
+      - "${ES_PORT:-9200}:9200"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+    restart: unless-stopped
+
+    networks:
+      - opens3-network
+
+  kibana:
+    profiles: [observability]
+    image: docker.elastic.co/kibana/kibana:9.0.4
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - xpack.encryptedSavedObjects.encryptionKey=REPLACE_WITH_32+_CHAR_STRING
+    
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    
+    env_file:
+      - infra/otel/.env
+
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/api/status >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    
+    restart: unless-stopped
+    networks:
+      - opens3-network
+
+  kibana-init:
+    profiles: [observability]
+    image: alpine:3.21
+    container_name: kibana-init
+    depends_on:
+      kibana:
+        condition: service_healthy
+    env_file:
+      - infra/otel/.env
+
+    command: 
+      - sh
+      - -c
+      - |
+        set -e # stop scipt after first error
+        
+        echo "Installing curl and jq..."
+        apk add --no-cache curl jq >/dev/null 2>&1
+        
+        echo "Waiting for Kibana..."
+        # max 60 attempts with delay 2 seconds
+        for i in $$(seq 1 60); do
+          if curl -sSf http://kibana:5601/api/status >/dev/null; then break; fi
+          sleep 2
+        done
+        
+        echo "Creating Data View logs* ..."
+        RESPONSE=$$(curl -sS -X POST http://kibana:5601/api/data_views/data_view \
+          -H "kbn-xsrf: true" \
+          -H "Content-Type: application/json" \
+          --data '{"data_view":{"title":"logs*","name":"Logs","timeFieldName":"@timestamp","allowNoIndex":true},"override":true}' || echo "{}")
+        
+        echo "Response: $$RESPONSE"
+        DATA_VIEW_ID=$$(echo "$$RESPONSE" | jq -r ".data_view.id // empty")
+        echo "Data View ID: $$DATA_VIEW_ID"
+        
+        # Making Data View default in Kibana
+        if [ -n "$$DATA_VIEW_ID" ]; then
+          echo "Setting as default data view..."
+          curl -sS -X POST http://kibana:5601/api/data_views/default \
+            -H "kbn-xsrf: true" \
+            -H "Content-Type: application/json" \
+            -d "{\"data_view_id\": \"$$DATA_VIEW_ID\", \"force\": true}" || true
+          echo "Default data view set successfully."
+        else
+          echo "Failed to get data view ID"
+        fi
+        echo "Done."
+    
+    networks:
+      - opens3-network
+    
+    restart: "no"

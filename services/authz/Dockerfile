@@ -13,12 +13,16 @@ COPY proto/ proto/
 COPY internal/ internal/
 COPY entrypoints/ entrypoints/
 
-# Install all deps into a prefix we can copy to the final image
-RUN pip install --no-cache-dir --prefix=/install ".[test]" grpcio-tools
+# Install grpcio-tools system-wide for proto generation
+RUN pip install --no-cache-dir grpcio-tools
 
 # Generate gRPC stubs
 COPY proto/generate.sh proto/generate.sh
 RUN bash proto/generate.sh
+
+# Install all deps into a prefix we can copy to the final image
+# --ignore-installed: force reinstall even if already present system-wide from grpcio-tools step
+RUN pip install --no-cache-dir --prefix=/install --ignore-installed ".[test]"
 
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -30,14 +34,6 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 # Copy source (with generated stubs)
 COPY --from=builder /app /app
-
-ENV NEO4J_URI=bolt://neo4j:7687 \
-    NEO4J_USER=neo4j \
-    NEO4J_PASSWORD=password123 \
-    REDIS_HOST=redis \
-    REDIS_PORT=6379 \
-    KAFKA_BOOTSTRAP=kafka:29092 \
-    GRPC_PORT=50051
 
 EXPOSE 50051
 
