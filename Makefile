@@ -18,7 +18,7 @@ vendor-proto:
 
 # ── Proto generation ───────────────────────────────────────────────────────────
 
-generate: generate-user generate-auth
+generate: generate-user generate-auth generate-storage
 
 generate-user:
 	mkdir -p shared/pkg/user/v1
@@ -45,6 +45,17 @@ generate-auth:
 		--grpc-gateway_out=shared/pkg/auth/v1 --grpc-gateway_opt=paths=source_relative \
 		--plugin=protoc-gen-grpc-gateway=$(LOCAL_BIN)/protoc-gen-grpc-gateway \
 		shared/api/auth/v1/auth.proto
+
+generate-storage:
+	mkdir -p shared/pkg/storage/v1
+	protoc \
+		--proto_path shared/api/storage/v1 \
+		--proto_path $(VENDOR_PROTO) \
+		--go_out=shared/pkg/storage/v1 --go_opt=paths=source_relative \
+		--plugin=protoc-gen-go=$(LOCAL_BIN)/protoc-gen-go \
+		--go-grpc_out=shared/pkg/storage/v1 --go-grpc_opt=paths=source_relative \
+		--plugin=protoc-gen-go-grpc=$(LOCAL_BIN)/protoc-gen-go-grpc \
+		shared/api/storage/v1/storage.proto
 
 # ── Docker ─────────────────────────────────────────────────────────────────────
 
