@@ -7,6 +7,7 @@ COPY go.work go.work.sum ./
 COPY shared/go.mod shared/go.sum ./shared/
 COPY services/users/go.mod services/users/go.sum ./services/users/
 COPY services/auth/go.mod services/auth/go.sum ./services/auth/
+COPY services/storage/go.mod services/storage/go.sum ./services/storage/
 
 # Скачиваем зависимости (этот слой кэшируется пока go.mod не меняются)
 RUN go mod download -x 2>/dev/null; true

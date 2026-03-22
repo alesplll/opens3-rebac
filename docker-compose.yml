@@ -8,6 +8,7 @@ volumes:
   neo4j-data:
   neo4j-logs:
   neo4j-plugins:
+  storage-data:
   jaeger-data:
   prometheus-data:
   grafana-data:
@@ -195,9 +196,20 @@ services:
   #     - postgres-metadata
   #     - kafka
 
-  # data-node:
-  #   profiles: [services]
-  #   ...
+  storage:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+    ports:
+      - "50053:50053"
+    env_file:
+      - services/storage/.env
+    volumes:
+      - storage-data:/data
+    networks:
+      - opens3-network
+    restart: unless-stopped
 
   # gateway:
   #   profiles: [services]
