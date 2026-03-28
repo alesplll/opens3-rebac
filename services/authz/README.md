@@ -90,15 +90,22 @@ bash proto/generate.sh
 
 ### 2. Start infrastructure (Neo4j, Redis, Kafka)
 
+From the **repository root:**
+
 ```bash
-docker compose -f deploy/local/docker-compose.yml up -d
+# All services + infra (recommended)
+make up-services
+
+# Or just the infra + authz only
+docker compose up neo4j redis kafka zookeeper -d
+docker compose --profile services up authz -d
 ```
 
 - **Neo4j Browser:** http://localhost:7474 — login `neo4j` / `password123`
 - **Redis:** `redis-cli ping` → `PONG`
 - **Kafka:** `localhost:9092`
 
-### 3. Run the gRPC server
+### 3. Run the gRPC server (local, without Docker)
 
 ```bash
 source venv/bin/activate
@@ -151,18 +158,17 @@ docker compose -f deploy/local/docker-compose.yml --profile app up -d
 
 ### Stop everything
 
-```bash
-docker compose -f deploy/local/docker-compose.yml --profile app down
+From the repo root:
 
-# To also remove volumes (wipes Neo4j data):
-docker compose -f deploy/local/docker-compose.yml --profile app down -v
+```bash
+make down            # остановить все контейнеры
+make down-volumes    # остановить + удалить данные (Neo4j, Redis)
 ```
 
 ### Rebuild after code changes
 
 ```bash
-docker compose -f deploy/local/docker-compose.yml --profile app build rebac-auth-service
-docker compose -f deploy/local/docker-compose.yml --profile app up -d rebac-auth-service
+make rebuild         # пересобрать без кэша и перезапустить
 ```
 
 ---
@@ -175,15 +181,20 @@ All commands below assume the server is running on `localhost:50051`.
 
 ```bash
 grpcurl -plaintext localhost:50051 list
-# → rebac.authz.v1.PermissionService
+# → opens3.authz.v1.PermissionService
 # → grpc.health.v1.Health
 ```
 
 ### Health check
 
 ```bash
-grpcurl -plaintext -d '{"service": "rebac.authz.v1.PermissionService"}' \
+# Standard gRPC health protocol (used by K8s probes)
+grpcurl -plaintext -d '{"service": "opens3.authz.v1.PermissionService"}' \
   localhost:50051 grpc.health.v1.Health/Check
+# → {"status": "SERVING"}
+
+# Custom HealthCheck (checks Neo4j + Redis connectivity)
+grpcurl -plaintext localhost:50051 opens3.authz.v1.PermissionService/HealthCheck
 # → {"status": "SERVING"}
 ```
 
@@ -192,27 +203,27 @@ grpcurl -plaintext -d '{"service": "rebac.authz.v1.PermissionService"}' \
 ```bash
 # alex is a member of devops
 grpcurl -plaintext -d '{"subject":"user:alex","relation":"MEMBER_OF","object":"group:devops"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # devops has admin permission on server-1
 grpcurl -plaintext -d '{"subject":"group:devops","relation":"HAS_PERMISSION","object":"resource:server-1","level":"admin"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # viewers group has read-only on doc1
 grpcurl -plaintext -d '{"subject":"group:viewers","relation":"HAS_PERMISSION","object":"resource:doc1","level":"read"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # bob is a viewer
 grpcurl -plaintext -d '{"subject":"user:bob","relation":"MEMBER_OF","object":"group:viewers"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # Transitive chain: alice → payments → finance → billing (read)
 grpcurl -plaintext -d '{"subject":"user:alice","relation":"MEMBER_OF","object":"group:payments"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 grpcurl -plaintext -d '{"subject":"group:payments","relation":"MEMBER_OF","object":"group:finance"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 grpcurl -plaintext -d '{"subject":"group:finance","relation":"HAS_PERMISSION","object":"resource:billing","level":"read"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/WriteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 ```
 
 ### Check permissions
@@ -220,26 +231,26 @@ grpcurl -plaintext -d '{"subject":"group:finance","relation":"HAS_PERMISSION","o
 ```bash
 # alex: admin implies read on server-1 → ALLOW
 grpcurl -plaintext -d '{"subject":"user:alex","action":"admin","object":"resource:server-1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 
 grpcurl -plaintext -d '{"subject":"user:alex","action":"read","object":"resource:server-1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # eve has no rights → DENY
 grpcurl -plaintext -d '{"subject":"user:eve","action":"read","object":"resource:server-1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # bob: read allowed, write denied
 grpcurl -plaintext -d '{"subject":"user:bob","action":"read","object":"resource:doc1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 grpcurl -plaintext -d '{"subject":"user:bob","action":"write","object":"resource:doc1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # alice: transitive chain alice→payments→finance → read on billing, but not write
 grpcurl -plaintext -d '{"subject":"user:alice","action":"read","object":"resource:billing"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 grpcurl -plaintext -d '{"subject":"user:alice","action":"write","object":"resource:billing"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 ```
 
 ### Delete relationships
@@ -247,17 +258,17 @@ grpcurl -plaintext -d '{"subject":"user:alice","action":"write","object":"resour
 ```bash
 # Remove alex from devops → loses access to server-1
 grpcurl -plaintext -d '{"subject":"user:alex","relation":"MEMBER_OF","object":"group:devops"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/DeleteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/DeleteTuple
 # → {"success": true}
 
 # Verify access is gone
 grpcurl -plaintext -d '{"subject":"user:alex","action":"read","object":"resource:server-1"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Check
+  localhost:50051 opens3.authz.v1.PermissionService/Check
 # → {"allowed": false}
 
 # Deleting a non-existent tuple returns false
 grpcurl -plaintext -d '{"subject":"user:nobody","relation":"MEMBER_OF","object":"group:nobody"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/DeleteTuple
+  localhost:50051 opens3.authz.v1.PermissionService/DeleteTuple
 # → {"success": false}
 ```
 
@@ -265,20 +276,25 @@ grpcurl -plaintext -d '{"subject":"user:nobody","relation":"MEMBER_OF","object":
 
 ```bash
 grpcurl -plaintext -d '{"subject":"user:alex"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Read
+  localhost:50051 opens3.authz.v1.PermissionService/Read
 
 grpcurl -plaintext -d '{"subject":"group:devops"}' \
-  localhost:50051 rebac.authz.v1.PermissionService/Read
+  localhost:50051 opens3.authz.v1.PermissionService/Read
 ```
 
 ### Kafka audit events
 
 ```bash
-docker exec -it $(docker ps -qf name=kafka) \
-  kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic auth-changes \
-  --from-beginning
+# Список топиков
+docker exec opens3-rebac-kafka-1 kafka-topics --bootstrap-server localhost:9092 --list
+
+# Читать аудит-лог (каждый Check пишет туда)
+docker exec opens3-rebac-kafka-1 kafka-console-consumer \
+  --bootstrap-server localhost:9092 --topic auth-audit --from-beginning
+
+# Инвалидация кэша (WriteTuple / DeleteTuple)
+docker exec opens3-rebac-kafka-1 kafka-console-consumer \
+  --bootstrap-server localhost:9092 --topic auth-changes --from-beginning
 ```
 
 Events emitted:
@@ -288,14 +304,13 @@ Events emitted:
 ### Redis cache
 
 ```bash
-# Check cached keys
-redis-cli KEYS "auth_decision:*"
+docker exec -it opens3-rebac-redis-1 redis-cli
 
-# Inspect a value (1 = allowed, 0 = denied)
-redis-cli GET "auth_decision:user:alex:read:resource:server-1"
-
-# TTL (default 30s)
-redis-cli TTL "auth_decision:user:alex:read:resource:server-1"
+# Внутри redis-cli:
+KEYS *                                              # все ключи
+KEYS auth_decision:*                               # только кэш решений
+GET auth_decision:user:alex:read:resource:server-1 # 1 = allow, 0 = deny
+TTL auth_decision:user:alex:read:resource:server-1 # оставшееся время жизни (default 30s)
 ```
 
 After a `DeleteTuple` + Kafka processing, the corresponding key is invalidated automatically (requires `cache_invalidator` running).
@@ -329,28 +344,32 @@ MATCH (n) DETACH DELETE n
 source venv/bin/activate
 
 # Unit tests (no infrastructure required)
-pytest tests/unit -v
+venv/bin/python -m pytest tests/unit -v
 
 # Unit tests with coverage
-pytest tests/unit -v --cov=internal --cov=entrypoints --cov-report=term-missing
+venv/bin/python -m pytest tests/unit -v --cov=internal --cov=entrypoints --cov-report=term-missing
 
 # Integration tests (Neo4j must be running)
-pytest tests/integration -v -m integration
+venv/bin/python -m pytest tests/integration -v -m integration
 ```
 
-Integration tests auto-skip if Neo4j is unreachable. Run Neo4j first:
+Integration tests auto-skip if Neo4j is unreachable. Run Neo4j first (from repo root):
 
 ```bash
-docker compose -f deploy/local/docker-compose.yml up -d neo4j
+docker compose up neo4j -d
 ```
 
 ---
 
 ## Proto regeneration
 
-After modifying `proto/authz.proto`:
+The source of truth is `shared/api/authz/v1/authz.proto` in the repo root.
+Stubs are pre-generated and committed — no need to regenerate unless the proto changes.
+
+After modifying the shared proto:
 
 ```bash
+cd services/authz
 bash proto/generate.sh
 # Regenerates internal/gen/authz_pb2.py and authz_pb2_grpc.py
 ```
@@ -374,8 +393,8 @@ rebac-auth-service/
 │   │   └── invalidation_consumer.py  # SCAN+DEL invalidation via Kafka
 │   ├── kafka/producer.py       # Audit event producer
 │   └── types.py                # Tuple dataclass
-├── proto/authz.proto           # gRPC contract
-├── internal/gen/               # Auto-generated stubs (do not edit)
+├── proto/generate.sh           # Script to regenerate stubs from shared proto
+├── internal/gen/               # Auto-generated stubs (do not edit manually)
 ├── tests/
 │   ├── unit/                   # Mocked unit tests
 │   └── integration/            # Real Neo4j integration tests

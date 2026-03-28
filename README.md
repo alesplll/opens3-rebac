@@ -97,6 +97,47 @@ opens3-rebac/
 
 ---
 
+## Запуск
+
+### Требования
+
+- Docker & Docker Compose
+- [`grpcurl`](https://github.com/fullstorydev/grpcurl) для ручного тестирования
+
+### Поднять всё доступное
+
+```bash
+make up-services     # инфраструктура + запущенные сервисы (authz, storage, auth, users)
+make down            # остановить всё
+make down-volumes    # остановить + удалить данные (neo4j, postgres, redis)
+make rebuild         # пересобрать образы без кэша и перезапустить
+```
+
+> Gateway и Metadata пока не реализованы — сквозного S3 flow нет.
+
+### Только инфраструктура + один сервис
+
+```bash
+docker compose up neo4j redis kafka zookeeper -d
+docker compose --profile services up authz -d
+```
+
+### Observability (Jaeger, Prometheus, Grafana, Kibana)
+
+```bash
+make up-observability
+```
+
+| UI | Адрес |
+|---|---|
+| Jaeger | http://localhost:16686 |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
+| Kibana | http://localhost:5601 |
+| Neo4j Browser | http://localhost:7474 (neo4j / password123) |
+
+---
+
 ## Roadmap
 
 | Фаза | Статус | Что |
