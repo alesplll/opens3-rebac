@@ -129,3 +129,132 @@ def test_delete_has_permission_tuple(neo4j_store, clean_graph):
 
     neo4j_store.delete_tuple(Tuple("group:eng", RelationType.HAS_PERMISSION.value, "resource:ci"))
     assert neo4j_store.check("group:eng", "write", "resource:ci") is False
+
+
+# ── Permission level hierarchy ─────────────────────────────────────────────────
+
+def test_level_write_implies_read(neo4j_store, clean_graph):
+    """write level grants read action (write ⊇ read)."""
+    neo4j_store.write_tuple(
+        Tuple("user:alice", RelationType.HAS_PERMISSION.value, "bucket:photos", level="write")
+    )
+    assert neo4j_store.check("user:alice", "read", "bucket:photos") is True
+    assert neo4j_store.check("user:alice", "write", "bucket:photos") is True
+    assert neo4j_store.check("user:alice", "delete", "bucket:photos") is False
+    assert neo4j_store.check("user:alice", "admin", "bucket:photos") is False
+
+
+def test_level_delete_implies_write_and_read(neo4j_store, clean_graph):
+    """delete level grants delete, create, write, read — but not admin."""
+    neo4j_store.write_tuple(
+        Tuple("user:bob", RelationType.HAS_PERMISSION.value, "bucket:data", level="delete")
+    )
+    assert neo4j_store.check("user:bob", "read", "bucket:data") is True
+    assert neo4j_store.check("user:bob", "write", "bucket:data") is True
+    assert neo4j_store.check("user:bob", "create", "bucket:data") is True
+    assert neo4j_store.check("user:bob", "delete", "bucket:data") is True
+    assert neo4j_store.check("user:bob", "admin", "bucket:data") is False
+
+
+def test_level_create_does_not_imply_delete(neo4j_store, clean_graph):
+    """create level grants create, write, read — but NOT delete or admin."""
+    neo4j_store.write_tuple(
+        Tuple("user:carol", RelationType.HAS_PERMISSION.value, "bucket:shared", level="create")
+    )
+    assert neo4j_store.check("user:carol", "read", "bucket:shared") is True
+    assert neo4j_store.check("user:carol", "write", "bucket:shared") is True
+    assert neo4j_store.check("user:carol", "create", "bucket:shared") is True
+    assert neo4j_store.check("user:carol", "delete", "bucket:shared") is False
+    assert neo4j_store.check("user:carol", "admin", "bucket:shared") is False
+
+
+def test_level_read_denies_everything_else(neo4j_store, clean_graph):
+    """read level grants only read."""
+    neo4j_store.write_tuple(
+        Tuple("user:viewer", RelationType.HAS_PERMISSION.value, "bucket:public", level="read")
+    )
+    assert neo4j_store.check("user:viewer", "read", "bucket:public") is True
+    assert neo4j_store.check("user:viewer", "write", "bucket:public") is False
+    assert neo4j_store.check("user:viewer", "create", "bucket:public") is False
+    assert neo4j_store.check("user:viewer", "delete", "bucket:public") is False
+    assert neo4j_store.check("user:viewer", "admin", "bucket:public") is False
+
+
+# ── Legacy relations: OWNER_OF, VIEWER ────────────────────────────────────────
+
+def test_owner_of_grants_all_actions(neo4j_store, clean_graph):
+    """OWNER_OF (legacy) grants read, write, create, delete, admin."""
+    neo4j_store.write_tuple(
+        Tuple("user:owner", RelationType.OWNER_OF.value, "bucket:mine")
+    )
+    for action in ("read", "write", "create", "delete", "admin"):
+        assert neo4j_store.check("user:owner", action, "bucket:mine") is True, \
+            f"OWNER_OF should grant {action}"
+
+
+def test_viewer_grants_only_read(neo4j_store, clean_graph):
+    """VIEWER (legacy) grants only read."""
+    neo4j_store.write_tuple(
+        Tuple("user:guest", RelationType.VIEWER.value, "bucket:docs")
+    )
+    assert neo4j_store.check("user:guest", "read", "bucket:docs") is True
+    assert neo4j_store.check("user:guest", "write", "bucket:docs") is False
+    assert neo4j_store.check("user:guest", "delete", "bucket:docs") is False
+
+
+# ── S3 entity ID format ────────────────────────────────────────────────────────
+
+def test_s3_bucket_and_object_ids(neo4j_store, clean_graph):
+    """Real S3-format IDs: bucket:photos, object:photos/cat.jpg."""
+    neo4j_store.write_tuple(
+        Tuple("user:alice", RelationType.HAS_PERMISSION.value, "bucket:photos", level="write")
+    )
+    # PutObject: check is on parent bucket
+    assert neo4j_store.check("user:alice", "write", "bucket:photos") is True
+
+    # GetObject: check is on specific object
+    neo4j_store.write_tuple(
+        Tuple("user:alice", RelationType.HAS_PERMISSION.value, "object:photos/cat.jpg", level="read")
+    )
+    assert neo4j_store.check("user:alice", "read", "object:photos/cat.jpg") is True
+    assert neo4j_store.check("user:alice", "delete", "object:photos/cat.jpg") is False
+
+
+def test_s3_owner_creates_bucket(neo4j_store, clean_graph):
+    """After CreateBucket, Gateway writes OWNER_OF: user gets full access."""
+    neo4j_store.write_tuple(
+        Tuple("user:alice", RelationType.OWNER_OF.value, "bucket:my-bucket")
+    )
+    assert neo4j_store.check("user:alice", "read", "bucket:my-bucket") is True
+    assert neo4j_store.check("user:alice", "delete", "bucket:my-bucket") is True
+    assert neo4j_store.check("user:bob", "read", "bucket:my-bucket") is False
+
+
+# ── PARENT_OF ─────────────────────────────────────────────────────────────────
+
+def test_parent_of_written_to_graph(neo4j_store, clean_graph):
+    """PARENT_OF can be written. NOTE: check() does not traverse PARENT_OF,
+    so bucket permissions are NOT inherited by objects automatically.
+    Gateway must write explicit permissions on the object after PutObject."""
+    neo4j_store.write_tuple(
+        Tuple("bucket:photos", RelationType.PARENT_OF.value, "object:photos/cat.jpg")
+    )
+    tuples = neo4j_store.read_tuples("bucket:photos")
+    assert any(
+        t.relation == "PARENT_OF" and t.object == "object:photos/cat.jpg"
+        for t in tuples
+    )
+
+
+def test_parent_of_does_not_propagate_permissions(neo4j_store, clean_graph):
+    """Bucket-level permission is NOT inherited by child objects via PARENT_OF.
+    This is by design: check() only traverses MEMBER_OF + HAS_PERMISSION.
+    Object permissions must be set explicitly."""
+    neo4j_store.write_tuple(
+        Tuple("user:alice", RelationType.HAS_PERMISSION.value, "bucket:photos", level="read")
+    )
+    neo4j_store.write_tuple(
+        Tuple("bucket:photos", RelationType.PARENT_OF.value, "object:photos/cat.jpg")
+    )
+    # alice has read on bucket, but NOT automatically on the object
+    assert neo4j_store.check("user:alice", "read", "object:photos/cat.jpg") is False
