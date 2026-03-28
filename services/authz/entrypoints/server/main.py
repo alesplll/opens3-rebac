@@ -28,11 +28,11 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
     """gRPC service implementation"""
 
     def __init__(self):
-        neo4j_store = Neo4jStore(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD)
-        cache = RedisDecisionCache(host=REDIS_HOST, port=REDIS_PORT)
+        self._neo4j_store = Neo4jStore(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD)
+        self._cache = RedisDecisionCache(host=REDIS_HOST, port=REDIS_PORT)
         audit_producer = AuditProducer(KAFKA_BOOTSTRAP)
         self.rebac = PermissionService(
-            store=neo4j_store, cache=cache, audit_producer=audit_producer
+            store=self._neo4j_store, cache=self._cache, audit_producer=audit_producer
         )
 
     def Check(self, request, context):
@@ -60,6 +60,20 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
             if t.level:
                 rt.level = t.level
         return response
+
+    def HealthCheck(self, request, context):
+        status = authz_pb2.HealthCheckResponse.SERVING
+        try:
+            self._neo4j_store.driver.verify_connectivity()
+        except Exception as e:
+            logger.warning("Neo4j health check failed: %s", e)
+            status = authz_pb2.HealthCheckResponse.NOT_SERVING
+        try:
+            self._cache._client.ping()
+        except Exception as e:
+            logger.warning("Redis health check failed: %s", e)
+            status = authz_pb2.HealthCheckResponse.NOT_SERVING
+        return authz_pb2.HealthCheckResponse(status=status)
 
 
 def serve():
