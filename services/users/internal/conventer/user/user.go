@@ -2,7 +2,7 @@ package user
 
 import (
 	"github.com/alesplll/opens3-rebac/services/users/internal/model"
-	pb "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
+	pb "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

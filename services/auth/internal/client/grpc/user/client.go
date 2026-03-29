@@ -5,7 +5,7 @@ import (
 
 	"github.com/alesplll/opens3-rebac/services/auth/internal/client/grpc"
 	"github.com/alesplll/opens3-rebac/services/auth/internal/model"
-	user_v1 "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
+	user_v1 "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 )
 
 type client struct {

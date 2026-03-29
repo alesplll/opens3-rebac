@@ -371,7 +371,7 @@ After modifying the shared proto:
 ```bash
 cd services/authz
 bash proto/generate.sh
-# Regenerates internal/gen/authz_pb2.py and authz_pb2_grpc.py
+# Regenerates shared/pkg/py/authz/v1/authz_pb2.py and authz_pb2_grpc.py
 ```
 
 ---
@@ -394,7 +394,7 @@ rebac-auth-service/
 │   ├── kafka/producer.py       # Audit event producer
 │   └── types.py                # Tuple dataclass
 ├── proto/generate.sh           # Script to regenerate stubs from shared proto
-├── internal/gen/               # Auto-generated stubs (do not edit manually)
+├── shared/pkg/py/               # Auto-generated stubs (do not edit manually)
 ├── tests/
 │   ├── unit/                   # Mocked unit tests
 │   └── integration/            # Real Neo4j integration tests

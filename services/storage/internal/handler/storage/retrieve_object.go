@@ -1,7 +1,7 @@
 package storage
 
 import (
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 const chunkSize = 8 * 1024 * 1024 // 8 MB

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/auth/internal/config"
-	desc_auth "github.com/alesplll/opens3-rebac/shared/pkg/auth/v1"
+	desc_auth "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/metric"

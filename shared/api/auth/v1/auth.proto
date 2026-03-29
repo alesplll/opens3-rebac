@@ -4,7 +4,7 @@ package auth_v1;
 
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/auth/v1;auth_v1";
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1;auth_v1";
 
 service AuthV1 {
   rpc Login (LoginRequest) returns (LoginResponse);

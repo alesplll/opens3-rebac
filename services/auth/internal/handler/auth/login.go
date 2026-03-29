@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/auth/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 )
 
 func (h *authHandler) Login(ctx context.Context, req *desc.LoginRequest) (*desc.LoginResponse, error) {

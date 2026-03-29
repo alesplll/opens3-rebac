@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package opens3.authz.v1;
 
-option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/authz/v1;authzv1";
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1;authzv1";
 
 // AuthZService — ReBAC-движок авторизации для OpenS3.
 // Отвечает на вопрос: "может ли <subject> выполнить <action> над <object>?"

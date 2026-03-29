@@ -16,7 +16,7 @@ import (
 	rateLimiterInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/ratelimiter"
 	validationInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/validation"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	grpcMiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

@@ -209,3 +209,5 @@ opens3-rebac.wiki/
 # Proto generation
 bin/
 shared/vendor.protogen/
+shared/pkg/py/**/__pycache__/
+shared/pkg/py/**/*.py[codz]

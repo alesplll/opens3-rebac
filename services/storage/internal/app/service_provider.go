@@ -9,7 +9,7 @@ import (
 	storageRepository "github.com/alesplll/opens3-rebac/services/storage/internal/repository/storage"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/service"
 	storageService "github.com/alesplll/opens3-rebac/services/storage/internal/service/storage"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 type serviceProvider struct {

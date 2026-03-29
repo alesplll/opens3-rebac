@@ -1,11 +1,17 @@
 """Unit tests for PermissionService with mocked store and cache."""
 from unittest.mock import MagicMock, patch
+from pathlib import Path
+import sys
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from internal.types import Tuple
 from internal.rebac.model import PermissionService
-from internal.gen import authz_pb2
+from shared.pkg.py.authz.v1 import authz_pb2
 
 
 class TestPermissionServiceCheck:

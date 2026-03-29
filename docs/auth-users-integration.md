@@ -75,8 +75,8 @@ shared/
 **Импорты в сервисах:**
 ```go
 // proto-контракты
-"github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
-"github.com/alesplll/opens3-rebac/shared/pkg/auth/v1"
+"github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
+"github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 
 // инфраструктура
 "github.com/alesplll/opens3-rebac/shared/pkg/kit/tokens"

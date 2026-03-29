@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"io"
 
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 func (h *handler) UploadPart(stream desc.DataStorageService_UploadPartServer) error {

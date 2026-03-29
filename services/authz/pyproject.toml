@@ -29,9 +29,8 @@ packages = ["internal", "entrypoints"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "../.."]
 markers = [
     "integration: integration tests (require Neo4j, run with: pytest -m integration)",
 ]
 filterwarnings = ["ignore:.*grpc.*"]
-

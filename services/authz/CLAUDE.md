@@ -12,7 +12,7 @@ A Relationship-Based Access Control (ReBAC) authorization engine exposed via gRP
 ```bash
 python -m venv venv && source venv/bin/activate
 pip install -e ".[test]"
-bash proto/generate.sh          # regenerate gRPC stubs into internal/gen/
+bash proto/generate.sh          # regenerate gRPC stubs into shared/pkg/py/
 ```
 
 ### Infrastructure (Neo4j, Redis, Kafka)
@@ -39,7 +39,7 @@ Integration tests require Neo4j running and these env vars (defaults work with d
 - `NEO4J_PASSWORD` (default: `password123`)
 
 ### Proto Regeneration
-After modifying `proto/authz.proto`, run `bash proto/generate.sh`. This generates `internal/gen/authz_pb2.py` and `authz_pb2_grpc.py` with fixed relative imports.
+After modifying `proto/authz.proto`, run `bash proto/generate.sh`. This generates `shared/pkg/py/authz/v1/authz_pb2.py` and `authz_pb2_grpc.py` with fixed relative imports.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ After modifying `proto/authz.proto`, run `bash proto/generate.sh`. This generate
 - **`internal/kafka/`** — `AuditProducer` emits `tuple_written` events to the `auth-changes` topic.
 - **`internal/types.py`** — `Tuple` dataclass: the fundamental unit `(subject, relation, object, level?)`.
 - **`proto/`** — gRPC contract. `authz.proto` defines `PermissionService` with `Check`, `WriteTuple`, `Read` RPCs.
-- **`internal/gen/`** — Auto-generated gRPC Python stubs. Do not edit manually.
+- **`shared/pkg/py/`** — Auto-generated gRPC Python stubs. Do not edit manually.
 
 ### Authorization Model
 Permission checks follow two paths in `Neo4jStore.check()`:

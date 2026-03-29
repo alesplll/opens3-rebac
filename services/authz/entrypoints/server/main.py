@@ -1,11 +1,19 @@
 """ReBAC Auth Service entrypoint"""
 import logging
 import os
+import sys
+from pathlib import Path
 from concurrent import futures
+
 import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
-from internal.gen import authz_pb2, authz_pb2_grpc
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from shared.pkg.py.authz.v1 import authz_pb2, authz_pb2_grpc
 from internal.rebac.model import PermissionService
 from internal.neo4j.store import Neo4jStore
 from internal.types import Tuple

@@ -165,8 +165,8 @@ services:
   authz:
     profiles: [services]
     build:
-      context: ./services/authz
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/authz/Dockerfile
     ports:
       - "50051:50051"
     env_file:

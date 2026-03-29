@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package opens3.storage.v1;
 
-option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1;storagev1";
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1;storagev1";
 
 // DataStorageService — единственный сервис, хранящий байты на диске.
 // Работает только с blob_id (UUID) и не знает о S3 API, бакетах, ключах или правах доступа.

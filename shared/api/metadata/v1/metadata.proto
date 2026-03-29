@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package opens3.metadata.v1;
 
-option go_package = "github.com/alesplll/opens3-rebac/gen/metadata/v1;metadatav1";
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1;metadatav1";
 
 // MetadataService — единственный источник правды о том, что существует в системе.
 // Хранит метаданные бакетов, объектов, версий и blob_id без хранения самих байт.

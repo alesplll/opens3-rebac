@@ -396,7 +396,7 @@ Handler → StorageService (interface) → StorageRepository (interface)
 make generate-storage
 ```
 
-Результат: `shared/pkg/storage/v1/storage.pb.go` + `storage_grpc.pb.go`
+Результат: `shared/pkg/go/storage/v1/storage.pb.go` + `storage_grpc.pb.go`
 
 ### Сборка и проверка
 

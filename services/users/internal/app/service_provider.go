@@ -9,7 +9,7 @@ import (
 	userRepository "github.com/alesplll/opens3-rebac/services/users/internal/repository/user"
 	"github.com/alesplll/opens3-rebac/services/users/internal/service"
 	userService "github.com/alesplll/opens3-rebac/services/users/internal/service/user"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db/pg"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db/transaction"

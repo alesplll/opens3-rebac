@@ -5,12 +5,13 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY proto/ proto/
-COPY internal/ internal/
-COPY entrypoints/ entrypoints/
+COPY services/authz/pyproject.toml ./pyproject.toml
+COPY services/authz/proto/ proto/
+COPY services/authz/internal/ internal/
+COPY services/authz/entrypoints/ entrypoints/
+COPY shared/ shared/
 
-# gRPC stubs are pre-generated (internal/gen/) and committed to the repo.
+# gRPC stubs are pre-generated (shared/pkg/py/) and committed to the repo.
 # To regenerate locally: bash proto/generate.sh
 RUN pip install --no-cache-dir --prefix=/install ".[test]"
 

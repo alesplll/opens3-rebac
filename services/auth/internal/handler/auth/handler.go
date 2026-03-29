@@ -2,7 +2,7 @@ package auth
 
 import (
 	"github.com/alesplll/opens3-rebac/services/auth/internal/service"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/auth/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 )
 
 type authHandler struct {

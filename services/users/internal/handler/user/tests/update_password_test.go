@@ -8,7 +8,7 @@ import (
 	userHandler "github.com/alesplll/opens3-rebac/services/users/internal/handler/user"
 	"github.com/alesplll/opens3-rebac/services/users/internal/service"
 	"github.com/alesplll/opens3-rebac/services/users/pkg/mocks"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"github.com/brianvoe/gofakeit"
 	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"

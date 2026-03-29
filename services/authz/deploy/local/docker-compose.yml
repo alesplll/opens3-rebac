@@ -54,8 +54,8 @@ services:
   rebac-auth-service:
     profiles: ["app"]
     build:
-      context: ../..
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: services/authz/Dockerfile
     restart: unless-stopped
     ports:
       - "50051:50051"
