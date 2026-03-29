@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/storage/internal/config"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/metric"
@@ -17,6 +16,7 @@ import (
 	rateLimiterInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/ratelimiter"
 	validationInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/validation"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/storage/v1"
 	grpcMiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
