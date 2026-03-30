@@ -34,13 +34,17 @@ Client (HTTP / S3 API)
         │
         ▼
     Gateway :8080          ← единственная точка входа
-   /    |    \
-  /     |     \
-AuthZ  Meta  Storage       ← gRPC-сервисы
-:50051 :50052 :50053
-  │      │
-Neo4j  PostgreSQL
-Redis
+   /  |  |   \
+  /   |  |    \
+Auth AuthZ Meta Storage    ← gRPC-сервисы
+:50050 :50051 :50052 :50053
+  │      │      │
+  │    Neo4j  PostgreSQL
+  │    Redis
+  │
+Users :50051               ← управление пользователями
+  │
+PostgreSQL
          │
        Kafka               ← асинхронные события между сервисами
 ```
@@ -53,6 +57,8 @@ Redis
 | **AuthZ (ReBAC)** | Python | `:50051` | Алекса |
 | **Metadata** | Python | `:50052` | Аня |
 | **Data Node** | Go | `:50053` | Илья |
+| **Auth** | Go | `:50050` | — |
+| **Users** | Go | `:50051` (gRPC) / `:8080` (HTTP) | — |
 
 ---
 
@@ -75,6 +81,47 @@ gRPC API: `Check` · `WriteTuple` · `DeleteTuple` · `Read` · `HealthCheck`
 
 ---
 
+## Auth Service
+
+Сервис аутентификации пользователей. Выдаёт JWT refresh/access токены и валидирует их для других сервисов.
+
+```
+Client → POST /api/v1/auth (email + password)
+           │
+           ├─ Users (gRPC ValidateCredentials) → OK
+           └─ выдаёт refresh token + access token
+```
+
+Защита от перебора: Redis хранит счётчик неудачных попыток (`login_attempts:{email}`, TTL 30 с, лимит 6 попыток). Rate limiter: 30 req/s.
+
+gRPC API: `Login` · `GetRefreshToken` · `GetAccessToken` · `ValidateToken` · `HealthCheck`
+
+HTTP (gRPC-Gateway): `POST /api/v1/auth` · `POST /api/v1/auth/refresh` · `POST /api/v1/auth/access` · `POST /api/v1/auth/validate`
+
+Подробнее: [`services/auth/README.md`](services/auth/README.md)
+
+---
+
+## Users Service
+
+Сервис управления пользователями. Хранит учётные записи в PostgreSQL, публикует события в Kafka. Является источником истины о credentials — Auth Service обращается к нему при каждом логине.
+
+```
+Auth → ValidateCredentials(email, password) → Users
+                                                 │
+                                              PostgreSQL (bcrypt check)
+```
+
+При создании/удалении пользователя публикует события `user.created` / `user.deleted` в Kafka для каскадной обработки в других сервисах.
+
+gRPC API: `Create` · `Get` · `Delete` · `Update` · `ValidateCredentials` · `HealthCheck`
+
+HTTP (gRPC-Gateway): `POST /api/v1/user` · `GET /api/v1/user/{id}` · `PATCH /api/v1/user` · `DELETE /api/v1/user` · `POST /api/v1/user/validate`
+
+Подробнее: [`services/users/README.md`](services/users/README.md)
+
+---
+
 ## Структура репозитория
 
 ```
@@ -88,7 +135,9 @@ opens3-rebac/
 │   ├── authz/                    # ReBAC authorization engine (Python)
 │   ├── metadata/                 # Metadata service (Python)
 │   ├── storage/                  # Data Node (Go)
-│   └── gateway/                  # HTTP Gateway (Go)
+│   ├── gateway/                  # HTTP Gateway (Go)
+│   ├── auth/                     # Authentication service (Go)
+│   └── users/                    # User management service (Go)
 │
 ├── infra/                        # Docker Compose, K8s манифесты
 ├── .github/                      # CI/CD workflows
