@@ -5,10 +5,14 @@ on:
     paths:
       - "services/authz/**"
       - "shared/api/authz/**"
+      - "shared/pkg/py/authz/**"
+      - "Makefile"
   pull_request:
     paths:
       - "services/authz/**"
       - "shared/api/authz/**"
+      - "shared/pkg/py/authz/**"
+      - "Makefile"
 
 defaults:
   run:

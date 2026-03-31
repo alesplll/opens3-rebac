@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-"github.com/alesplll/opens3-rebac/services/auth/internal/client/cache"
+	"github.com/alesplll/opens3-rebac/services/auth/internal/client/cache"
 	redis_client "github.com/alesplll/opens3-rebac/services/auth/internal/client/cache/redis"
 	grpc_clients "github.com/alesplll/opens3-rebac/services/auth/internal/client/grpc"
 	userClient "github.com/alesplll/opens3-rebac/services/auth/internal/client/grpc/user"
@@ -13,7 +13,6 @@ import (
 	"github.com/alesplll/opens3-rebac/services/auth/internal/repository/auth"
 	"github.com/alesplll/opens3-rebac/services/auth/internal/service"
 	service_auth "github.com/alesplll/opens3-rebac/services/auth/internal/service/auth"
-	access_v1 "github.com/alesplll/opens3-rebac/shared/pkg/go/access/v1"
 	auth_v1 "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 	desc_user "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
@@ -32,8 +31,7 @@ const (
 )
 
 type serviceProvider struct {
-	authHandler   auth_v1.AuthV1Server
-	accessHandler access_v1.AccessV1Server
+	authHandler auth_v1.AuthV1Server
 
 	authService    service.AuthService
 	authRepository repository.AuthRepository

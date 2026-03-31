@@ -50,7 +50,6 @@ shared/
 └── pkg/
     ├── user/v1/                ← сгенерированный Go-код (user gRPC)
     ├── auth/v1/                ← сгенерированный Go-код (auth gRPC)
-    ├── access/v1/              ← сгенерированный Go-код (access gRPC)
     └── kit/                    ← общая инфраструктура для Go-сервисов
         ├── tokens/             ← JWT: UserClaims, TokenService
         ├── tokens/jwt/         ← JWT реализация
