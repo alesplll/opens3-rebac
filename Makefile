@@ -50,6 +50,14 @@ generate-authz:
 		--plugin=protoc-gen-go-grpc=$(LOCAL_BIN)/protoc-gen-go-grpc \
 		shared/api/authz/v1/authz.proto
 
+# ── Tests ──────────────────────────────────────────────────────────────────────
+
+test-users:
+	go test ./services/users/... -count=1
+
+test-users-service:
+	go test ./services/users/internal/service/user/tests -count=1
+
 # ── Docker ─────────────────────────────────────────────────────────────────────
 
 up-services:
