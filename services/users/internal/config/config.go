@@ -14,7 +14,6 @@ var appConfig *config
 type config struct {
 	Logger      LoggerConfig
 	GRPC        GRPCConfig
-	HTTP        HTTPConfig
 	PG          PGConfig
 	Tracing     TracingConfig
 	Metrics     MetricsConfig
@@ -36,11 +35,6 @@ func Load(path ...string) error {
 	}
 
 	grpcCfg, err := env.NewGRPCConfig()
-	if err != nil {
-		return err
-	}
-
-	httpCfg, err := env.NewHTTPConfig()
 	if err != nil {
 		return err
 	}
@@ -68,7 +62,6 @@ func Load(path ...string) error {
 	appConfig = &config{
 		Logger:      loggerCfg,
 		GRPC:        grpcCfg,
-		HTTP:        httpCfg,
 		PG:          pgCfg,
 		Tracing:     tracingCfg,
 		Metrics:     metricsCfg,

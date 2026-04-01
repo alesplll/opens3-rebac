@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/alesplll/opens3-rebac/shared v0.0.0-20260322083635-07cb8dcee9eb h1:phWp0IFLrCAB6GA2Nvnwxp4g7fiEwQaIucj3v7Bc/ng=
-github.com/alesplll/opens3-rebac/shared v0.0.0-20260322083635-07cb8dcee9eb/go.mod h1:cpDp+bjwPbnvkKHbFmRXp4kHM8xDS0da5O7YD3QDjPo=
+github.com/alesplll/opens3-rebac/shared v0.0.0-20260401221801-a711779ac92c h1:+n3KNtYiry28dSTAEnT2ClLGNo7IQz73P5k3hyNk4bk=
+github.com/alesplll/opens3-rebac/shared v0.0.0-20260401221801-a711779ac92c/go.mod h1:cpDp+bjwPbnvkKHbFmRXp4kHM8xDS0da5O7YD3QDjPo=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/caarlos0/env/v11 v11.3.1 h1:cArPWC15hWmEt+gWk7YBi7lEXTXCvpaSdCiZE2X5mCA=
 github.com/caarlos0/env/v11 v11.3.1/go.mod h1:qupehSf/Y0TUTsxKywqRt/vJjN5nz6vauiYEUUr8P4U=

@@ -2,16 +2,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"net"
-	"net/http"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/users/internal/config"
-	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/metric"
@@ -19,11 +15,10 @@ import (
 	rateLimiterInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/ratelimiter"
 	validationInterceptor "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/middleware/validation"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
+	desc "github.com/alesplll/opens3-rebac/shared/pkg/user/v1"
 	grpcMiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -42,7 +37,6 @@ func init() {
 type App struct {
 	serviceProvider *serviceProvider
 	grpcServer      *grpc.Server
-	httpServer      *http.Server
 }
 
 func NewApp(ctx context.Context) (*App, error) {
@@ -64,7 +58,6 @@ func (a *App) initDeps(ctx context.Context) error {
 		a.initServiceProvider,
 		a.initMetrics,
 		a.initGRPCServer,
-		a.initHTTPServer,
 		a.initTracing,
 	}
 
@@ -118,7 +111,6 @@ func (a *App) initMetrics(ctx context.Context) error {
 
 func (a *App) initGRPCServer(ctx context.Context) error {
 	a.grpcServer = grpc.NewServer(
-		grpc.Creds(insecure.NewCredentials()),
 		grpc.UnaryInterceptor(
 			grpcMiddleware.ChainUnaryServer(
 				rateLimiterInterceptor.NewRateLimiterInterceptor(ctx, config.AppConfig().RateLimiter).Unary,
@@ -142,30 +134,6 @@ func (a *App) initGRPCServer(ctx context.Context) error {
 	reflection.Register(a.grpcServer)
 
 	desc.RegisterUserV1Server(a.grpcServer, a.serviceProvider.UserHandler(ctx))
-
-	return nil
-}
-
-func (a *App) initHTTPServer(ctx context.Context) error {
-	mux := runtime.NewServeMux()
-
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}
-
-	err := desc.RegisterUserV1HandlerFromEndpoint(ctx, mux, config.AppConfig().GRPC.Address(), opts)
-	if err != nil {
-		return err
-	}
-
-	a.httpServer = &http.Server{
-		Addr:    config.AppConfig().HTTP.Address(),
-		Handler: mux,
-	}
-
-	closer.AddNamed("HTTP server", func(ctx context.Context) error {
-		return a.httpServer.Shutdown(ctx)
-	})
 
 	return nil
 }
@@ -198,39 +166,11 @@ func (a *App) runGRPCServer() error {
 	return nil
 }
 
-func (a *App) runHTTPServer() error {
-	logger.Info(context.Background(), "HTTP server is starting listening and serving", zap.String("address", config.AppConfig().HTTP.Address()))
-	err := a.httpServer.ListenAndServe()
-	if err != nil {
+func (a *App) Run() error {
+	if err := a.runGRPCServer(); err != nil {
+		logger.Error(context.Background(), "fault grpc server", zap.Error(err))
 		return err
 	}
-	logger.Info(context.Background(), "HTTP server stopped gracefully")
-	return nil
-}
-
-func (a *App) Run() error {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-
-		err := a.runGRPCServer()
-		if err != nil {
-			logger.Error(context.Background(), "fault grpc server", zap.Error(err))
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		err := a.runHTTPServer()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error(context.Background(), "fault http server", zap.Error(err))
-		}
-	}()
-
-	wg.Wait()
 
 	return nil
 }
