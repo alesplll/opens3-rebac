@@ -32,7 +32,7 @@ get-deps:
 
 generate-api:
 	mkdir -p pkg/user/v1
-	protoc --proto_path api/user/v1 --proto_path vendor.protogen \
+	protoc --proto_path api/user/v1 \
 	--go_out=pkg/user/v1 --go_opt=paths=source_relative \
 	--plugin=protoc-gen-go=bin/protoc-gen-go \
 	--go-grpc_out=pkg/user/v1 --go-grpc_opt=paths=source_relative \
@@ -62,12 +62,6 @@ vendor-proto:
 			git clone https://github.com/envoyproxy/protoc-gen-validate vendor.protogen/protoc-gen-validate &&\
 			mv vendor.protogen/protoc-gen-validate/validate/*.proto vendor.protogen/validate &&\
 			rm -rf vendor.protogen/protoc-gen-validate ;\
-		fi
-		@if [ ! -d vendor.protogen/google ]; then \
-			git clone https://github.com/googleapis/googleapis vendor.protogen/googleapis &&\
-			mkdir -p  vendor.protogen/google/ &&\
-			mv vendor.protogen/googleapis/google/api vendor.protogen/google &&\
-			rm -rf vendor.protogen/googleapis ;\
 		fi
 
 gen-cert:

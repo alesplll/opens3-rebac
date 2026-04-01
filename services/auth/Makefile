@@ -19,21 +19,13 @@ get-deps:
 	go get -u github.com/gomodule/redigo/redis
 	go get -u github.com/pkg/errors
 	go get -u github.com/caarlos0/env/v11
-	
-vendor-proto:
-		@if [ ! -d vendor.protogen/google ]; then \
-			git clone https://github.com/googleapis/googleapis vendor.protogen/googleapis &&\
-			mkdir -p  vendor.protogen/google/ &&\
-			mv vendor.protogen/googleapis/google/api vendor.protogen/google &&\
-			rm -rf vendor.protogen/googleapis ;\
-		fi
 
 generate-api:
 	make generate-api-auth
 
 generate-api-auth:
 	mkdir -p pkg/auth/v1
-	protoc --proto_path=vendor.protogen  --proto_path api/auth/v1 \
+	protoc --proto_path api/auth/v1 \
 	--go_out=pkg/auth/v1 --go_opt=paths=source_relative \
 	--plugin=protoc-gen-go=bin/protoc-gen-go \
 	--go-grpc_out=pkg/auth/v1 --go-grpc_opt=paths=source_relative \
