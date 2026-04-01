@@ -10,7 +10,7 @@
 
 ## Технологический стек
 - **Go:** 1.24+
-- **gRPC + gRPC-Gateway** - API с автоматическим HTTP/JSON маппингом
+- **gRPC** - RPC API между сервисами
 - **Redis** - brute force protection
 - **OpenTelemetry (OTEL):**
   - **Metrics:** Prometheus → Grafana
@@ -24,7 +24,7 @@
 
 ```
 ┌─────────────────────────────────────┐
-│         Handler Layer               │  ← gRPC handlers + HTTP (gRPC-Gateway)
+│         Handler Layer               │  ← gRPC handlers
 ├─────────────────────────────────────┤
 │         Service Layer               │  ← Бизнес-логика (JWT generation, validation)
 ├─────────────────────────────────────┤
@@ -36,7 +36,6 @@
 
 - **Dependency Injection (DI) контейнер** - управление зависимостями между слоями
 - **Graceful Shutdown** - корректное завершение работы с закрытием соединений
-- **gRPC-Gateway** - автоматический маппинг HTTP/JSON → gRPC (определён в `.proto`)
 
 ## Структура проекта
 
@@ -134,16 +133,6 @@ RATE_LIMITER_PERIOD=1s
 - **GetRefreshToken** - обновление refresh токена (rotation)
 - **GetAccessToken** - получение access токена по refresh токену
 - **ValidateToken** - валидация JWT токена для других сервисов
-
-### HTTP Endpoints (gRPC-Gateway)
-
-HTTP запросы автоматически маппятся на gRPC методы через gRPC-Gateway. Маппинг определён в `.proto` файле с помощью аннотаций `google.api.http`.
-
-**Примеры HTTP эндпоинтов:**
-- `POST /api/v1/auth` → `Login`
-- `POST /api/v1/auth/refresh` → `GetRefreshToken`
-- `POST /api/v1/auth/access` → `GetAccessToken`
-- `POST /api/v1/auth/validate` → `ValidateToken`
 
 
 ## JWT Токены

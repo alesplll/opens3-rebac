@@ -58,7 +58,7 @@ PostgreSQL
 | **Metadata** | Python | `:50052` | Аня |
 | **Data Node** | Go | `:50053` | Илья |
 | **Auth** | Go | `:50050` | — |
-| **Users** | Go | `:50051` (gRPC) / `:8080` (HTTP) | — |
+| **Users** | Go | `:50051` (gRPC) | — |
 
 ---
 
@@ -86,17 +86,15 @@ gRPC API: `Check` · `WriteTuple` · `DeleteTuple` · `Read` · `HealthCheck`
 Сервис аутентификации пользователей. Выдаёт JWT refresh/access токены и валидирует их для других сервисов.
 
 ```
-Client → POST /api/v1/auth (email + password)
-           │
-           ├─ Users (gRPC ValidateCredentials) → OK
-           └─ выдаёт refresh token + access token
+Gateway → Auth.Login(email, password)
+            │
+            ├─ Users (gRPC ValidateCredentials) → OK
+            └─ выдаёт refresh token + access token
 ```
 
 Защита от перебора: Redis хранит счётчик неудачных попыток (`login_attempts:{email}`, TTL 30 с, лимит 6 попыток). Rate limiter: 30 req/s.
 
 gRPC API: `Login` · `GetRefreshToken` · `GetAccessToken` · `ValidateToken` · `HealthCheck`
-
-HTTP (gRPC-Gateway): `POST /api/v1/auth` · `POST /api/v1/auth/refresh` · `POST /api/v1/auth/access` · `POST /api/v1/auth/validate`
 
 Подробнее: [`services/auth/README.md`](services/auth/README.md)
 
@@ -115,8 +113,6 @@ Auth → ValidateCredentials(email, password) → Users
 При создании/удалении пользователя публикует события `user.created` / `user.deleted` в Kafka для каскадной обработки в других сервисах.
 
 gRPC API: `Create` · `Get` · `Delete` · `Update` · `ValidateCredentials` · `HealthCheck`
-
-HTTP (gRPC-Gateway): `POST /api/v1/user` · `GET /api/v1/user/{id}` · `PATCH /api/v1/user` · `DELETE /api/v1/user` · `POST /api/v1/user/validate`
 
 Подробнее: [`services/users/README.md`](services/users/README.md)
 

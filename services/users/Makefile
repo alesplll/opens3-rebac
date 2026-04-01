@@ -69,12 +69,6 @@ vendor-proto:
 			mv vendor.protogen/googleapis/google/api vendor.protogen/google &&\
 			rm -rf vendor.protogen/googleapis ;\
 		fi
-		@if [ ! -d vendor.protogen/protoc-gen-openapiv2 ]; then \
-			mkdir -p vendor.protogen/protoc-gen-openapiv2/options &&\
-			git clone https://github.com/grpc-ecosystem/grpc-gateway vendor.protogen/openapiv2 &&\
-			mv vendor.protogen/openapiv2/protoc-gen-openapiv2/options/*.proto vendor.protogen/protoc-gen-openapiv2/options &&\
-			rm -rf vendor.protogen/openapiv2 ;\
-		fi
 
 gen-cert:
 	openssl genrsa -out ca.key 4096

@@ -6,7 +6,6 @@ VENDOR_PROTO=$(CURDIR)/shared/vendor.protogen
 install-deps:
 	GOBIN=$(LOCAL_BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1
 	GOBIN=$(LOCAL_BIN) go install -mod=mod google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
-	GOBIN=$(LOCAL_BIN) go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.20.0
 
 vendor-proto:
 	@if [ ! -d $(VENDOR_PROTO)/google ]; then \
@@ -40,8 +39,6 @@ generate-auth:
 		--plugin=protoc-gen-go=$(LOCAL_BIN)/protoc-gen-go \
 		--go-grpc_out=shared/pkg/auth/v1 --go-grpc_opt=paths=source_relative \
 		--plugin=protoc-gen-go-grpc=$(LOCAL_BIN)/protoc-gen-go-grpc \
-		--grpc-gateway_out=shared/pkg/auth/v1 --grpc-gateway_opt=paths=source_relative \
-		--plugin=protoc-gen-grpc-gateway=$(LOCAL_BIN)/protoc-gen-grpc-gateway \
 		shared/api/auth/v1/auth.proto
 
 generate-storage:

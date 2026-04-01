@@ -3,40 +3,15 @@ syntax = "proto3";
 package auth_v1;
 
 import "google/protobuf/empty.proto";
-import "google/api/annotations.proto";
 
 option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/auth/v1;auth_v1";
 
 service AuthV1 {
-  rpc Login (LoginRequest) returns (LoginResponse){
-    option (google.api.http) = {
-      post: "/api/v1/auth"
-      body: "*"
-    };
-
-  };
-
-  rpc GetRefreshToken (GetRefreshTokenRequest) returns (GetRefreshTokenResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/auth/refresh"
-    };
-
-  }
-
-  rpc GetAccessToken (GetAccessTokenRequest) returns (GetAccessTokenResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/auth/access"
-      body: "*"
-    };
-  };
-
-  rpc ValidateToken (google.protobuf.Empty) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      post: "/api/v1/auth/validate"
-      body: "*"
-    };
-  };
-};
+  rpc Login (LoginRequest) returns (LoginResponse);
+  rpc GetRefreshToken (GetRefreshTokenRequest) returns (GetRefreshTokenResponse);
+  rpc GetAccessToken (GetAccessTokenRequest) returns (GetAccessTokenResponse);
+  rpc ValidateToken (google.protobuf.Empty) returns (google.protobuf.Empty);
+}
 
 
 message LoginRequest {
