@@ -40,10 +40,6 @@
 GRPC_HOST=0.0.0.0
 GRPC_PORT=50051
 
-# HTTP (gRPC-Gateway)
-HTTP_HOST=0.0.0.0
-HTTP_PORT=8080
-
 # Postgres
 PG_HOST=pg-user
 PG_PORT_INNER=5432
@@ -86,16 +82,6 @@ ACCESS_TOKEN_SECRET=access_secret
 - `Delete` - удаление пользователя (требует JWT)
 - `Update` - обновление пароля (требует JWT)
 - `ValidateCredentials` - валидация учетных данных для [Auth Service](https://github.com/WithSoull/AuthService)
-### HTTP Endpoints (gRPC-Gateway)
-HTTP запросы автоматически маппятся на gRPC методы через gRPC-Gateway. Маппинг определён в `.proto` файле с помощью аннотаций `google.api.http`.
-Примеры HTTP эндпоинтов:
-- `POST /api/v1/user` → `Create`
-- `GET /api/v1/user/{id}` → `Get`
-- `PATCH /api/v1/user` → `Update`
-- `POST /api/v1/user/update_password` → `UpdatePassword`
-- `DELETE /api/v1/user` → `DeleteUser`
-- `POST /api/v1/user/validate` → `ValidateCredentials`
-
 
 ## Авторизация
 Для операций, требующих авторизации (например, удаление пользователя), используется **JWT токен**. 

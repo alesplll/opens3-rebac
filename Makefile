@@ -29,8 +29,6 @@ generate-user:
 		--plugin=protoc-gen-go=$(LOCAL_BIN)/protoc-gen-go \
 		--go-grpc_out=shared/pkg/user/v1 --go-grpc_opt=paths=source_relative \
 		--plugin=protoc-gen-go-grpc=$(LOCAL_BIN)/protoc-gen-go-grpc \
-		--grpc-gateway_out=shared/pkg/user/v1 --grpc-gateway_opt=paths=source_relative \
-		--plugin=protoc-gen-grpc-gateway=$(LOCAL_BIN)/protoc-gen-grpc-gateway \
 		shared/api/user/v1/user.proto
 
 generate-auth:
