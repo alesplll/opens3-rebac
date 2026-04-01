@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white" alt="Go" />
+  <img src="https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go" alt="Go" />
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/gRPC-Protobuf-00C7B7?logo=google-cloud&logoColor=white" alt="gRPC" />
   <img src="https://img.shields.io/badge/S3-Compatible%20API-FF9900?logo=amazons3&logoColor=white" alt="S3" />
