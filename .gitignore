@@ -203,6 +203,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# wiki
+opens3-rebac.wiki/
+
 # Proto generation
 bin/
 shared/vendor.protogen/
