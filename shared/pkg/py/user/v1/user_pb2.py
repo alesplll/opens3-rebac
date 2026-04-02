@@ -25,10 +25,9 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from google.protobuf import wrappers_pb2 as google_dot_protobuf_dot_wrappers__pb2
-from google.api import annotations_pb2 as google_dot_api_dot_annotations__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nuser.proto\x12\x07user_v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1cgoogle/api/annotations.proto\"\'\n\x08UserInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\r\n\x05\x65mail\x18\x02 \x01(\t\"\x98\x01\n\x04User\x12\n\n\x02id\x18\x01 \x01(\t\x12$\n\tuser_info\x18\x02 \x01(\x0b\x32\x11.user_v1.UserInfo\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"a\n\rCreateRequest\x12$\n\tuser_info\x18\x01 \x01(\x0b\x32\x11.user_v1.UserInfo\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x18\n\x10password_confirm\x18\x03 \x01(\t\"\x1c\n\x0e\x43reateResponse\x12\n\n\x02id\x18\x01 \x01(\t\"\x18\n\nGetRequest\x12\n\n\x02id\x18\x01 \x01(\t\"*\n\x0bGetResponse\x12\x1b\n\x04user\x18\x01 \x01(\x0b\x32\r.user_v1.User\"y\n\rUpdateRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12*\n\x04name\x18\x02 \x01(\x0b\x32\x1c.google.protobuf.StringValue\x12+\n\x05\x65mail\x18\x03 \x01(\x0b\x32\x1c.google.protobuf.StringValue\"T\n\x15UpdatePasswordRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x18\n\x10password_confirm\x18\x03 \x01(\t\" \n\rDeleteRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"=\n\x1aValidateCredentialsRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\"=\n\x1bValidateCredentialsResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0f\n\x07user_id\x18\x02 \x01(\t2\xc5\x04\n\x06UserV1\x12R\n\x06\x43reate\x12\x16.user_v1.CreateRequest\x1a\x17.user_v1.CreateResponse\"\x17\x82\xd3\xe4\x93\x02\x11\"\x0c/api/v1/user:\x01*\x12K\n\x03Get\x12\x13.user_v1.GetRequest\x1a\x14.user_v1.GetResponse\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/api/v1/user/{id}\x12Q\n\x06Update\x12\x16.user_v1.UpdateRequest\x1a\x16.google.protobuf.Empty\"\x17\x82\xd3\xe4\x93\x02\x11\x32\x0c/api/v1/user:\x01*\x12q\n\x0eUpdatePassword\x12\x1e.user_v1.UpdatePasswordRequest\x1a\x16.google.protobuf.Empty\"\'\x82\xd3\xe4\x93\x02!\"\x1c/api/v1/user/update_password:\x01*\x12N\n\x06\x44\x65lete\x12\x16.user_v1.DeleteRequest\x1a\x16.google.protobuf.Empty\"\x14\x82\xd3\xe4\x93\x02\x0e*\x0c/api/v1/user\x12\x83\x01\n\x13ValidateCredentials\x12#.user_v1.ValidateCredentialsRequest\x1a$.user_v1.ValidateCredentialsResponse\"!\x82\xd3\xe4\x93\x02\x1b\"\x16/user/v1/user/validate:\x01*B@Z>github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1;user_v1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nuser.proto\x12\x07user_v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1egoogle/protobuf/wrappers.proto\"\'\n\x08UserInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\r\n\x05\x65mail\x18\x02 \x01(\t\"\x98\x01\n\x04User\x12\n\n\x02id\x18\x01 \x01(\t\x12$\n\tuser_info\x18\x02 \x01(\x0b\x32\x11.user_v1.UserInfo\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"a\n\rCreateRequest\x12$\n\tuser_info\x18\x01 \x01(\x0b\x32\x11.user_v1.UserInfo\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x18\n\x10password_confirm\x18\x03 \x01(\t\"\x1c\n\x0e\x43reateResponse\x12\n\n\x02id\x18\x01 \x01(\t\"\x18\n\nGetRequest\x12\n\n\x02id\x18\x01 \x01(\t\"*\n\x0bGetResponse\x12\x1b\n\x04user\x18\x01 \x01(\x0b\x32\r.user_v1.User\"y\n\rUpdateRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12*\n\x04name\x18\x02 \x01(\x0b\x32\x1c.google.protobuf.StringValue\x12+\n\x05\x65mail\x18\x03 \x01(\x0b\x32\x1c.google.protobuf.StringValue\"T\n\x15UpdatePasswordRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x18\n\x10password_confirm\x18\x03 \x01(\t\" \n\rDeleteRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"=\n\x1aValidateCredentialsRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\"=\n\x1bValidateCredentialsResponse\x12\r\n\x05valid\x18\x01 \x01(\x08\x12\x0f\n\x07user_id\x18\x02 \x01(\t2\x95\x03\n\x06UserV1\x12\x39\n\x06\x43reate\x12\x16.user_v1.CreateRequest\x1a\x17.user_v1.CreateResponse\x12\x30\n\x03Get\x12\x13.user_v1.GetRequest\x1a\x14.user_v1.GetResponse\x12\x38\n\x06Update\x12\x16.user_v1.UpdateRequest\x1a\x16.google.protobuf.Empty\x12H\n\x0eUpdatePassword\x12\x1e.user_v1.UpdatePasswordRequest\x1a\x16.google.protobuf.Empty\x12\x38\n\x06\x44\x65lete\x12\x16.user_v1.DeleteRequest\x1a\x16.google.protobuf.Empty\x12`\n\x13ValidateCredentials\x12#.user_v1.ValidateCredentialsRequest\x1a$.user_v1.ValidateCredentialsResponseB@Z>github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1;user_v1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,40 +35,28 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'user_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z>github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1;user_v1'
-  _globals['_USERV1'].methods_by_name['Create']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['Create']._serialized_options = b'\202\323\344\223\002\021\"\014/api/v1/user:\001*'
-  _globals['_USERV1'].methods_by_name['Get']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['Get']._serialized_options = b'\202\323\344\223\002\023\022\021/api/v1/user/{id}'
-  _globals['_USERV1'].methods_by_name['Update']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['Update']._serialized_options = b'\202\323\344\223\002\0212\014/api/v1/user:\001*'
-  _globals['_USERV1'].methods_by_name['UpdatePassword']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['UpdatePassword']._serialized_options = b'\202\323\344\223\002!\"\034/api/v1/user/update_password:\001*'
-  _globals['_USERV1'].methods_by_name['Delete']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['Delete']._serialized_options = b'\202\323\344\223\002\016*\014/api/v1/user'
-  _globals['_USERV1'].methods_by_name['ValidateCredentials']._loaded_options = None
-  _globals['_USERV1'].methods_by_name['ValidateCredentials']._serialized_options = b'\202\323\344\223\002\033\"\026/user/v1/user/validate:\001*'
-  _globals['_USERINFO']._serialized_start=147
-  _globals['_USERINFO']._serialized_end=186
-  _globals['_USER']._serialized_start=189
-  _globals['_USER']._serialized_end=341
-  _globals['_CREATEREQUEST']._serialized_start=343
-  _globals['_CREATEREQUEST']._serialized_end=440
-  _globals['_CREATERESPONSE']._serialized_start=442
-  _globals['_CREATERESPONSE']._serialized_end=470
-  _globals['_GETREQUEST']._serialized_start=472
-  _globals['_GETREQUEST']._serialized_end=496
-  _globals['_GETRESPONSE']._serialized_start=498
-  _globals['_GETRESPONSE']._serialized_end=540
-  _globals['_UPDATEREQUEST']._serialized_start=542
-  _globals['_UPDATEREQUEST']._serialized_end=663
-  _globals['_UPDATEPASSWORDREQUEST']._serialized_start=665
-  _globals['_UPDATEPASSWORDREQUEST']._serialized_end=749
-  _globals['_DELETEREQUEST']._serialized_start=751
-  _globals['_DELETEREQUEST']._serialized_end=783
-  _globals['_VALIDATECREDENTIALSREQUEST']._serialized_start=785
-  _globals['_VALIDATECREDENTIALSREQUEST']._serialized_end=846
-  _globals['_VALIDATECREDENTIALSRESPONSE']._serialized_start=848
-  _globals['_VALIDATECREDENTIALSRESPONSE']._serialized_end=909
-  _globals['_USERV1']._serialized_start=912
-  _globals['_USERV1']._serialized_end=1493
+  _globals['_USERINFO']._serialized_start=117
+  _globals['_USERINFO']._serialized_end=156
+  _globals['_USER']._serialized_start=159
+  _globals['_USER']._serialized_end=311
+  _globals['_CREATEREQUEST']._serialized_start=313
+  _globals['_CREATEREQUEST']._serialized_end=410
+  _globals['_CREATERESPONSE']._serialized_start=412
+  _globals['_CREATERESPONSE']._serialized_end=440
+  _globals['_GETREQUEST']._serialized_start=442
+  _globals['_GETREQUEST']._serialized_end=466
+  _globals['_GETRESPONSE']._serialized_start=468
+  _globals['_GETRESPONSE']._serialized_end=510
+  _globals['_UPDATEREQUEST']._serialized_start=512
+  _globals['_UPDATEREQUEST']._serialized_end=633
+  _globals['_UPDATEPASSWORDREQUEST']._serialized_start=635
+  _globals['_UPDATEPASSWORDREQUEST']._serialized_end=719
+  _globals['_DELETEREQUEST']._serialized_start=721
+  _globals['_DELETEREQUEST']._serialized_end=753
+  _globals['_VALIDATECREDENTIALSREQUEST']._serialized_start=755
+  _globals['_VALIDATECREDENTIALSREQUEST']._serialized_end=816
+  _globals['_VALIDATECREDENTIALSRESPONSE']._serialized_start=818
+  _globals['_VALIDATECREDENTIALSRESPONSE']._serialized_end=879
+  _globals['_USERV1']._serialized_start=882
+  _globals['_USERV1']._serialized_end=1287
 # @@protoc_insertion_point(module_scope)
