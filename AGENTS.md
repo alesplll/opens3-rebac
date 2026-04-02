@@ -26,6 +26,28 @@ Do not hand-edit generated protobuf files under `shared/pkg/`; regenerate them i
 
 Keep Go tests close to the package they verify, using `*_test.go`. Current examples include handler and service tests under `services/users/internal/.../tests`. For AuthZ, use `tests/unit/test_*.py` for isolated logic and `tests/integration/test_*.py` for Neo4j-dependent flows. Mark integration tests with `@pytest.mark.integration`.
 
+### Documentation Discipline
+
+Documentation must be updated in the same change whenever the code changes the developer workflow or runtime expectations.
+
+Update documentation when the change affects:
+
+- project startup or local run flow
+- Docker Compose usage, build contexts, or service dependencies
+- ports, env vars, credentials, or required local tools
+- `Makefile` commands, test commands, or generation commands
+- repository structure that is referenced from onboarding or README
+- first-run experience for a new contributor
+
+At minimum, check whether the change also requires updates to:
+
+- `README.md`
+- `GETTING_STARTED.md`
+- `AGENTS.md`
+- service-level README files under `services/*/README.md`
+
+If a document is now partially outdated but a full rewrite is unnecessary, prefer a small accurate update over leaving stale instructions in place.
+
 ### Go Test Style
 
 The rules below apply specifically to Go unit tests:
