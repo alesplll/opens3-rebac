@@ -25,6 +25,21 @@
 
 Клиенты работают через стандартный S3 API (boto3, aws-cli, любой S3 SDK). Внутри — четыре микросервиса, общающихся по gRPC.
 
+## Быстрый старт
+
+Если у вас установлен только Docker и вы хотите просто поднять локально всё, что уже реализовано, используйте пошаговую инструкцию:
+
+- [GETTING_STARTED.md](GETTING_STARTED.md)
+
+Короткая версия:
+
+```bash
+cd /путь/до/opens3-rebac
+docker compose --profile services up --build -d
+```
+
+Важно: команды нужно запускать именно из корня репозитория, где лежит `docker-compose.yml`.
+
 ---
 
 ## Архитектура
@@ -144,30 +159,23 @@ opens3-rebac/
 
 ## Запуск
 
-### Требования
+Для первого локального запуска используйте пошаговую инструкцию:
 
-- Docker & Docker Compose
-- [`grpcurl`](https://github.com/fullstorydev/grpcurl) для ручного тестирования
+- [GETTING_STARTED.md](/Users/grishinid/home/01_Coding/06_pets/opens3-rebac/GETTING_STARTED.md)
+- [GETTING_STARTED.md](GETTING_STARTED.md)
 
-### Поднять всё доступное
-
-```bash
-make up-services     # инфраструктура + запущенные сервисы (authz, storage, auth, users)
-make down            # остановить всё
-make down-volumes    # остановить + удалить данные (neo4j, postgres, redis)
-make rebuild         # пересобрать образы без кэша и перезапустить
-```
-
-> Gateway и Metadata пока не реализованы — сквозного S3 flow нет.
-
-### Только инфраструктура + один сервис
+Короткие команды через `make`:
 
 ```bash
-docker compose up neo4j redis kafka zookeeper -d
-docker compose --profile services up authz -d
+make up-services
+make down
+make down-volumes
+make rebuild
 ```
 
-### Observability (Jaeger, Prometheus, Grafana, Kibana)
+> Gateway и Metadata пока не реализованы, поэтому полного S3 flow ещё нет.
+
+### Observability
 
 ```bash
 make up-observability
