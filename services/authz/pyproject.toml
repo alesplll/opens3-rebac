@@ -27,9 +27,6 @@ rebac-server = "entrypoints.server.main:run_server"
 [tool.hatch.build.targets.wheel]
 packages = ["internal", "entrypoints"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"shared" = "shared"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "../.."]
