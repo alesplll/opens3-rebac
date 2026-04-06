@@ -88,11 +88,11 @@ message StoreObjectResponse {
 
 message RetrieveObjectRequest {
   // UUID blob'а, полученный из Metadata GetObjectMeta.
-  string blob_id     = 1;
-  // Начальный байт (включительно) для range-запроса. 0 = начало файла.
-  int64  range_start = 2;
-  // Конечный байт (не включается в ответ) для range-запроса. -1 = конец файла.
-  int64  range_end   = 3;
+  string blob_id = 1;
+  // Смещение от начала файла в байтах. 0 = читать с начала файла.
+  int64  offset  = 2;
+  // Сколько байт вернуть. 0 = читать до конца файла начиная с offset.
+  int64  length  = 3;
 }
 
 // RetrieveObjectResponse — один чанк стримингового ответа.
