@@ -5,13 +5,13 @@ import (
 	"io"
 )
 
-func (s *storageService) RetrieveObject(ctx context.Context, blobID string, rangeStart, rangeEnd int64) (io.ReadCloser, int64, error) {
-	normalizedRange := normalizeRange(rangeStart, rangeEnd)
-	if normalizedRange.full {
+func (s *storageService) RetrieveObject(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error) {
+	normalized := normalizeRange(offset, length)
+	if normalized.full {
 		return s.repo.RetrieveBlob(ctx, blobID)
 	}
 
-	return s.repo.RetrieveBlobRange(ctx, blobID, normalizedRange.offset, normalizedRange.length)
+	return s.repo.RetrieveBlobRange(ctx, blobID, normalized.offset, normalized.length)
 }
 
 type normalizedRange struct {
@@ -20,43 +20,29 @@ type normalizedRange struct {
 	full   bool
 }
 
-func normalizeRange(rangeStart, rangeEnd int64) normalizedRange {
-	if rangeStart < 0 {
-		rangeStart = 0
+func normalizeRange(offset, length int64) normalizedRange {
+	if offset < 0 {
+		offset = 0
 	}
 
-	// Backward compatibility with the current implementation plan:
-	// (0, 0) historically means "read full blob". Internally we normalize
-	// that to a full-read branch before repository execution.
-	if rangeStart == 0 && rangeEnd == 0 {
+	if offset == 0 && length == 0 {
 		return normalizedRange{full: true}
 	}
 
-	if rangeEnd < -1 {
-		rangeEnd = -1
+	if length < 0 {
+		length = 0
 	}
 
-	if rangeStart == 0 && rangeEnd == -1 {
-		return normalizedRange{full: true}
-	}
-
-	if rangeEnd == -1 {
+	if length == 0 {
 		return normalizedRange{
-			offset: rangeStart,
+			offset: offset,
 			length: maxInt64,
 		}
 	}
 
-	if rangeEnd < rangeStart {
-		return normalizedRange{
-			offset: rangeStart,
-			length: 0,
-		}
-	}
-
 	return normalizedRange{
-		offset: rangeStart,
-		length: rangeEnd - rangeStart + 1,
+		offset: offset,
+		length: length,
 	}
 }
 

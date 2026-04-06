@@ -10,7 +10,7 @@ import (
 const chunkSize = 8 * 1024 * 1024 // 8 MB
 
 func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.DataStorageService_RetrieveObjectServer) error {
-	reader, totalSize, err := h.service.RetrieveObject(stream.Context(), req.GetBlobId(), req.GetRangeStart(), req.GetRangeEnd())
+	reader, totalSize, err := h.service.RetrieveObject(stream.Context(), req.GetBlobId(), req.GetOffset(), req.GetLength())
 	if err != nil {
 		return err
 	}
