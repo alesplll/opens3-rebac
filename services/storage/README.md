@@ -161,7 +161,7 @@ Gateway                          Storage
 ```
 Gateway                          Storage
   │                                │
-  │──── RetrieveObjectRequest ───► │  (blob_id, range_start, range_end)
+  │──── RetrieveObjectRequest ───► │  (blob_id, offset, length)
   │                                │
   │◄─── RetrieveObjectResponse ─── │  (data + total_size в первом чанке)
   │◄─── RetrieveObjectResponse ─── │  (data)
