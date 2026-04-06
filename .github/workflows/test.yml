@@ -16,8 +16,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [auth, users]
+        service: [auth, users, storage]
+        include:
+          - service: storage
+            optional: true
     name: test (${{ matrix.service }})
+    continue-on-error: ${{ matrix.optional || false }} # TODO: remove optional for storage once tests are stable
     steps:
       - uses: actions/checkout@v4
 

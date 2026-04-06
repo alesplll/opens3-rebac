@@ -432,6 +432,9 @@ go.work
 
 ## TODO
 
+Подробный план реализации с описанием всех фаз, взаимодействий и подводных камней:
+[docs/storage-service-implementation-plan.md](../../docs/storage-service-implementation-plan.md)
+
 - [ ] Реализовать реальное чтение/запись на файловую систему в Repository
 - [ ] Подсчёт MD5 при записи blob
 - [ ] Range-запросы при чтении (RetrieveObject)
