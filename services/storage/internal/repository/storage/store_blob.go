@@ -38,10 +38,6 @@ func (r *repo) StoreBlob(ctx context.Context, reader io.Reader) (*model.BlobMeta
 		return nil, fmt.Errorf("create temp blob file: %w", err)
 	}
 
-	defer func() {
-		_ = file.Close()
-	}()
-
 	hasher := md5.New()
 	written, copyErr := io.Copy(io.MultiWriter(file, hasher), newContextReader(ctx, reader))
 	if copyErr != nil {
