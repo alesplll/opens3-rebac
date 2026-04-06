@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"errors"
+	"io"
+
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
@@ -31,7 +34,11 @@ func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.Da
 			}
 		}
 		if readErr != nil {
-			break
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+
+			return readErr
 		}
 	}
 

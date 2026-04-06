@@ -122,6 +122,9 @@ func (a *App) initGRPCServer(ctx context.Context) error {
 				tracing.UnaryServerInterceptor(config.AppConfig().Tracing.ServiceName()),
 			),
 		),
+		grpc.StreamInterceptor(
+			validationInterceptor.ErrorCodesStreamInterceptor(logger.Logger()),
+		),
 	)
 
 	closer.AddNamed("GRPC server", func(ctx context.Context) error {
