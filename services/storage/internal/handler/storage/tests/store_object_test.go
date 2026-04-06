@@ -92,7 +92,7 @@ func (s testStorageService) StoreObject(ctx context.Context, reader io.Reader, s
 	return s.storeObjectFn(ctx, reader, size, contentType)
 }
 
-func (s testStorageService) RetrieveObject(ctx context.Context, blobID string, rangeStart, rangeEnd int64) (io.ReadCloser, int64, error) {
+func (s testStorageService) RetrieveObject(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error) {
 	panic("unexpected call")
 }
 

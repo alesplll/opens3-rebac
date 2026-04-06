@@ -21,7 +21,7 @@ func TestRetrieveObject_ReturnsReadError(t *testing.T) {
 	readErr := errors.New("read failed")
 
 	svc := testRetrieveStorageService{
-		retrieveObjectFn: func(ctx context.Context, blobID string, rangeStart, rangeEnd int64) (io.ReadCloser, int64, error) {
+		retrieveObjectFn: func(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error) {
 			return &failingReadCloser{
 				chunks: [][]byte{[]byte("hello")},
 				err:    readErr,
@@ -42,7 +42,7 @@ func TestRetrieveObject_ReturnsReadError(t *testing.T) {
 }
 
 type testRetrieveStorageService struct {
-	retrieveObjectFn func(ctx context.Context, blobID string, rangeStart, rangeEnd int64) (io.ReadCloser, int64, error)
+	retrieveObjectFn func(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error)
 }
 
 var _ service.StorageService = testRetrieveStorageService{}
@@ -51,11 +51,11 @@ func (s testRetrieveStorageService) StoreObject(ctx context.Context, reader io.R
 	panic("unexpected call")
 }
 
-func (s testRetrieveStorageService) RetrieveObject(ctx context.Context, blobID string, rangeStart, rangeEnd int64) (io.ReadCloser, int64, error) {
+func (s testRetrieveStorageService) RetrieveObject(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error) {
 	if s.retrieveObjectFn == nil {
 		panic("unexpected call")
 	}
-	return s.retrieveObjectFn(ctx, blobID, rangeStart, rangeEnd)
+	return s.retrieveObjectFn(ctx, blobID, offset, length)
 }
 
 func (s testRetrieveStorageService) DeleteObject(ctx context.Context, blobID string) error {
