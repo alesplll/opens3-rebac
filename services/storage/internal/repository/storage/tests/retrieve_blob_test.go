@@ -86,6 +86,21 @@ func TestRetrieveBlob_RangeOffsetPastEnd(t *testing.T) {
 	require.Empty(t, actual)
 }
 
+func TestRetrieveBlobRange_OffsetZeroFullLength(t *testing.T) {
+	t.Parallel()
+
+	repository, blobID, content := prepareStoredBlob(t)
+
+	reader, totalSize, err := repository.RetrieveBlobRange(context.Background(), blobID, 0, int64(len(content)))
+	require.NoError(t, err)
+	require.Equal(t, int64(len(content)), totalSize)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	actual, readErr := io.ReadAll(reader)
+	require.NoError(t, readErr)
+	require.Equal(t, content, actual)
+}
+
 func prepareStoredBlob(t *testing.T) (repository.StorageRepository, string, []byte) {
 	t.Helper()
 
