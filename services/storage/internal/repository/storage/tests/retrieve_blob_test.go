@@ -17,7 +17,7 @@ func TestRetrieveBlob_Success(t *testing.T) {
 
 	repository, blobID, content := prepareStoredBlob(t)
 
-	reader, totalSize, err := repository.RetrieveBlob(context.Background(), blobID, 0, 0)
+	reader, totalSize, err := repository.RetrieveBlob(context.Background(), blobID)
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), totalSize)
 	t.Cleanup(func() { _ = reader.Close() })
@@ -35,7 +35,7 @@ func TestRetrieveBlob_NotFound(t *testing.T) {
 		multipartDir: t.TempDir(),
 	})
 
-	reader, totalSize, err := repository.RetrieveBlob(context.Background(), "missing-blob", 0, 0)
+	reader, totalSize, err := repository.RetrieveBlob(context.Background(), "missing-blob")
 	require.ErrorIs(t, err, domainerrors.ErrBlobNotFound)
 	require.Nil(t, reader)
 	require.Zero(t, totalSize)
@@ -46,7 +46,7 @@ func TestRetrieveBlob_Range(t *testing.T) {
 
 	repository, blobID, content := prepareStoredBlob(t)
 
-	reader, totalSize, err := repository.RetrieveBlob(context.Background(), blobID, 4, 8)
+	reader, totalSize, err := repository.RetrieveBlobRange(context.Background(), blobID, 4, 5)
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), totalSize)
 	t.Cleanup(func() { _ = reader.Close() })
@@ -61,7 +61,7 @@ func TestRetrieveBlob_RangePastEnd(t *testing.T) {
 
 	repository, blobID, content := prepareStoredBlob(t)
 
-	reader, totalSize, err := repository.RetrieveBlob(context.Background(), blobID, 10, 1000)
+	reader, totalSize, err := repository.RetrieveBlobRange(context.Background(), blobID, 10, 1000)
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), totalSize)
 	t.Cleanup(func() { _ = reader.Close() })
@@ -69,6 +69,21 @@ func TestRetrieveBlob_RangePastEnd(t *testing.T) {
 	actual, readErr := io.ReadAll(reader)
 	require.NoError(t, readErr)
 	require.Equal(t, content[10:], actual)
+}
+
+func TestRetrieveBlob_RangeOffsetPastEnd(t *testing.T) {
+	t.Parallel()
+
+	repository, blobID, content := prepareStoredBlob(t)
+
+	reader, totalSize, err := repository.RetrieveBlobRange(context.Background(), blobID, int64(len(content)+10), 100)
+	require.NoError(t, err)
+	require.Equal(t, int64(len(content)), totalSize)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	actual, readErr := io.ReadAll(reader)
+	require.NoError(t, readErr)
+	require.Empty(t, actual)
 }
 
 func prepareStoredBlob(t *testing.T) (repository.StorageRepository, string, []byte) {

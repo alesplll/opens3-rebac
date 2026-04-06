@@ -32,11 +32,17 @@ type StorageRepositoryMock struct {
 	beforeHealthCheckCounter uint64
 	HealthCheckMock          mStorageRepositoryMockHealthCheck
 
-	funcRetrieveBlob          func(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64) (r1 io.ReadCloser, i1 int64, err error)
-	inspectFuncRetrieveBlob   func(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64)
+	funcRetrieveBlob          func(ctx context.Context, blobID string) (r1 io.ReadCloser, i1 int64, err error)
+	inspectFuncRetrieveBlob   func(ctx context.Context, blobID string)
 	afterRetrieveBlobCounter  uint64
 	beforeRetrieveBlobCounter uint64
 	RetrieveBlobMock          mStorageRepositoryMockRetrieveBlob
+
+	funcRetrieveBlobRange          func(ctx context.Context, blobID string, offset int64, length int64) (r1 io.ReadCloser, i1 int64, err error)
+	inspectFuncRetrieveBlobRange   func(ctx context.Context, blobID string, offset int64, length int64)
+	afterRetrieveBlobRangeCounter  uint64
+	beforeRetrieveBlobRangeCounter uint64
+	RetrieveBlobRangeMock          mStorageRepositoryMockRetrieveBlobRange
 
 	funcStoreBlob          func(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error)
 	inspectFuncStoreBlob   func(ctx context.Context, reader io.Reader)
@@ -61,6 +67,9 @@ func NewStorageRepositoryMock(t minimock.Tester) *StorageRepositoryMock {
 
 	m.RetrieveBlobMock = mStorageRepositoryMockRetrieveBlob{mock: m}
 	m.RetrieveBlobMock.callArgs = []*StorageRepositoryMockRetrieveBlobParams{}
+
+	m.RetrieveBlobRangeMock = mStorageRepositoryMockRetrieveBlobRange{mock: m}
+	m.RetrieveBlobRangeMock.callArgs = []*StorageRepositoryMockRetrieveBlobRangeParams{}
 
 	m.StoreBlobMock = mStorageRepositoryMockStoreBlob{mock: m}
 	m.StoreBlobMock.callArgs = []*StorageRepositoryMockStoreBlobParams{}
@@ -520,10 +529,8 @@ type StorageRepositoryMockRetrieveBlobExpectation struct {
 
 // StorageRepositoryMockRetrieveBlobParams contains parameters of the StorageRepository.RetrieveBlob
 type StorageRepositoryMockRetrieveBlobParams struct {
-	ctx        context.Context
-	blobID     string
-	rangeStart int64
-	rangeEnd   int64
+	ctx    context.Context
+	blobID string
 }
 
 // StorageRepositoryMockRetrieveBlobResults contains results of the StorageRepository.RetrieveBlob
@@ -534,7 +541,7 @@ type StorageRepositoryMockRetrieveBlobResults struct {
 }
 
 // Expect sets up expected params for StorageRepository.RetrieveBlob
-func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Expect(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64) *mStorageRepositoryMockRetrieveBlob {
+func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Expect(ctx context.Context, blobID string) *mStorageRepositoryMockRetrieveBlob {
 	if mmRetrieveBlob.mock.funcRetrieveBlob != nil {
 		mmRetrieveBlob.mock.t.Fatalf("StorageRepositoryMock.RetrieveBlob mock is already set by Set")
 	}
@@ -543,7 +550,7 @@ func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Expect(ctx context.Con
 		mmRetrieveBlob.defaultExpectation = &StorageRepositoryMockRetrieveBlobExpectation{}
 	}
 
-	mmRetrieveBlob.defaultExpectation.params = &StorageRepositoryMockRetrieveBlobParams{ctx, blobID, rangeStart, rangeEnd}
+	mmRetrieveBlob.defaultExpectation.params = &StorageRepositoryMockRetrieveBlobParams{ctx, blobID}
 	for _, e := range mmRetrieveBlob.expectations {
 		if minimock.Equal(e.params, mmRetrieveBlob.defaultExpectation.params) {
 			mmRetrieveBlob.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmRetrieveBlob.defaultExpectation.params)
@@ -554,7 +561,7 @@ func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Expect(ctx context.Con
 }
 
 // Inspect accepts an inspector function that has same arguments as the StorageRepository.RetrieveBlob
-func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Inspect(f func(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64)) *mStorageRepositoryMockRetrieveBlob {
+func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Inspect(f func(ctx context.Context, blobID string)) *mStorageRepositoryMockRetrieveBlob {
 	if mmRetrieveBlob.mock.inspectFuncRetrieveBlob != nil {
 		mmRetrieveBlob.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.RetrieveBlob")
 	}
@@ -578,7 +585,7 @@ func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Return(r1 io.ReadClose
 }
 
 // Set uses given function f to mock the StorageRepository.RetrieveBlob method
-func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Set(f func(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64) (r1 io.ReadCloser, i1 int64, err error)) *StorageRepositoryMock {
+func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Set(f func(ctx context.Context, blobID string) (r1 io.ReadCloser, i1 int64, err error)) *StorageRepositoryMock {
 	if mmRetrieveBlob.defaultExpectation != nil {
 		mmRetrieveBlob.mock.t.Fatalf("Default expectation is already set for the StorageRepository.RetrieveBlob method")
 	}
@@ -593,14 +600,14 @@ func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) Set(f func(ctx context
 
 // When sets expectation for the StorageRepository.RetrieveBlob which will trigger the result defined by the following
 // Then helper
-func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) When(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64) *StorageRepositoryMockRetrieveBlobExpectation {
+func (mmRetrieveBlob *mStorageRepositoryMockRetrieveBlob) When(ctx context.Context, blobID string) *StorageRepositoryMockRetrieveBlobExpectation {
 	if mmRetrieveBlob.mock.funcRetrieveBlob != nil {
 		mmRetrieveBlob.mock.t.Fatalf("StorageRepositoryMock.RetrieveBlob mock is already set by Set")
 	}
 
 	expectation := &StorageRepositoryMockRetrieveBlobExpectation{
 		mock:   mmRetrieveBlob.mock,
-		params: &StorageRepositoryMockRetrieveBlobParams{ctx, blobID, rangeStart, rangeEnd},
+		params: &StorageRepositoryMockRetrieveBlobParams{ctx, blobID},
 	}
 	mmRetrieveBlob.expectations = append(mmRetrieveBlob.expectations, expectation)
 	return expectation
@@ -613,15 +620,15 @@ func (e *StorageRepositoryMockRetrieveBlobExpectation) Then(r1 io.ReadCloser, i1
 }
 
 // RetrieveBlob implements repository.StorageRepository
-func (mmRetrieveBlob *StorageRepositoryMock) RetrieveBlob(ctx context.Context, blobID string, rangeStart int64, rangeEnd int64) (r1 io.ReadCloser, i1 int64, err error) {
+func (mmRetrieveBlob *StorageRepositoryMock) RetrieveBlob(ctx context.Context, blobID string) (r1 io.ReadCloser, i1 int64, err error) {
 	mm_atomic.AddUint64(&mmRetrieveBlob.beforeRetrieveBlobCounter, 1)
 	defer mm_atomic.AddUint64(&mmRetrieveBlob.afterRetrieveBlobCounter, 1)
 
 	if mmRetrieveBlob.inspectFuncRetrieveBlob != nil {
-		mmRetrieveBlob.inspectFuncRetrieveBlob(ctx, blobID, rangeStart, rangeEnd)
+		mmRetrieveBlob.inspectFuncRetrieveBlob(ctx, blobID)
 	}
 
-	mm_params := StorageRepositoryMockRetrieveBlobParams{ctx, blobID, rangeStart, rangeEnd}
+	mm_params := StorageRepositoryMockRetrieveBlobParams{ctx, blobID}
 
 	// Record call args
 	mmRetrieveBlob.RetrieveBlobMock.mutex.Lock()
@@ -638,7 +645,7 @@ func (mmRetrieveBlob *StorageRepositoryMock) RetrieveBlob(ctx context.Context, b
 	if mmRetrieveBlob.RetrieveBlobMock.defaultExpectation != nil {
 		mm_atomic.AddUint64(&mmRetrieveBlob.RetrieveBlobMock.defaultExpectation.Counter, 1)
 		mm_want := mmRetrieveBlob.RetrieveBlobMock.defaultExpectation.params
-		mm_got := StorageRepositoryMockRetrieveBlobParams{ctx, blobID, rangeStart, rangeEnd}
+		mm_got := StorageRepositoryMockRetrieveBlobParams{ctx, blobID}
 		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
 			mmRetrieveBlob.t.Errorf("StorageRepositoryMock.RetrieveBlob got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
 		}
@@ -650,9 +657,9 @@ func (mmRetrieveBlob *StorageRepositoryMock) RetrieveBlob(ctx context.Context, b
 		return (*mm_results).r1, (*mm_results).i1, (*mm_results).err
 	}
 	if mmRetrieveBlob.funcRetrieveBlob != nil {
-		return mmRetrieveBlob.funcRetrieveBlob(ctx, blobID, rangeStart, rangeEnd)
+		return mmRetrieveBlob.funcRetrieveBlob(ctx, blobID)
 	}
-	mmRetrieveBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.RetrieveBlob. %v %v %v %v", ctx, blobID, rangeStart, rangeEnd)
+	mmRetrieveBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.RetrieveBlob. %v %v", ctx, blobID)
 	return
 }
 
@@ -718,6 +725,226 @@ func (m *StorageRepositoryMock) MinimockRetrieveBlobInspect() {
 	// if func was set then invocations count should be greater than zero
 	if m.funcRetrieveBlob != nil && mm_atomic.LoadUint64(&m.afterRetrieveBlobCounter) < 1 {
 		m.t.Error("Expected call to StorageRepositoryMock.RetrieveBlob")
+	}
+}
+
+type mStorageRepositoryMockRetrieveBlobRange struct {
+	mock               *StorageRepositoryMock
+	defaultExpectation *StorageRepositoryMockRetrieveBlobRangeExpectation
+	expectations       []*StorageRepositoryMockRetrieveBlobRangeExpectation
+
+	callArgs []*StorageRepositoryMockRetrieveBlobRangeParams
+	mutex    sync.RWMutex
+}
+
+// StorageRepositoryMockRetrieveBlobRangeExpectation specifies expectation struct of the StorageRepository.RetrieveBlobRange
+type StorageRepositoryMockRetrieveBlobRangeExpectation struct {
+	mock    *StorageRepositoryMock
+	params  *StorageRepositoryMockRetrieveBlobRangeParams
+	results *StorageRepositoryMockRetrieveBlobRangeResults
+	Counter uint64
+}
+
+// StorageRepositoryMockRetrieveBlobRangeParams contains parameters of the StorageRepository.RetrieveBlobRange
+type StorageRepositoryMockRetrieveBlobRangeParams struct {
+	ctx    context.Context
+	blobID string
+	offset int64
+	length int64
+}
+
+// StorageRepositoryMockRetrieveBlobRangeResults contains results of the StorageRepository.RetrieveBlobRange
+type StorageRepositoryMockRetrieveBlobRangeResults struct {
+	r1  io.ReadCloser
+	i1  int64
+	err error
+}
+
+// Expect sets up expected params for StorageRepository.RetrieveBlobRange
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) Expect(ctx context.Context, blobID string, offset int64, length int64) *mStorageRepositoryMockRetrieveBlobRange {
+	if mmRetrieveBlobRange.mock.funcRetrieveBlobRange != nil {
+		mmRetrieveBlobRange.mock.t.Fatalf("StorageRepositoryMock.RetrieveBlobRange mock is already set by Set")
+	}
+
+	if mmRetrieveBlobRange.defaultExpectation == nil {
+		mmRetrieveBlobRange.defaultExpectation = &StorageRepositoryMockRetrieveBlobRangeExpectation{}
+	}
+
+	mmRetrieveBlobRange.defaultExpectation.params = &StorageRepositoryMockRetrieveBlobRangeParams{ctx, blobID, offset, length}
+	for _, e := range mmRetrieveBlobRange.expectations {
+		if minimock.Equal(e.params, mmRetrieveBlobRange.defaultExpectation.params) {
+			mmRetrieveBlobRange.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmRetrieveBlobRange.defaultExpectation.params)
+		}
+	}
+
+	return mmRetrieveBlobRange
+}
+
+// Inspect accepts an inspector function that has same arguments as the StorageRepository.RetrieveBlobRange
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) Inspect(f func(ctx context.Context, blobID string, offset int64, length int64)) *mStorageRepositoryMockRetrieveBlobRange {
+	if mmRetrieveBlobRange.mock.inspectFuncRetrieveBlobRange != nil {
+		mmRetrieveBlobRange.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.RetrieveBlobRange")
+	}
+
+	mmRetrieveBlobRange.mock.inspectFuncRetrieveBlobRange = f
+
+	return mmRetrieveBlobRange
+}
+
+// Return sets up results that will be returned by StorageRepository.RetrieveBlobRange
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) Return(r1 io.ReadCloser, i1 int64, err error) *StorageRepositoryMock {
+	if mmRetrieveBlobRange.mock.funcRetrieveBlobRange != nil {
+		mmRetrieveBlobRange.mock.t.Fatalf("StorageRepositoryMock.RetrieveBlobRange mock is already set by Set")
+	}
+
+	if mmRetrieveBlobRange.defaultExpectation == nil {
+		mmRetrieveBlobRange.defaultExpectation = &StorageRepositoryMockRetrieveBlobRangeExpectation{mock: mmRetrieveBlobRange.mock}
+	}
+	mmRetrieveBlobRange.defaultExpectation.results = &StorageRepositoryMockRetrieveBlobRangeResults{r1, i1, err}
+	return mmRetrieveBlobRange.mock
+}
+
+// Set uses given function f to mock the StorageRepository.RetrieveBlobRange method
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) Set(f func(ctx context.Context, blobID string, offset int64, length int64) (r1 io.ReadCloser, i1 int64, err error)) *StorageRepositoryMock {
+	if mmRetrieveBlobRange.defaultExpectation != nil {
+		mmRetrieveBlobRange.mock.t.Fatalf("Default expectation is already set for the StorageRepository.RetrieveBlobRange method")
+	}
+
+	if len(mmRetrieveBlobRange.expectations) > 0 {
+		mmRetrieveBlobRange.mock.t.Fatalf("Some expectations are already set for the StorageRepository.RetrieveBlobRange method")
+	}
+
+	mmRetrieveBlobRange.mock.funcRetrieveBlobRange = f
+	return mmRetrieveBlobRange.mock
+}
+
+// When sets expectation for the StorageRepository.RetrieveBlobRange which will trigger the result defined by the following
+// Then helper
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) When(ctx context.Context, blobID string, offset int64, length int64) *StorageRepositoryMockRetrieveBlobRangeExpectation {
+	if mmRetrieveBlobRange.mock.funcRetrieveBlobRange != nil {
+		mmRetrieveBlobRange.mock.t.Fatalf("StorageRepositoryMock.RetrieveBlobRange mock is already set by Set")
+	}
+
+	expectation := &StorageRepositoryMockRetrieveBlobRangeExpectation{
+		mock:   mmRetrieveBlobRange.mock,
+		params: &StorageRepositoryMockRetrieveBlobRangeParams{ctx, blobID, offset, length},
+	}
+	mmRetrieveBlobRange.expectations = append(mmRetrieveBlobRange.expectations, expectation)
+	return expectation
+}
+
+// Then sets up StorageRepository.RetrieveBlobRange return parameters for the expectation previously defined by the When method
+func (e *StorageRepositoryMockRetrieveBlobRangeExpectation) Then(r1 io.ReadCloser, i1 int64, err error) *StorageRepositoryMock {
+	e.results = &StorageRepositoryMockRetrieveBlobRangeResults{r1, i1, err}
+	return e.mock
+}
+
+// RetrieveBlobRange implements repository.StorageRepository
+func (mmRetrieveBlobRange *StorageRepositoryMock) RetrieveBlobRange(ctx context.Context, blobID string, offset int64, length int64) (r1 io.ReadCloser, i1 int64, err error) {
+	mm_atomic.AddUint64(&mmRetrieveBlobRange.beforeRetrieveBlobRangeCounter, 1)
+	defer mm_atomic.AddUint64(&mmRetrieveBlobRange.afterRetrieveBlobRangeCounter, 1)
+
+	if mmRetrieveBlobRange.inspectFuncRetrieveBlobRange != nil {
+		mmRetrieveBlobRange.inspectFuncRetrieveBlobRange(ctx, blobID, offset, length)
+	}
+
+	mm_params := StorageRepositoryMockRetrieveBlobRangeParams{ctx, blobID, offset, length}
+
+	// Record call args
+	mmRetrieveBlobRange.RetrieveBlobRangeMock.mutex.Lock()
+	mmRetrieveBlobRange.RetrieveBlobRangeMock.callArgs = append(mmRetrieveBlobRange.RetrieveBlobRangeMock.callArgs, &mm_params)
+	mmRetrieveBlobRange.RetrieveBlobRangeMock.mutex.Unlock()
+
+	for _, e := range mmRetrieveBlobRange.RetrieveBlobRangeMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.r1, e.results.i1, e.results.err
+		}
+	}
+
+	if mmRetrieveBlobRange.RetrieveBlobRangeMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmRetrieveBlobRange.RetrieveBlobRangeMock.defaultExpectation.Counter, 1)
+		mm_want := mmRetrieveBlobRange.RetrieveBlobRangeMock.defaultExpectation.params
+		mm_got := StorageRepositoryMockRetrieveBlobRangeParams{ctx, blobID, offset, length}
+		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmRetrieveBlobRange.t.Errorf("StorageRepositoryMock.RetrieveBlobRange got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmRetrieveBlobRange.RetrieveBlobRangeMock.defaultExpectation.results
+		if mm_results == nil {
+			mmRetrieveBlobRange.t.Fatal("No results are set for the StorageRepositoryMock.RetrieveBlobRange")
+		}
+		return (*mm_results).r1, (*mm_results).i1, (*mm_results).err
+	}
+	if mmRetrieveBlobRange.funcRetrieveBlobRange != nil {
+		return mmRetrieveBlobRange.funcRetrieveBlobRange(ctx, blobID, offset, length)
+	}
+	mmRetrieveBlobRange.t.Fatalf("Unexpected call to StorageRepositoryMock.RetrieveBlobRange. %v %v %v %v", ctx, blobID, offset, length)
+	return
+}
+
+// RetrieveBlobRangeAfterCounter returns a count of finished StorageRepositoryMock.RetrieveBlobRange invocations
+func (mmRetrieveBlobRange *StorageRepositoryMock) RetrieveBlobRangeAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmRetrieveBlobRange.afterRetrieveBlobRangeCounter)
+}
+
+// RetrieveBlobRangeBeforeCounter returns a count of StorageRepositoryMock.RetrieveBlobRange invocations
+func (mmRetrieveBlobRange *StorageRepositoryMock) RetrieveBlobRangeBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmRetrieveBlobRange.beforeRetrieveBlobRangeCounter)
+}
+
+// Calls returns a list of arguments used in each call to StorageRepositoryMock.RetrieveBlobRange.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmRetrieveBlobRange *mStorageRepositoryMockRetrieveBlobRange) Calls() []*StorageRepositoryMockRetrieveBlobRangeParams {
+	mmRetrieveBlobRange.mutex.RLock()
+
+	argCopy := make([]*StorageRepositoryMockRetrieveBlobRangeParams, len(mmRetrieveBlobRange.callArgs))
+	copy(argCopy, mmRetrieveBlobRange.callArgs)
+
+	mmRetrieveBlobRange.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockRetrieveBlobRangeDone returns true if the count of the RetrieveBlobRange invocations corresponds
+// the number of defined expectations
+func (m *StorageRepositoryMock) MinimockRetrieveBlobRangeDone() bool {
+	for _, e := range m.RetrieveBlobRangeMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.RetrieveBlobRangeMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterRetrieveBlobRangeCounter) < 1 {
+		return false
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcRetrieveBlobRange != nil && mm_atomic.LoadUint64(&m.afterRetrieveBlobRangeCounter) < 1 {
+		return false
+	}
+	return true
+}
+
+// MinimockRetrieveBlobRangeInspect logs each unmet expectation
+func (m *StorageRepositoryMock) MinimockRetrieveBlobRangeInspect() {
+	for _, e := range m.RetrieveBlobRangeMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to StorageRepositoryMock.RetrieveBlobRange with params: %#v", *e.params)
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.RetrieveBlobRangeMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterRetrieveBlobRangeCounter) < 1 {
+		if m.RetrieveBlobRangeMock.defaultExpectation.params == nil {
+			m.t.Error("Expected call to StorageRepositoryMock.RetrieveBlobRange")
+		} else {
+			m.t.Errorf("Expected call to StorageRepositoryMock.RetrieveBlobRange with params: %#v", *m.RetrieveBlobRangeMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcRetrieveBlobRange != nil && mm_atomic.LoadUint64(&m.afterRetrieveBlobRangeCounter) < 1 {
+		m.t.Error("Expected call to StorageRepositoryMock.RetrieveBlobRange")
 	}
 }
 
@@ -948,6 +1175,8 @@ func (m *StorageRepositoryMock) MinimockFinish() {
 
 			m.MinimockRetrieveBlobInspect()
 
+			m.MinimockRetrieveBlobRangeInspect()
+
 			m.MinimockStoreBlobInspect()
 			m.t.FailNow()
 		}
@@ -976,5 +1205,6 @@ func (m *StorageRepositoryMock) minimockDone() bool {
 		m.MinimockDeleteBlobDone() &&
 		m.MinimockHealthCheckDone() &&
 		m.MinimockRetrieveBlobDone() &&
+		m.MinimockRetrieveBlobRangeDone() &&
 		m.MinimockStoreBlobDone()
 }

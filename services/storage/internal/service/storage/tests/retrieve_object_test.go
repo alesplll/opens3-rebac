@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testMaxInt64 = int64(^uint64(0) >> 1)
+
 func TestRetrieveObject(t *testing.T) {
 	type repoMockFunc func(mc *minimock.Controller) repository.StorageRepository
 
@@ -56,7 +58,58 @@ func TestRetrieveObject(t *testing.T) {
 			err:      nil,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.RetrieveBlobMock.Expect(ctx, blobID, int64(0), int64(0)).Return(io.NopCloser(strings.NewReader(blobContent)), blobSize, nil)
+				mock.RetrieveBlobMock.Expect(ctx, blobID).Return(io.NopCloser(strings.NewReader(blobContent)), blobSize, nil)
+				return mock
+			},
+		},
+		{
+			name: "normalizes negative start and end below sentinel",
+			args: args{
+				ctx:        ctx,
+				blobID:     blobID,
+				rangeStart: -10,
+				rangeEnd:   -5,
+			},
+			wantSize: blobSize,
+			wantBody: blobContent,
+			err:      nil,
+			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
+				mock := mocks.NewStorageRepositoryMock(mc)
+				mock.RetrieveBlobMock.Expect(ctx, blobID).Return(io.NopCloser(strings.NewReader(blobContent)), blobSize, nil)
+				return mock
+			},
+		},
+		{
+			name: "partial range uses range repo method",
+			args: args{
+				ctx:        ctx,
+				blobID:     blobID,
+				rangeStart: 4,
+				rangeEnd:   8,
+			},
+			wantSize: blobSize,
+			wantBody: " blob",
+			err:      nil,
+			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
+				mock := mocks.NewStorageRepositoryMock(mc)
+				mock.RetrieveBlobRangeMock.Expect(ctx, blobID, int64(4), int64(5)).Return(io.NopCloser(strings.NewReader(" blob")), blobSize, nil)
+				return mock
+			},
+		},
+		{
+			name: "open ended range uses max length sentinel",
+			args: args{
+				ctx:        ctx,
+				blobID:     blobID,
+				rangeStart: 4,
+				rangeEnd:   -1,
+			},
+			wantSize: blobSize,
+			wantBody: "blob content",
+			err:      nil,
+			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
+				mock := mocks.NewStorageRepositoryMock(mc)
+				mock.RetrieveBlobRangeMock.Expect(ctx, blobID, int64(4), testMaxInt64).Return(io.NopCloser(strings.NewReader("blob content")), blobSize, nil)
 				return mock
 			},
 		},
@@ -72,7 +125,7 @@ func TestRetrieveObject(t *testing.T) {
 			err:      repoErr,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.RetrieveBlobMock.Expect(ctx, blobID, int64(0), int64(0)).Return(nil, 0, repoErr)
+				mock.RetrieveBlobMock.Expect(ctx, blobID).Return(nil, 0, repoErr)
 				return mock
 			},
 		},
