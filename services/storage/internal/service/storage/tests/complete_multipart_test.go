@@ -49,7 +49,7 @@ func TestCompleteMultipartUpload(t *testing.T) {
 					require.Equal(t, ctx, gotCtx)
 					require.Equal(t, "upload-1", uploadID)
 					require.Equal(t, parts, gotParts)
-					require.NotEmpty(t, destBlobID)
+					require.Equal(t, "upload-1", destBlobID)
 					return repoResult, nil
 				})
 				return mock
@@ -98,7 +98,7 @@ func TestCompleteMultipartUpload(t *testing.T) {
 					require.Equal(t, ctx, gotCtx)
 					require.Equal(t, "upload-1", uploadID)
 					require.Equal(t, parts, gotParts)
-					require.NotEmpty(t, destBlobID)
+					require.Equal(t, "upload-1", destBlobID)
 					return nil, repoErr
 				})
 				return mock

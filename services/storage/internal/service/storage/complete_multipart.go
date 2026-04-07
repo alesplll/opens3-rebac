@@ -7,7 +7,6 @@ import (
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/observability"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -16,7 +15,7 @@ func (s *storageService) CompleteMultipartUpload(ctx context.Context, uploadID s
 		return nil, err
 	}
 
-	meta, err := s.repo.AssembleParts(ctx, uploadID, parts, uuid.New().String())
+	meta, err := s.repo.AssembleParts(ctx, uploadID, parts, uploadID)
 	if err != nil {
 		logger.Error(
 			ctx,
