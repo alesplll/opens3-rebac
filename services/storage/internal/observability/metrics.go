@@ -3,6 +3,8 @@ package observability
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -16,7 +18,8 @@ var (
 	initErr      error
 	readBytes    otelmetric.Int64Counter
 	writeBytes   otelmetric.Int64Counter
-	diskUsage    otelmetric.Int64ObservableGauge
+	fsDiskUsage  otelmetric.Int64ObservableGauge
+	dataDirUsage otelmetric.Int64ObservableGauge
 	registration otelmetric.Registration
 )
 
@@ -40,24 +43,39 @@ func InitMetrics(dataDir string) error {
 			return
 		}
 
-		diskUsage, initErr = metric.NewInt64ObservableGauge(
-			"storage_disk_usage_bytes",
+		fsDiskUsage, initErr = metric.NewInt64ObservableGauge(
+			"storage_filesystem_usage_bytes",
 			otelmetric.WithUnit("By"),
 		)
 		if initErr != nil {
-			diskUsage, _ = noopmetric.Meter{}.Int64ObservableGauge("storage_disk_usage_bytes")
+			fsDiskUsage, _ = noopmetric.Meter{}.Int64ObservableGauge("storage_filesystem_usage_bytes")
+			return
+		}
+
+		dataDirUsage, initErr = metric.NewInt64ObservableGauge(
+			"storage_data_dir_usage_bytes",
+			otelmetric.WithUnit("By"),
+		)
+		if initErr != nil {
+			dataDirUsage, _ = noopmetric.Meter{}.Int64ObservableGauge("storage_data_dir_usage_bytes")
 			return
 		}
 
 		registration, initErr = metric.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
-			usedBytes, err := getDiskUsageBytes(dataDir)
+			fsUsedBytes, err := getFilesystemUsageBytes(dataDir)
 			if err != nil {
 				return err
 			}
 
-			observer.ObserveInt64(diskUsage, usedBytes)
+			dataDirUsedBytes, err := getDataDirUsageBytes(dataDir)
+			if err != nil {
+				return err
+			}
+
+			observer.ObserveInt64(fsDiskUsage, fsUsedBytes)
+			observer.ObserveInt64(dataDirUsage, dataDirUsedBytes)
 			return nil
-		}, diskUsage)
+		}, fsDiskUsage, dataDirUsage)
 	})
 
 	return initErr
@@ -85,7 +103,7 @@ func Shutdown() {
 	}
 }
 
-func getDiskUsageBytes(dir string) (int64, error) {
+func getFilesystemUsageBytes(dir string) (int64, error) {
 	var stats syscall.Statfs_t
 	if err := syscall.Statfs(dir, &stats); err != nil {
 		return 0, fmt.Errorf("statfs data dir: %w", err)
@@ -95,4 +113,31 @@ func getDiskUsageBytes(dir string) (int64, error) {
 	blockSize := int64(stats.Bsize)
 
 	return usedBlocks * blockSize, nil
+}
+
+func getDataDirUsageBytes(dir string) (int64, error) {
+	var total int64
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("walk data dir: %w", err)
+	}
+
+	return total, nil
 }

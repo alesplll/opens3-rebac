@@ -359,7 +359,8 @@ Handler → StorageService (interface) → StorageRepository (interface)
 - Дополнительно для storage:
   - `storage_read_bytes_total`
   - `storage_write_bytes_total`
-  - `storage_disk_usage_bytes`
+  - `storage_filesystem_usage_bytes`
+  - `storage_data_dir_usage_bytes`
 
 ### Health Check
 
