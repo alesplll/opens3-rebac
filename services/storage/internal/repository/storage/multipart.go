@@ -89,6 +89,10 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 	if err != nil {
 		return nil, fmt.Errorf("create assembled blob temp file: %w", err)
 	}
+	cleanupTemp := func() {
+		_ = file.Close()
+		_ = os.Remove(tempPath)
+	}
 
 	hasher := md5.New()
 	writer := io.MultiWriter(file, hasher)
@@ -98,8 +102,7 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		partPath := r.multipartPartPath(uploadID, part.PartNumber)
 		partFile, openErr := os.Open(partPath)
 		if openErr != nil {
-			_ = file.Close()
-			_ = os.Remove(tempPath)
+			cleanupTemp()
 			if errors.Is(openErr, os.ErrNotExist) {
 				return nil, domainerrors.ErrUploadNotFound
 			}
@@ -111,8 +114,7 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		n, copyErr := io.Copy(writer, io.TeeReader(newContextReader(ctx, partFile), partHasher))
 		closeErr := partFile.Close()
 		if copyErr != nil {
-			_ = file.Close()
-			_ = os.Remove(tempPath)
+			cleanupTemp()
 			if isDiskFull(copyErr) {
 				return nil, domainerrors.ErrDiskFull
 			}
@@ -120,14 +122,12 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 			return nil, fmt.Errorf("copy multipart part: %w", copyErr)
 		}
 		if closeErr != nil {
-			_ = file.Close()
-			_ = os.Remove(tempPath)
+			cleanupTemp()
 			return nil, fmt.Errorf("close multipart part: %w", closeErr)
 		}
 
 		if fmt.Sprintf("%x", partHasher.Sum(nil)) != part.ChecksumMD5 {
-			_ = file.Close()
-			_ = os.Remove(tempPath)
+			cleanupTemp()
 			return nil, domainerrors.ErrChecksumMismatch
 		}
 
@@ -135,8 +135,7 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 	}
 
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
+		cleanupTemp()
 		return nil, fmt.Errorf("sync assembled blob temp file: %w", err)
 	}
 
