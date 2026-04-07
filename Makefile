@@ -129,6 +129,9 @@ generate-authz-py:
 test-users:
 	go test ./services/users/... -count=1
 
+test-storage:
+	go test ./services/storage/... -count=1
+
 test-users-service:
 	go test ./services/users/internal/service/user/tests -count=1
 

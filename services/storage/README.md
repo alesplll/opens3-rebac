@@ -253,6 +253,9 @@ go run cmd/server/main.go -config-path=.env.local
 # Из корня репозитория (используется go.work)
 go build ./services/storage/...
 
+# Тесты storage-сервиса
+make test-storage
+
 # Или из директории сервиса
 cd services/storage
 go build -o bin/storage-server cmd/server/main.go
