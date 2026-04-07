@@ -10,7 +10,9 @@ import (
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestUploadPart_StreamsAllChunksToService(t *testing.T) {
@@ -140,6 +142,82 @@ func TestUploadPart_StartsStreamingBeforeClientStreamEnds(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("UploadPart did not finish after the remaining chunk was released")
 	}
+}
+
+func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
+	t.Parallel()
+
+	serviceCalled := false
+	svc := testStorageService{
+		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
+			serviceCalled = true
+			_, err := io.ReadAll(reader)
+			require.Error(t, err)
+			return "", err
+		},
+	}
+
+	stream := &uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				UploadId:   "upload-1",
+				PartNumber: 3,
+				Data:       []byte("hello "),
+			},
+			{
+				UploadId:   "upload-2",
+				PartNumber: 3,
+				Data:       []byte("world"),
+			},
+		},
+	}
+
+	h := handlerStorage.NewHandler(svc)
+	err := h.UploadPart(stream)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "upload_id changed within stream")
+	require.True(t, serviceCalled)
+	require.Nil(t, stream.closedWith)
+}
+
+func TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch(t *testing.T) {
+	t.Parallel()
+
+	serviceCalled := false
+	svc := testStorageService{
+		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
+			serviceCalled = true
+			_, err := io.ReadAll(reader)
+			require.Error(t, err)
+			return "", err
+		},
+	}
+
+	stream := &uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				UploadId:   "upload-1",
+				PartNumber: 3,
+				Data:       []byte("hello "),
+			},
+			{
+				UploadId:   "upload-1",
+				PartNumber: 4,
+				Data:       []byte("world"),
+			},
+		},
+	}
+
+	h := handlerStorage.NewHandler(svc)
+	err := h.UploadPart(stream)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "part_number changed within stream")
+	require.True(t, serviceCalled)
+	require.Nil(t, stream.closedWith)
 }
 
 type uploadPartServerMock struct {
