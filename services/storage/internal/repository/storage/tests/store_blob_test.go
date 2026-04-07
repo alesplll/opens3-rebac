@@ -123,6 +123,28 @@ func TestStoreBlob_ContextCanceled(t *testing.T) {
 	require.Empty(t, entries)
 }
 
+func TestStoreBlob_IgnoresStaleTempFileOnRetry(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	repository := storageRepo.NewRepository(testStorageConfig{
+		dataDir:      dataDir,
+		multipartDir: t.TempDir(),
+	})
+
+	blobID := "blob-1"
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, blobID)+".tmp", []byte("stale temp"), 0o644))
+
+	content := []byte("storage blob content")
+	meta, err := repository.StoreBlob(context.Background(), blobID, bytes.NewReader(content))
+	require.NoError(t, err)
+	require.Equal(t, blobID, meta.BlobID)
+
+	storedContent, err := os.ReadFile(filepath.Join(dataDir, blobID))
+	require.NoError(t, err)
+	require.Equal(t, content, storedContent)
+}
+
 type testStorageConfig struct {
 	dataDir      string
 	multipartDir string

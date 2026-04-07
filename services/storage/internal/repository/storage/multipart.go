@@ -128,10 +128,9 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 	}
 
 	finalPath := r.blobPath(destBlobID)
-	tempPath := finalPath + ".tmp"
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	file, tempPath, err := createAtomicTempFile(finalPath, "assembled blob")
 	if err != nil {
-		return nil, fmt.Errorf("create assembled blob temp file: %w", err)
+		return nil, err
 	}
 	cleanupTemp := func() {
 		_ = file.Close()

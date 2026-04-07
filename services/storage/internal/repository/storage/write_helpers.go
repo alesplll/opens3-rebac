@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/storage/internal/errors/domain_errors"
 )
@@ -28,11 +29,9 @@ func ensureDirReady(dir string) error {
 }
 
 func writeAtomically(ctx context.Context, finalPath string, reader io.Reader, entity string) (*writeResult, error) {
-	tempPath := finalPath + ".tmp"
-
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	file, tempPath, err := createAtomicTempFile(finalPath, entity)
 	if err != nil {
-		return nil, fmt.Errorf("create temp %s file: %w", entity, err)
+		return nil, err
 	}
 
 	hasher := md5.New()
@@ -67,6 +66,25 @@ func writeAtomically(ctx context.Context, finalPath string, reader io.Reader, en
 		checksumMD5: fmt.Sprintf("%x", hasher.Sum(nil)),
 		sizeBytes:   written,
 	}, nil
+}
+
+func createAtomicTempFile(finalPath string, entity string) (*os.File, string, error) {
+	dir := filepath.Dir(finalPath)
+	base := filepath.Base(finalPath)
+
+	file, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		return nil, "", fmt.Errorf("create temp %s file: %w", entity, err)
+	}
+
+	if err := file.Chmod(0o644); err != nil {
+		tempPath := file.Name()
+		_ = file.Close()
+		_ = os.Remove(tempPath)
+		return nil, "", fmt.Errorf("chmod temp %s file: %w", entity, err)
+	}
+
+	return file, file.Name(), nil
 }
 
 func domainDiskFull(err error) error {

@@ -297,3 +297,30 @@ func TestAssembleParts_CorruptedCompletedMetaWithoutSessionReturnsUploadNotFound
 	require.ErrorIs(t, err, domainerrors.ErrUploadNotFound)
 	require.Nil(t, meta)
 }
+
+func TestAssembleParts_IgnoresStaleTempFileOnRetry(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	multipartDir := t.TempDir()
+	repository := storageRepo.NewRepository(testStorageConfig{
+		dataDir:      dataDir,
+		multipartDir: multipartDir,
+	})
+
+	part := []byte("hello world")
+	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "upload-1.tmp"), []byte("stale temp"), 0o644))
+
+	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
+		{PartNumber: 1, ChecksumMD5: checksum},
+	}, "blob-ignored")
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	require.Equal(t, "upload-1", meta.BlobID)
+
+	body, readErr := os.ReadFile(filepath.Join(dataDir, "upload-1"))
+	require.NoError(t, readErr)
+	require.Equal(t, part, body)
+}
