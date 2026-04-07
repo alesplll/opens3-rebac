@@ -153,9 +153,17 @@ Gateway                          Storage
   │──── StoreObjectRequest ──────► │  (data)
   │──── StoreObjectRequest ──────► │  (data)
   │──── EOF ─────────────────────► │
-  │                                │  собирает все чанки, сохраняет
+  │                                │  потоково читает чанки и пишет на диск
   │◄─── StoreObjectResponse ────── │  (blob_id, checksum_md5)
 ```
+
+Для `UploadPart` действуют те же streaming semantics:
+- `upload_id` и `part_number` фиксируются по первому сообщению stream-а
+- в последующих сообщениях они не должны меняться, иначе возвращается `INVALID_ARGUMENT`
+- данные части пишутся потоково, без буферизации всего part в памяти handler-а
+- части можно загружать в любом порядке; порядок фактической загрузки не влияет на итоговую сборку
+- при `CompleteMultipartUpload` список `parts` должен быть отсортирован по возрастанию `part_number`
+- текущая реализация не требует непрерывной последовательности `1..N`: сервис собирает итоговый blob из тех `part_number`, которые явно переданы в `CompleteMultipartUpload` и реально существуют на диске
 
 **Server-streaming** (`RetrieveObject`):
 ```
@@ -248,6 +256,9 @@ go run cmd/server/main.go -config-path=.env.local
 # Из корня репозитория (используется go.work)
 go build ./services/storage/...
 
+# Тесты storage-сервиса
+make test-storage
+
 # Или из директории сервиса
 cd services/storage
 go build -o bin/storage-server cmd/server/main.go
@@ -267,6 +278,27 @@ grpcurl -plaintext -d '{"blob_id": "550e8400-e29b-41d4-a716-446655440000"}' \
   localhost:50053 opens3.storage.v1.DataStorageService/DeleteObject
 ```
 
+### Multipart Smoke Test
+
+Для быстрого ручного happy-path smoke test multipart upload:
+
+```bash
+go run ./services/storage/cmd/multipart-smoke
+```
+
+С кастомными параметрами:
+
+```bash
+go run ./services/storage/cmd/multipart-smoke \
+  -addr localhost:50053 \
+  -content-type text/plain \
+  -part1 "hello " \
+  -part2 "world" \
+  -chunk-size 3
+```
+
+CLI создаёт multipart session, загружает 2 части несколькими чанками, выполняет `CompleteMultipartUpload`, затем читает итоговый blob обратно и проверяет содержимое и MD5.
+
 ---
 
 ## Хранилище на диске
@@ -278,7 +310,11 @@ DATA_DIR/                            (по умолчанию /data/blobs)
 └── ...
 
 MULTIPART_DIR/                       (по умолчанию /data/multipart)
+├── completed/
+│   ├── {upload_id}.json            ← persisted result completed multipart upload
+│   └── ...
 ├── {upload_id}/
+│   ├── meta.json                    ← expected_parts + content_type + blob_id
 │   ├── part_1
 │   ├── part_2
 │   └── ...
@@ -286,9 +322,10 @@ MULTIPART_DIR/                       (по умолчанию /data/multipart)
     └── ...
 ```
 
-- `blob_id` — UUID v4, генерируется сервисом при `StoreObject` / `CompleteMultipartUpload`
+- `blob_id` — UUID v4, генерируется сервисом при `StoreObject`; для multipart фиксируется при `InitiateMultipartUpload` и затем переиспользуется в `CompleteMultipartUpload`
 - `upload_id` — UUID v4, генерируется при `InitiateMultipartUpload`
-- Временные файлы частей удаляются после `CompleteMultipartUpload` или `AbortMultipartUpload`
+- После успешного `CompleteMultipartUpload` session cleanup выполняется best-effort; идемпотентность retry обеспечивается через `completed/{upload_id}.json`
+- Для атомарной записи используются уникальные temp-файлы с последующим `os.Rename`, поэтому stale `*.tmp` после crash не должны ломать retry
 
 > **Рекомендация:** для production с большим количеством файлов стоит использовать
 > вложенность `DATA_DIR/{blob_id[0:2]}/{blob_id}` (шардирование по первым 2 символам UUID).
@@ -327,6 +364,9 @@ Handler → StorageService (interface) → StorageRepository (interface)
 |---|---|---|
 | `ErrBlobNotFound` | `NOT_FOUND` | blob_id не существует на диске |
 | `ErrUploadNotFound` | `NOT_FOUND` | upload_id multipart не найден |
+| `ErrInvalidBlobSize` | `INVALID_ARGUMENT` | size < 0 или фактический размер не совпал с ожидаемым |
+| `ErrInvalidUpload` | `INVALID_ARGUMENT` | некорректная multipart-сессия |
+| `ErrInvalidParts` | `INVALID_ARGUMENT` | пустой/невалидный список частей или не совпало expected_parts |
 | `ErrInvalidPartNumber` | `INVALID_ARGUMENT` | Некорректный номер части |
 | `ErrChecksumMismatch` | `INVALID_ARGUMENT` | MD5 не совпадает при CompleteMultipart |
 | `ErrDiskFull` | `RESOURCE_EXHAUSTED` | Недостаточно места на диске |
@@ -376,7 +416,7 @@ Handler → StorageService (interface) → StorageRepository (interface)
 
 ## Kafka-интеграция
 
-> **Текущий статус:** не реализована (Phase 2)
+> **Текущий статус:** не реализована (следующий этап: Phase 3)
 
 Планируемая интеграция:
 
@@ -408,6 +448,16 @@ make generate-storage
 ```bash
 # Из корня репозитория (go.work подтягивает shared)
 go build ./services/storage/...
+
+# Unit + component tests
+go test ./services/storage/...
+```
+
+### Генерация minimock для service tests
+
+```bash
+cd services/storage
+PATH="$PWD/bin:$PATH" go generate ./pkg/mocks
 ```
 
 ### Структура модулей
@@ -440,13 +490,14 @@ go.work
 Подробный план реализации с описанием всех фаз, взаимодействий и подводных камней:
 [docs/storage-service-implementation-plan.md](../../docs/storage-service-implementation-plan.md)
 
-- [ ] Реализовать реальное чтение/запись на файловую систему в Repository
-- [ ] Подсчёт MD5 при записи blob
-- [ ] Range-запросы при чтении (RetrieveObject)
-- [ ] Multipart: хранение частей, склейка, отмена
+- [x] Реализовать реальное чтение/запись на файловую систему в Repository
+- [x] Подсчёт MD5 при записи blob
+- [x] Range-запросы при чтении (RetrieveObject)
+- [x] Multipart: хранение частей, склейка, отмена
 - [ ] Kafka producer (`object-stored`) и consumer (`object-deleted`)
-- [ ] Проверка свободного места на диске в HealthCheck
+- [x] Проверка свободного места на диске в HealthCheck
 - [ ] Шардирование файлов по первым байтам UUID
-- [ ] Unit-тесты для всех слоёв
-- [ ] Dockerfile
-- [ ] Интеграция в docker-compose.yml
+- [ ] TTL/garbage collection для зависших multipart-сессий
+- [x] Unit/component-тесты для service и repository слоёв
+- [x] Dockerfile
+- [x] Интеграция в docker-compose.yml

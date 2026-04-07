@@ -20,6 +20,24 @@ type StorageRepositoryMock struct {
 	t          minimock.Tester
 	finishOnce sync.Once
 
+	funcAssembleParts          func(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (bp1 *model.BlobMeta, err error)
+	inspectFuncAssembleParts   func(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string)
+	afterAssemblePartsCounter  uint64
+	beforeAssemblePartsCounter uint64
+	AssemblePartsMock          mStorageRepositoryMockAssembleParts
+
+	funcCleanupMultipart          func(ctx context.Context, uploadID string) (err error)
+	inspectFuncCleanupMultipart   func(ctx context.Context, uploadID string)
+	afterCleanupMultipartCounter  uint64
+	beforeCleanupMultipartCounter uint64
+	CleanupMultipartMock          mStorageRepositoryMockCleanupMultipart
+
+	funcCreateMultipartSession          func(ctx context.Context, uploadID string, expectedParts int32, contentType string) (err error)
+	inspectFuncCreateMultipartSession   func(ctx context.Context, uploadID string, expectedParts int32, contentType string)
+	afterCreateMultipartSessionCounter  uint64
+	beforeCreateMultipartSessionCounter uint64
+	CreateMultipartSessionMock          mStorageRepositoryMockCreateMultipartSession
+
 	funcDeleteBlob          func(ctx context.Context, blobID string) (err error)
 	inspectFuncDeleteBlob   func(ctx context.Context, blobID string)
 	afterDeleteBlobCounter  uint64
@@ -44,11 +62,17 @@ type StorageRepositoryMock struct {
 	beforeRetrieveBlobRangeCounter uint64
 	RetrieveBlobRangeMock          mStorageRepositoryMockRetrieveBlobRange
 
-	funcStoreBlob          func(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error)
-	inspectFuncStoreBlob   func(ctx context.Context, reader io.Reader)
+	funcStoreBlob          func(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error)
+	inspectFuncStoreBlob   func(ctx context.Context, blobID string, reader io.Reader)
 	afterStoreBlobCounter  uint64
 	beforeStoreBlobCounter uint64
 	StoreBlobMock          mStorageRepositoryMockStoreBlob
+
+	funcStorePart          func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (checksumMD5 string, err error)
+	inspectFuncStorePart   func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader)
+	afterStorePartCounter  uint64
+	beforeStorePartCounter uint64
+	StorePartMock          mStorageRepositoryMockStorePart
 }
 
 // NewStorageRepositoryMock returns a mock for repository.StorageRepository
@@ -58,6 +82,15 @@ func NewStorageRepositoryMock(t minimock.Tester) *StorageRepositoryMock {
 	if controller, ok := t.(minimock.MockController); ok {
 		controller.RegisterMocker(m)
 	}
+
+	m.AssemblePartsMock = mStorageRepositoryMockAssembleParts{mock: m}
+	m.AssemblePartsMock.callArgs = []*StorageRepositoryMockAssemblePartsParams{}
+
+	m.CleanupMultipartMock = mStorageRepositoryMockCleanupMultipart{mock: m}
+	m.CleanupMultipartMock.callArgs = []*StorageRepositoryMockCleanupMultipartParams{}
+
+	m.CreateMultipartSessionMock = mStorageRepositoryMockCreateMultipartSession{mock: m}
+	m.CreateMultipartSessionMock.callArgs = []*StorageRepositoryMockCreateMultipartSessionParams{}
 
 	m.DeleteBlobMock = mStorageRepositoryMockDeleteBlob{mock: m}
 	m.DeleteBlobMock.callArgs = []*StorageRepositoryMockDeleteBlobParams{}
@@ -74,9 +107,665 @@ func NewStorageRepositoryMock(t minimock.Tester) *StorageRepositoryMock {
 	m.StoreBlobMock = mStorageRepositoryMockStoreBlob{mock: m}
 	m.StoreBlobMock.callArgs = []*StorageRepositoryMockStoreBlobParams{}
 
+	m.StorePartMock = mStorageRepositoryMockStorePart{mock: m}
+	m.StorePartMock.callArgs = []*StorageRepositoryMockStorePartParams{}
+
 	t.Cleanup(m.MinimockFinish)
 
 	return m
+}
+
+type mStorageRepositoryMockAssembleParts struct {
+	mock               *StorageRepositoryMock
+	defaultExpectation *StorageRepositoryMockAssemblePartsExpectation
+	expectations       []*StorageRepositoryMockAssemblePartsExpectation
+
+	callArgs []*StorageRepositoryMockAssemblePartsParams
+	mutex    sync.RWMutex
+}
+
+// StorageRepositoryMockAssemblePartsExpectation specifies expectation struct of the StorageRepository.AssembleParts
+type StorageRepositoryMockAssemblePartsExpectation struct {
+	mock    *StorageRepositoryMock
+	params  *StorageRepositoryMockAssemblePartsParams
+	results *StorageRepositoryMockAssemblePartsResults
+	Counter uint64
+}
+
+// StorageRepositoryMockAssemblePartsParams contains parameters of the StorageRepository.AssembleParts
+type StorageRepositoryMockAssemblePartsParams struct {
+	ctx        context.Context
+	uploadID   string
+	parts      []model.PartInfo
+	destBlobID string
+}
+
+// StorageRepositoryMockAssemblePartsResults contains results of the StorageRepository.AssembleParts
+type StorageRepositoryMockAssemblePartsResults struct {
+	bp1 *model.BlobMeta
+	err error
+}
+
+// Expect sets up expected params for StorageRepository.AssembleParts
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) Expect(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) *mStorageRepositoryMockAssembleParts {
+	if mmAssembleParts.mock.funcAssembleParts != nil {
+		mmAssembleParts.mock.t.Fatalf("StorageRepositoryMock.AssembleParts mock is already set by Set")
+	}
+
+	if mmAssembleParts.defaultExpectation == nil {
+		mmAssembleParts.defaultExpectation = &StorageRepositoryMockAssemblePartsExpectation{}
+	}
+
+	mmAssembleParts.defaultExpectation.params = &StorageRepositoryMockAssemblePartsParams{ctx, uploadID, parts, destBlobID}
+	for _, e := range mmAssembleParts.expectations {
+		if minimock.Equal(e.params, mmAssembleParts.defaultExpectation.params) {
+			mmAssembleParts.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmAssembleParts.defaultExpectation.params)
+		}
+	}
+
+	return mmAssembleParts
+}
+
+// Inspect accepts an inspector function that has same arguments as the StorageRepository.AssembleParts
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) Inspect(f func(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string)) *mStorageRepositoryMockAssembleParts {
+	if mmAssembleParts.mock.inspectFuncAssembleParts != nil {
+		mmAssembleParts.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.AssembleParts")
+	}
+
+	mmAssembleParts.mock.inspectFuncAssembleParts = f
+
+	return mmAssembleParts
+}
+
+// Return sets up results that will be returned by StorageRepository.AssembleParts
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) Return(bp1 *model.BlobMeta, err error) *StorageRepositoryMock {
+	if mmAssembleParts.mock.funcAssembleParts != nil {
+		mmAssembleParts.mock.t.Fatalf("StorageRepositoryMock.AssembleParts mock is already set by Set")
+	}
+
+	if mmAssembleParts.defaultExpectation == nil {
+		mmAssembleParts.defaultExpectation = &StorageRepositoryMockAssemblePartsExpectation{mock: mmAssembleParts.mock}
+	}
+	mmAssembleParts.defaultExpectation.results = &StorageRepositoryMockAssemblePartsResults{bp1, err}
+	return mmAssembleParts.mock
+}
+
+// Set uses given function f to mock the StorageRepository.AssembleParts method
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) Set(f func(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (bp1 *model.BlobMeta, err error)) *StorageRepositoryMock {
+	if mmAssembleParts.defaultExpectation != nil {
+		mmAssembleParts.mock.t.Fatalf("Default expectation is already set for the StorageRepository.AssembleParts method")
+	}
+
+	if len(mmAssembleParts.expectations) > 0 {
+		mmAssembleParts.mock.t.Fatalf("Some expectations are already set for the StorageRepository.AssembleParts method")
+	}
+
+	mmAssembleParts.mock.funcAssembleParts = f
+	return mmAssembleParts.mock
+}
+
+// When sets expectation for the StorageRepository.AssembleParts which will trigger the result defined by the following
+// Then helper
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) When(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) *StorageRepositoryMockAssemblePartsExpectation {
+	if mmAssembleParts.mock.funcAssembleParts != nil {
+		mmAssembleParts.mock.t.Fatalf("StorageRepositoryMock.AssembleParts mock is already set by Set")
+	}
+
+	expectation := &StorageRepositoryMockAssemblePartsExpectation{
+		mock:   mmAssembleParts.mock,
+		params: &StorageRepositoryMockAssemblePartsParams{ctx, uploadID, parts, destBlobID},
+	}
+	mmAssembleParts.expectations = append(mmAssembleParts.expectations, expectation)
+	return expectation
+}
+
+// Then sets up StorageRepository.AssembleParts return parameters for the expectation previously defined by the When method
+func (e *StorageRepositoryMockAssemblePartsExpectation) Then(bp1 *model.BlobMeta, err error) *StorageRepositoryMock {
+	e.results = &StorageRepositoryMockAssemblePartsResults{bp1, err}
+	return e.mock
+}
+
+// AssembleParts implements repository.StorageRepository
+func (mmAssembleParts *StorageRepositoryMock) AssembleParts(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (bp1 *model.BlobMeta, err error) {
+	mm_atomic.AddUint64(&mmAssembleParts.beforeAssemblePartsCounter, 1)
+	defer mm_atomic.AddUint64(&mmAssembleParts.afterAssemblePartsCounter, 1)
+
+	if mmAssembleParts.inspectFuncAssembleParts != nil {
+		mmAssembleParts.inspectFuncAssembleParts(ctx, uploadID, parts, destBlobID)
+	}
+
+	mm_params := StorageRepositoryMockAssemblePartsParams{ctx, uploadID, parts, destBlobID}
+
+	// Record call args
+	mmAssembleParts.AssemblePartsMock.mutex.Lock()
+	mmAssembleParts.AssemblePartsMock.callArgs = append(mmAssembleParts.AssemblePartsMock.callArgs, &mm_params)
+	mmAssembleParts.AssemblePartsMock.mutex.Unlock()
+
+	for _, e := range mmAssembleParts.AssemblePartsMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.bp1, e.results.err
+		}
+	}
+
+	if mmAssembleParts.AssemblePartsMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmAssembleParts.AssemblePartsMock.defaultExpectation.Counter, 1)
+		mm_want := mmAssembleParts.AssemblePartsMock.defaultExpectation.params
+		mm_got := StorageRepositoryMockAssemblePartsParams{ctx, uploadID, parts, destBlobID}
+		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmAssembleParts.t.Errorf("StorageRepositoryMock.AssembleParts got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmAssembleParts.AssemblePartsMock.defaultExpectation.results
+		if mm_results == nil {
+			mmAssembleParts.t.Fatal("No results are set for the StorageRepositoryMock.AssembleParts")
+		}
+		return (*mm_results).bp1, (*mm_results).err
+	}
+	if mmAssembleParts.funcAssembleParts != nil {
+		return mmAssembleParts.funcAssembleParts(ctx, uploadID, parts, destBlobID)
+	}
+	mmAssembleParts.t.Fatalf("Unexpected call to StorageRepositoryMock.AssembleParts. %v %v %v %v", ctx, uploadID, parts, destBlobID)
+	return
+}
+
+// AssemblePartsAfterCounter returns a count of finished StorageRepositoryMock.AssembleParts invocations
+func (mmAssembleParts *StorageRepositoryMock) AssemblePartsAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmAssembleParts.afterAssemblePartsCounter)
+}
+
+// AssemblePartsBeforeCounter returns a count of StorageRepositoryMock.AssembleParts invocations
+func (mmAssembleParts *StorageRepositoryMock) AssemblePartsBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmAssembleParts.beforeAssemblePartsCounter)
+}
+
+// Calls returns a list of arguments used in each call to StorageRepositoryMock.AssembleParts.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmAssembleParts *mStorageRepositoryMockAssembleParts) Calls() []*StorageRepositoryMockAssemblePartsParams {
+	mmAssembleParts.mutex.RLock()
+
+	argCopy := make([]*StorageRepositoryMockAssemblePartsParams, len(mmAssembleParts.callArgs))
+	copy(argCopy, mmAssembleParts.callArgs)
+
+	mmAssembleParts.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockAssemblePartsDone returns true if the count of the AssembleParts invocations corresponds
+// the number of defined expectations
+func (m *StorageRepositoryMock) MinimockAssemblePartsDone() bool {
+	for _, e := range m.AssemblePartsMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.AssemblePartsMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterAssemblePartsCounter) < 1 {
+		return false
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcAssembleParts != nil && mm_atomic.LoadUint64(&m.afterAssemblePartsCounter) < 1 {
+		return false
+	}
+	return true
+}
+
+// MinimockAssemblePartsInspect logs each unmet expectation
+func (m *StorageRepositoryMock) MinimockAssemblePartsInspect() {
+	for _, e := range m.AssemblePartsMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to StorageRepositoryMock.AssembleParts with params: %#v", *e.params)
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.AssemblePartsMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterAssemblePartsCounter) < 1 {
+		if m.AssemblePartsMock.defaultExpectation.params == nil {
+			m.t.Error("Expected call to StorageRepositoryMock.AssembleParts")
+		} else {
+			m.t.Errorf("Expected call to StorageRepositoryMock.AssembleParts with params: %#v", *m.AssemblePartsMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcAssembleParts != nil && mm_atomic.LoadUint64(&m.afterAssemblePartsCounter) < 1 {
+		m.t.Error("Expected call to StorageRepositoryMock.AssembleParts")
+	}
+}
+
+type mStorageRepositoryMockCleanupMultipart struct {
+	mock               *StorageRepositoryMock
+	defaultExpectation *StorageRepositoryMockCleanupMultipartExpectation
+	expectations       []*StorageRepositoryMockCleanupMultipartExpectation
+
+	callArgs []*StorageRepositoryMockCleanupMultipartParams
+	mutex    sync.RWMutex
+}
+
+// StorageRepositoryMockCleanupMultipartExpectation specifies expectation struct of the StorageRepository.CleanupMultipart
+type StorageRepositoryMockCleanupMultipartExpectation struct {
+	mock    *StorageRepositoryMock
+	params  *StorageRepositoryMockCleanupMultipartParams
+	results *StorageRepositoryMockCleanupMultipartResults
+	Counter uint64
+}
+
+// StorageRepositoryMockCleanupMultipartParams contains parameters of the StorageRepository.CleanupMultipart
+type StorageRepositoryMockCleanupMultipartParams struct {
+	ctx      context.Context
+	uploadID string
+}
+
+// StorageRepositoryMockCleanupMultipartResults contains results of the StorageRepository.CleanupMultipart
+type StorageRepositoryMockCleanupMultipartResults struct {
+	err error
+}
+
+// Expect sets up expected params for StorageRepository.CleanupMultipart
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) Expect(ctx context.Context, uploadID string) *mStorageRepositoryMockCleanupMultipart {
+	if mmCleanupMultipart.mock.funcCleanupMultipart != nil {
+		mmCleanupMultipart.mock.t.Fatalf("StorageRepositoryMock.CleanupMultipart mock is already set by Set")
+	}
+
+	if mmCleanupMultipart.defaultExpectation == nil {
+		mmCleanupMultipart.defaultExpectation = &StorageRepositoryMockCleanupMultipartExpectation{}
+	}
+
+	mmCleanupMultipart.defaultExpectation.params = &StorageRepositoryMockCleanupMultipartParams{ctx, uploadID}
+	for _, e := range mmCleanupMultipart.expectations {
+		if minimock.Equal(e.params, mmCleanupMultipart.defaultExpectation.params) {
+			mmCleanupMultipart.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmCleanupMultipart.defaultExpectation.params)
+		}
+	}
+
+	return mmCleanupMultipart
+}
+
+// Inspect accepts an inspector function that has same arguments as the StorageRepository.CleanupMultipart
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) Inspect(f func(ctx context.Context, uploadID string)) *mStorageRepositoryMockCleanupMultipart {
+	if mmCleanupMultipart.mock.inspectFuncCleanupMultipart != nil {
+		mmCleanupMultipart.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.CleanupMultipart")
+	}
+
+	mmCleanupMultipart.mock.inspectFuncCleanupMultipart = f
+
+	return mmCleanupMultipart
+}
+
+// Return sets up results that will be returned by StorageRepository.CleanupMultipart
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) Return(err error) *StorageRepositoryMock {
+	if mmCleanupMultipart.mock.funcCleanupMultipart != nil {
+		mmCleanupMultipart.mock.t.Fatalf("StorageRepositoryMock.CleanupMultipart mock is already set by Set")
+	}
+
+	if mmCleanupMultipart.defaultExpectation == nil {
+		mmCleanupMultipart.defaultExpectation = &StorageRepositoryMockCleanupMultipartExpectation{mock: mmCleanupMultipart.mock}
+	}
+	mmCleanupMultipart.defaultExpectation.results = &StorageRepositoryMockCleanupMultipartResults{err}
+	return mmCleanupMultipart.mock
+}
+
+// Set uses given function f to mock the StorageRepository.CleanupMultipart method
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) Set(f func(ctx context.Context, uploadID string) (err error)) *StorageRepositoryMock {
+	if mmCleanupMultipart.defaultExpectation != nil {
+		mmCleanupMultipart.mock.t.Fatalf("Default expectation is already set for the StorageRepository.CleanupMultipart method")
+	}
+
+	if len(mmCleanupMultipart.expectations) > 0 {
+		mmCleanupMultipart.mock.t.Fatalf("Some expectations are already set for the StorageRepository.CleanupMultipart method")
+	}
+
+	mmCleanupMultipart.mock.funcCleanupMultipart = f
+	return mmCleanupMultipart.mock
+}
+
+// When sets expectation for the StorageRepository.CleanupMultipart which will trigger the result defined by the following
+// Then helper
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) When(ctx context.Context, uploadID string) *StorageRepositoryMockCleanupMultipartExpectation {
+	if mmCleanupMultipart.mock.funcCleanupMultipart != nil {
+		mmCleanupMultipart.mock.t.Fatalf("StorageRepositoryMock.CleanupMultipart mock is already set by Set")
+	}
+
+	expectation := &StorageRepositoryMockCleanupMultipartExpectation{
+		mock:   mmCleanupMultipart.mock,
+		params: &StorageRepositoryMockCleanupMultipartParams{ctx, uploadID},
+	}
+	mmCleanupMultipart.expectations = append(mmCleanupMultipart.expectations, expectation)
+	return expectation
+}
+
+// Then sets up StorageRepository.CleanupMultipart return parameters for the expectation previously defined by the When method
+func (e *StorageRepositoryMockCleanupMultipartExpectation) Then(err error) *StorageRepositoryMock {
+	e.results = &StorageRepositoryMockCleanupMultipartResults{err}
+	return e.mock
+}
+
+// CleanupMultipart implements repository.StorageRepository
+func (mmCleanupMultipart *StorageRepositoryMock) CleanupMultipart(ctx context.Context, uploadID string) (err error) {
+	mm_atomic.AddUint64(&mmCleanupMultipart.beforeCleanupMultipartCounter, 1)
+	defer mm_atomic.AddUint64(&mmCleanupMultipart.afterCleanupMultipartCounter, 1)
+
+	if mmCleanupMultipart.inspectFuncCleanupMultipart != nil {
+		mmCleanupMultipart.inspectFuncCleanupMultipart(ctx, uploadID)
+	}
+
+	mm_params := StorageRepositoryMockCleanupMultipartParams{ctx, uploadID}
+
+	// Record call args
+	mmCleanupMultipart.CleanupMultipartMock.mutex.Lock()
+	mmCleanupMultipart.CleanupMultipartMock.callArgs = append(mmCleanupMultipart.CleanupMultipartMock.callArgs, &mm_params)
+	mmCleanupMultipart.CleanupMultipartMock.mutex.Unlock()
+
+	for _, e := range mmCleanupMultipart.CleanupMultipartMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.err
+		}
+	}
+
+	if mmCleanupMultipart.CleanupMultipartMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmCleanupMultipart.CleanupMultipartMock.defaultExpectation.Counter, 1)
+		mm_want := mmCleanupMultipart.CleanupMultipartMock.defaultExpectation.params
+		mm_got := StorageRepositoryMockCleanupMultipartParams{ctx, uploadID}
+		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmCleanupMultipart.t.Errorf("StorageRepositoryMock.CleanupMultipart got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmCleanupMultipart.CleanupMultipartMock.defaultExpectation.results
+		if mm_results == nil {
+			mmCleanupMultipart.t.Fatal("No results are set for the StorageRepositoryMock.CleanupMultipart")
+		}
+		return (*mm_results).err
+	}
+	if mmCleanupMultipart.funcCleanupMultipart != nil {
+		return mmCleanupMultipart.funcCleanupMultipart(ctx, uploadID)
+	}
+	mmCleanupMultipart.t.Fatalf("Unexpected call to StorageRepositoryMock.CleanupMultipart. %v %v", ctx, uploadID)
+	return
+}
+
+// CleanupMultipartAfterCounter returns a count of finished StorageRepositoryMock.CleanupMultipart invocations
+func (mmCleanupMultipart *StorageRepositoryMock) CleanupMultipartAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmCleanupMultipart.afterCleanupMultipartCounter)
+}
+
+// CleanupMultipartBeforeCounter returns a count of StorageRepositoryMock.CleanupMultipart invocations
+func (mmCleanupMultipart *StorageRepositoryMock) CleanupMultipartBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmCleanupMultipart.beforeCleanupMultipartCounter)
+}
+
+// Calls returns a list of arguments used in each call to StorageRepositoryMock.CleanupMultipart.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmCleanupMultipart *mStorageRepositoryMockCleanupMultipart) Calls() []*StorageRepositoryMockCleanupMultipartParams {
+	mmCleanupMultipart.mutex.RLock()
+
+	argCopy := make([]*StorageRepositoryMockCleanupMultipartParams, len(mmCleanupMultipart.callArgs))
+	copy(argCopy, mmCleanupMultipart.callArgs)
+
+	mmCleanupMultipart.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockCleanupMultipartDone returns true if the count of the CleanupMultipart invocations corresponds
+// the number of defined expectations
+func (m *StorageRepositoryMock) MinimockCleanupMultipartDone() bool {
+	for _, e := range m.CleanupMultipartMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.CleanupMultipartMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterCleanupMultipartCounter) < 1 {
+		return false
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcCleanupMultipart != nil && mm_atomic.LoadUint64(&m.afterCleanupMultipartCounter) < 1 {
+		return false
+	}
+	return true
+}
+
+// MinimockCleanupMultipartInspect logs each unmet expectation
+func (m *StorageRepositoryMock) MinimockCleanupMultipartInspect() {
+	for _, e := range m.CleanupMultipartMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to StorageRepositoryMock.CleanupMultipart with params: %#v", *e.params)
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.CleanupMultipartMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterCleanupMultipartCounter) < 1 {
+		if m.CleanupMultipartMock.defaultExpectation.params == nil {
+			m.t.Error("Expected call to StorageRepositoryMock.CleanupMultipart")
+		} else {
+			m.t.Errorf("Expected call to StorageRepositoryMock.CleanupMultipart with params: %#v", *m.CleanupMultipartMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcCleanupMultipart != nil && mm_atomic.LoadUint64(&m.afterCleanupMultipartCounter) < 1 {
+		m.t.Error("Expected call to StorageRepositoryMock.CleanupMultipart")
+	}
+}
+
+type mStorageRepositoryMockCreateMultipartSession struct {
+	mock               *StorageRepositoryMock
+	defaultExpectation *StorageRepositoryMockCreateMultipartSessionExpectation
+	expectations       []*StorageRepositoryMockCreateMultipartSessionExpectation
+
+	callArgs []*StorageRepositoryMockCreateMultipartSessionParams
+	mutex    sync.RWMutex
+}
+
+// StorageRepositoryMockCreateMultipartSessionExpectation specifies expectation struct of the StorageRepository.CreateMultipartSession
+type StorageRepositoryMockCreateMultipartSessionExpectation struct {
+	mock    *StorageRepositoryMock
+	params  *StorageRepositoryMockCreateMultipartSessionParams
+	results *StorageRepositoryMockCreateMultipartSessionResults
+	Counter uint64
+}
+
+// StorageRepositoryMockCreateMultipartSessionParams contains parameters of the StorageRepository.CreateMultipartSession
+type StorageRepositoryMockCreateMultipartSessionParams struct {
+	ctx           context.Context
+	uploadID      string
+	expectedParts int32
+	contentType   string
+}
+
+// StorageRepositoryMockCreateMultipartSessionResults contains results of the StorageRepository.CreateMultipartSession
+type StorageRepositoryMockCreateMultipartSessionResults struct {
+	err error
+}
+
+// Expect sets up expected params for StorageRepository.CreateMultipartSession
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) Expect(ctx context.Context, uploadID string, expectedParts int32, contentType string) *mStorageRepositoryMockCreateMultipartSession {
+	if mmCreateMultipartSession.mock.funcCreateMultipartSession != nil {
+		mmCreateMultipartSession.mock.t.Fatalf("StorageRepositoryMock.CreateMultipartSession mock is already set by Set")
+	}
+
+	if mmCreateMultipartSession.defaultExpectation == nil {
+		mmCreateMultipartSession.defaultExpectation = &StorageRepositoryMockCreateMultipartSessionExpectation{}
+	}
+
+	mmCreateMultipartSession.defaultExpectation.params = &StorageRepositoryMockCreateMultipartSessionParams{ctx, uploadID, expectedParts, contentType}
+	for _, e := range mmCreateMultipartSession.expectations {
+		if minimock.Equal(e.params, mmCreateMultipartSession.defaultExpectation.params) {
+			mmCreateMultipartSession.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmCreateMultipartSession.defaultExpectation.params)
+		}
+	}
+
+	return mmCreateMultipartSession
+}
+
+// Inspect accepts an inspector function that has same arguments as the StorageRepository.CreateMultipartSession
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) Inspect(f func(ctx context.Context, uploadID string, expectedParts int32, contentType string)) *mStorageRepositoryMockCreateMultipartSession {
+	if mmCreateMultipartSession.mock.inspectFuncCreateMultipartSession != nil {
+		mmCreateMultipartSession.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.CreateMultipartSession")
+	}
+
+	mmCreateMultipartSession.mock.inspectFuncCreateMultipartSession = f
+
+	return mmCreateMultipartSession
+}
+
+// Return sets up results that will be returned by StorageRepository.CreateMultipartSession
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) Return(err error) *StorageRepositoryMock {
+	if mmCreateMultipartSession.mock.funcCreateMultipartSession != nil {
+		mmCreateMultipartSession.mock.t.Fatalf("StorageRepositoryMock.CreateMultipartSession mock is already set by Set")
+	}
+
+	if mmCreateMultipartSession.defaultExpectation == nil {
+		mmCreateMultipartSession.defaultExpectation = &StorageRepositoryMockCreateMultipartSessionExpectation{mock: mmCreateMultipartSession.mock}
+	}
+	mmCreateMultipartSession.defaultExpectation.results = &StorageRepositoryMockCreateMultipartSessionResults{err}
+	return mmCreateMultipartSession.mock
+}
+
+// Set uses given function f to mock the StorageRepository.CreateMultipartSession method
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) Set(f func(ctx context.Context, uploadID string, expectedParts int32, contentType string) (err error)) *StorageRepositoryMock {
+	if mmCreateMultipartSession.defaultExpectation != nil {
+		mmCreateMultipartSession.mock.t.Fatalf("Default expectation is already set for the StorageRepository.CreateMultipartSession method")
+	}
+
+	if len(mmCreateMultipartSession.expectations) > 0 {
+		mmCreateMultipartSession.mock.t.Fatalf("Some expectations are already set for the StorageRepository.CreateMultipartSession method")
+	}
+
+	mmCreateMultipartSession.mock.funcCreateMultipartSession = f
+	return mmCreateMultipartSession.mock
+}
+
+// When sets expectation for the StorageRepository.CreateMultipartSession which will trigger the result defined by the following
+// Then helper
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) When(ctx context.Context, uploadID string, expectedParts int32, contentType string) *StorageRepositoryMockCreateMultipartSessionExpectation {
+	if mmCreateMultipartSession.mock.funcCreateMultipartSession != nil {
+		mmCreateMultipartSession.mock.t.Fatalf("StorageRepositoryMock.CreateMultipartSession mock is already set by Set")
+	}
+
+	expectation := &StorageRepositoryMockCreateMultipartSessionExpectation{
+		mock:   mmCreateMultipartSession.mock,
+		params: &StorageRepositoryMockCreateMultipartSessionParams{ctx, uploadID, expectedParts, contentType},
+	}
+	mmCreateMultipartSession.expectations = append(mmCreateMultipartSession.expectations, expectation)
+	return expectation
+}
+
+// Then sets up StorageRepository.CreateMultipartSession return parameters for the expectation previously defined by the When method
+func (e *StorageRepositoryMockCreateMultipartSessionExpectation) Then(err error) *StorageRepositoryMock {
+	e.results = &StorageRepositoryMockCreateMultipartSessionResults{err}
+	return e.mock
+}
+
+// CreateMultipartSession implements repository.StorageRepository
+func (mmCreateMultipartSession *StorageRepositoryMock) CreateMultipartSession(ctx context.Context, uploadID string, expectedParts int32, contentType string) (err error) {
+	mm_atomic.AddUint64(&mmCreateMultipartSession.beforeCreateMultipartSessionCounter, 1)
+	defer mm_atomic.AddUint64(&mmCreateMultipartSession.afterCreateMultipartSessionCounter, 1)
+
+	if mmCreateMultipartSession.inspectFuncCreateMultipartSession != nil {
+		mmCreateMultipartSession.inspectFuncCreateMultipartSession(ctx, uploadID, expectedParts, contentType)
+	}
+
+	mm_params := StorageRepositoryMockCreateMultipartSessionParams{ctx, uploadID, expectedParts, contentType}
+
+	// Record call args
+	mmCreateMultipartSession.CreateMultipartSessionMock.mutex.Lock()
+	mmCreateMultipartSession.CreateMultipartSessionMock.callArgs = append(mmCreateMultipartSession.CreateMultipartSessionMock.callArgs, &mm_params)
+	mmCreateMultipartSession.CreateMultipartSessionMock.mutex.Unlock()
+
+	for _, e := range mmCreateMultipartSession.CreateMultipartSessionMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.err
+		}
+	}
+
+	if mmCreateMultipartSession.CreateMultipartSessionMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmCreateMultipartSession.CreateMultipartSessionMock.defaultExpectation.Counter, 1)
+		mm_want := mmCreateMultipartSession.CreateMultipartSessionMock.defaultExpectation.params
+		mm_got := StorageRepositoryMockCreateMultipartSessionParams{ctx, uploadID, expectedParts, contentType}
+		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmCreateMultipartSession.t.Errorf("StorageRepositoryMock.CreateMultipartSession got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmCreateMultipartSession.CreateMultipartSessionMock.defaultExpectation.results
+		if mm_results == nil {
+			mmCreateMultipartSession.t.Fatal("No results are set for the StorageRepositoryMock.CreateMultipartSession")
+		}
+		return (*mm_results).err
+	}
+	if mmCreateMultipartSession.funcCreateMultipartSession != nil {
+		return mmCreateMultipartSession.funcCreateMultipartSession(ctx, uploadID, expectedParts, contentType)
+	}
+	mmCreateMultipartSession.t.Fatalf("Unexpected call to StorageRepositoryMock.CreateMultipartSession. %v %v %v %v", ctx, uploadID, expectedParts, contentType)
+	return
+}
+
+// CreateMultipartSessionAfterCounter returns a count of finished StorageRepositoryMock.CreateMultipartSession invocations
+func (mmCreateMultipartSession *StorageRepositoryMock) CreateMultipartSessionAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmCreateMultipartSession.afterCreateMultipartSessionCounter)
+}
+
+// CreateMultipartSessionBeforeCounter returns a count of StorageRepositoryMock.CreateMultipartSession invocations
+func (mmCreateMultipartSession *StorageRepositoryMock) CreateMultipartSessionBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmCreateMultipartSession.beforeCreateMultipartSessionCounter)
+}
+
+// Calls returns a list of arguments used in each call to StorageRepositoryMock.CreateMultipartSession.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmCreateMultipartSession *mStorageRepositoryMockCreateMultipartSession) Calls() []*StorageRepositoryMockCreateMultipartSessionParams {
+	mmCreateMultipartSession.mutex.RLock()
+
+	argCopy := make([]*StorageRepositoryMockCreateMultipartSessionParams, len(mmCreateMultipartSession.callArgs))
+	copy(argCopy, mmCreateMultipartSession.callArgs)
+
+	mmCreateMultipartSession.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockCreateMultipartSessionDone returns true if the count of the CreateMultipartSession invocations corresponds
+// the number of defined expectations
+func (m *StorageRepositoryMock) MinimockCreateMultipartSessionDone() bool {
+	for _, e := range m.CreateMultipartSessionMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.CreateMultipartSessionMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterCreateMultipartSessionCounter) < 1 {
+		return false
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcCreateMultipartSession != nil && mm_atomic.LoadUint64(&m.afterCreateMultipartSessionCounter) < 1 {
+		return false
+	}
+	return true
+}
+
+// MinimockCreateMultipartSessionInspect logs each unmet expectation
+func (m *StorageRepositoryMock) MinimockCreateMultipartSessionInspect() {
+	for _, e := range m.CreateMultipartSessionMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to StorageRepositoryMock.CreateMultipartSession with params: %#v", *e.params)
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.CreateMultipartSessionMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterCreateMultipartSessionCounter) < 1 {
+		if m.CreateMultipartSessionMock.defaultExpectation.params == nil {
+			m.t.Error("Expected call to StorageRepositoryMock.CreateMultipartSession")
+		} else {
+			m.t.Errorf("Expected call to StorageRepositoryMock.CreateMultipartSession with params: %#v", *m.CreateMultipartSessionMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcCreateMultipartSession != nil && mm_atomic.LoadUint64(&m.afterCreateMultipartSessionCounter) < 1 {
+		m.t.Error("Expected call to StorageRepositoryMock.CreateMultipartSession")
+	}
 }
 
 type mStorageRepositoryMockDeleteBlob struct {
@@ -968,6 +1657,7 @@ type StorageRepositoryMockStoreBlobExpectation struct {
 // StorageRepositoryMockStoreBlobParams contains parameters of the StorageRepository.StoreBlob
 type StorageRepositoryMockStoreBlobParams struct {
 	ctx    context.Context
+	blobID string
 	reader io.Reader
 }
 
@@ -978,7 +1668,7 @@ type StorageRepositoryMockStoreBlobResults struct {
 }
 
 // Expect sets up expected params for StorageRepository.StoreBlob
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, reader io.Reader) *mStorageRepositoryMockStoreBlob {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, blobID string, reader io.Reader) *mStorageRepositoryMockStoreBlob {
 	if mmStoreBlob.mock.funcStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("StorageRepositoryMock.StoreBlob mock is already set by Set")
 	}
@@ -987,7 +1677,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, 
 		mmStoreBlob.defaultExpectation = &StorageRepositoryMockStoreBlobExpectation{}
 	}
 
-	mmStoreBlob.defaultExpectation.params = &StorageRepositoryMockStoreBlobParams{ctx, reader}
+	mmStoreBlob.defaultExpectation.params = &StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 	for _, e := range mmStoreBlob.expectations {
 		if minimock.Equal(e.params, mmStoreBlob.defaultExpectation.params) {
 			mmStoreBlob.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmStoreBlob.defaultExpectation.params)
@@ -998,7 +1688,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, 
 }
 
 // Inspect accepts an inspector function that has same arguments as the StorageRepository.StoreBlob
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Inspect(f func(ctx context.Context, reader io.Reader)) *mStorageRepositoryMockStoreBlob {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Inspect(f func(ctx context.Context, blobID string, reader io.Reader)) *mStorageRepositoryMockStoreBlob {
 	if mmStoreBlob.mock.inspectFuncStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.StoreBlob")
 	}
@@ -1022,7 +1712,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Return(bp1 *model.BlobMeta, 
 }
 
 // Set uses given function f to mock the StorageRepository.StoreBlob method
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error)) *StorageRepositoryMock {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error)) *StorageRepositoryMock {
 	if mmStoreBlob.defaultExpectation != nil {
 		mmStoreBlob.mock.t.Fatalf("Default expectation is already set for the StorageRepository.StoreBlob method")
 	}
@@ -1037,14 +1727,14 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Conte
 
 // When sets expectation for the StorageRepository.StoreBlob which will trigger the result defined by the following
 // Then helper
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) When(ctx context.Context, reader io.Reader) *StorageRepositoryMockStoreBlobExpectation {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) When(ctx context.Context, blobID string, reader io.Reader) *StorageRepositoryMockStoreBlobExpectation {
 	if mmStoreBlob.mock.funcStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("StorageRepositoryMock.StoreBlob mock is already set by Set")
 	}
 
 	expectation := &StorageRepositoryMockStoreBlobExpectation{
 		mock:   mmStoreBlob.mock,
-		params: &StorageRepositoryMockStoreBlobParams{ctx, reader},
+		params: &StorageRepositoryMockStoreBlobParams{ctx, blobID, reader},
 	}
 	mmStoreBlob.expectations = append(mmStoreBlob.expectations, expectation)
 	return expectation
@@ -1057,15 +1747,15 @@ func (e *StorageRepositoryMockStoreBlobExpectation) Then(bp1 *model.BlobMeta, er
 }
 
 // StoreBlob implements repository.StorageRepository
-func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error) {
+func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error) {
 	mm_atomic.AddUint64(&mmStoreBlob.beforeStoreBlobCounter, 1)
 	defer mm_atomic.AddUint64(&mmStoreBlob.afterStoreBlobCounter, 1)
 
 	if mmStoreBlob.inspectFuncStoreBlob != nil {
-		mmStoreBlob.inspectFuncStoreBlob(ctx, reader)
+		mmStoreBlob.inspectFuncStoreBlob(ctx, blobID, reader)
 	}
 
-	mm_params := StorageRepositoryMockStoreBlobParams{ctx, reader}
+	mm_params := StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 
 	// Record call args
 	mmStoreBlob.StoreBlobMock.mutex.Lock()
@@ -1082,7 +1772,7 @@ func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader 
 	if mmStoreBlob.StoreBlobMock.defaultExpectation != nil {
 		mm_atomic.AddUint64(&mmStoreBlob.StoreBlobMock.defaultExpectation.Counter, 1)
 		mm_want := mmStoreBlob.StoreBlobMock.defaultExpectation.params
-		mm_got := StorageRepositoryMockStoreBlobParams{ctx, reader}
+		mm_got := StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
 			mmStoreBlob.t.Errorf("StorageRepositoryMock.StoreBlob got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
 		}
@@ -1094,9 +1784,9 @@ func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader 
 		return (*mm_results).bp1, (*mm_results).err
 	}
 	if mmStoreBlob.funcStoreBlob != nil {
-		return mmStoreBlob.funcStoreBlob(ctx, reader)
+		return mmStoreBlob.funcStoreBlob(ctx, blobID, reader)
 	}
-	mmStoreBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.StoreBlob. %v %v", ctx, reader)
+	mmStoreBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.StoreBlob. %v %v %v", ctx, blobID, reader)
 	return
 }
 
@@ -1165,10 +1855,235 @@ func (m *StorageRepositoryMock) MinimockStoreBlobInspect() {
 	}
 }
 
+type mStorageRepositoryMockStorePart struct {
+	mock               *StorageRepositoryMock
+	defaultExpectation *StorageRepositoryMockStorePartExpectation
+	expectations       []*StorageRepositoryMockStorePartExpectation
+
+	callArgs []*StorageRepositoryMockStorePartParams
+	mutex    sync.RWMutex
+}
+
+// StorageRepositoryMockStorePartExpectation specifies expectation struct of the StorageRepository.StorePart
+type StorageRepositoryMockStorePartExpectation struct {
+	mock    *StorageRepositoryMock
+	params  *StorageRepositoryMockStorePartParams
+	results *StorageRepositoryMockStorePartResults
+	Counter uint64
+}
+
+// StorageRepositoryMockStorePartParams contains parameters of the StorageRepository.StorePart
+type StorageRepositoryMockStorePartParams struct {
+	ctx        context.Context
+	uploadID   string
+	partNumber int32
+	reader     io.Reader
+}
+
+// StorageRepositoryMockStorePartResults contains results of the StorageRepository.StorePart
+type StorageRepositoryMockStorePartResults struct {
+	checksumMD5 string
+	err         error
+}
+
+// Expect sets up expected params for StorageRepository.StorePart
+func (mmStorePart *mStorageRepositoryMockStorePart) Expect(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) *mStorageRepositoryMockStorePart {
+	if mmStorePart.mock.funcStorePart != nil {
+		mmStorePart.mock.t.Fatalf("StorageRepositoryMock.StorePart mock is already set by Set")
+	}
+
+	if mmStorePart.defaultExpectation == nil {
+		mmStorePart.defaultExpectation = &StorageRepositoryMockStorePartExpectation{}
+	}
+
+	mmStorePart.defaultExpectation.params = &StorageRepositoryMockStorePartParams{ctx, uploadID, partNumber, reader}
+	for _, e := range mmStorePart.expectations {
+		if minimock.Equal(e.params, mmStorePart.defaultExpectation.params) {
+			mmStorePart.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmStorePart.defaultExpectation.params)
+		}
+	}
+
+	return mmStorePart
+}
+
+// Inspect accepts an inspector function that has same arguments as the StorageRepository.StorePart
+func (mmStorePart *mStorageRepositoryMockStorePart) Inspect(f func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader)) *mStorageRepositoryMockStorePart {
+	if mmStorePart.mock.inspectFuncStorePart != nil {
+		mmStorePart.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.StorePart")
+	}
+
+	mmStorePart.mock.inspectFuncStorePart = f
+
+	return mmStorePart
+}
+
+// Return sets up results that will be returned by StorageRepository.StorePart
+func (mmStorePart *mStorageRepositoryMockStorePart) Return(checksumMD5 string, err error) *StorageRepositoryMock {
+	if mmStorePart.mock.funcStorePart != nil {
+		mmStorePart.mock.t.Fatalf("StorageRepositoryMock.StorePart mock is already set by Set")
+	}
+
+	if mmStorePart.defaultExpectation == nil {
+		mmStorePart.defaultExpectation = &StorageRepositoryMockStorePartExpectation{mock: mmStorePart.mock}
+	}
+	mmStorePart.defaultExpectation.results = &StorageRepositoryMockStorePartResults{checksumMD5, err}
+	return mmStorePart.mock
+}
+
+// Set uses given function f to mock the StorageRepository.StorePart method
+func (mmStorePart *mStorageRepositoryMockStorePart) Set(f func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (checksumMD5 string, err error)) *StorageRepositoryMock {
+	if mmStorePart.defaultExpectation != nil {
+		mmStorePart.mock.t.Fatalf("Default expectation is already set for the StorageRepository.StorePart method")
+	}
+
+	if len(mmStorePart.expectations) > 0 {
+		mmStorePart.mock.t.Fatalf("Some expectations are already set for the StorageRepository.StorePart method")
+	}
+
+	mmStorePart.mock.funcStorePart = f
+	return mmStorePart.mock
+}
+
+// When sets expectation for the StorageRepository.StorePart which will trigger the result defined by the following
+// Then helper
+func (mmStorePart *mStorageRepositoryMockStorePart) When(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) *StorageRepositoryMockStorePartExpectation {
+	if mmStorePart.mock.funcStorePart != nil {
+		mmStorePart.mock.t.Fatalf("StorageRepositoryMock.StorePart mock is already set by Set")
+	}
+
+	expectation := &StorageRepositoryMockStorePartExpectation{
+		mock:   mmStorePart.mock,
+		params: &StorageRepositoryMockStorePartParams{ctx, uploadID, partNumber, reader},
+	}
+	mmStorePart.expectations = append(mmStorePart.expectations, expectation)
+	return expectation
+}
+
+// Then sets up StorageRepository.StorePart return parameters for the expectation previously defined by the When method
+func (e *StorageRepositoryMockStorePartExpectation) Then(checksumMD5 string, err error) *StorageRepositoryMock {
+	e.results = &StorageRepositoryMockStorePartResults{checksumMD5, err}
+	return e.mock
+}
+
+// StorePart implements repository.StorageRepository
+func (mmStorePart *StorageRepositoryMock) StorePart(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (checksumMD5 string, err error) {
+	mm_atomic.AddUint64(&mmStorePart.beforeStorePartCounter, 1)
+	defer mm_atomic.AddUint64(&mmStorePart.afterStorePartCounter, 1)
+
+	if mmStorePart.inspectFuncStorePart != nil {
+		mmStorePart.inspectFuncStorePart(ctx, uploadID, partNumber, reader)
+	}
+
+	mm_params := StorageRepositoryMockStorePartParams{ctx, uploadID, partNumber, reader}
+
+	// Record call args
+	mmStorePart.StorePartMock.mutex.Lock()
+	mmStorePart.StorePartMock.callArgs = append(mmStorePart.StorePartMock.callArgs, &mm_params)
+	mmStorePart.StorePartMock.mutex.Unlock()
+
+	for _, e := range mmStorePart.StorePartMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.checksumMD5, e.results.err
+		}
+	}
+
+	if mmStorePart.StorePartMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmStorePart.StorePartMock.defaultExpectation.Counter, 1)
+		mm_want := mmStorePart.StorePartMock.defaultExpectation.params
+		mm_got := StorageRepositoryMockStorePartParams{ctx, uploadID, partNumber, reader}
+		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmStorePart.t.Errorf("StorageRepositoryMock.StorePart got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmStorePart.StorePartMock.defaultExpectation.results
+		if mm_results == nil {
+			mmStorePart.t.Fatal("No results are set for the StorageRepositoryMock.StorePart")
+		}
+		return (*mm_results).checksumMD5, (*mm_results).err
+	}
+	if mmStorePart.funcStorePart != nil {
+		return mmStorePart.funcStorePart(ctx, uploadID, partNumber, reader)
+	}
+	mmStorePart.t.Fatalf("Unexpected call to StorageRepositoryMock.StorePart. %v %v %v %v", ctx, uploadID, partNumber, reader)
+	return
+}
+
+// StorePartAfterCounter returns a count of finished StorageRepositoryMock.StorePart invocations
+func (mmStorePart *StorageRepositoryMock) StorePartAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmStorePart.afterStorePartCounter)
+}
+
+// StorePartBeforeCounter returns a count of StorageRepositoryMock.StorePart invocations
+func (mmStorePart *StorageRepositoryMock) StorePartBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmStorePart.beforeStorePartCounter)
+}
+
+// Calls returns a list of arguments used in each call to StorageRepositoryMock.StorePart.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmStorePart *mStorageRepositoryMockStorePart) Calls() []*StorageRepositoryMockStorePartParams {
+	mmStorePart.mutex.RLock()
+
+	argCopy := make([]*StorageRepositoryMockStorePartParams, len(mmStorePart.callArgs))
+	copy(argCopy, mmStorePart.callArgs)
+
+	mmStorePart.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockStorePartDone returns true if the count of the StorePart invocations corresponds
+// the number of defined expectations
+func (m *StorageRepositoryMock) MinimockStorePartDone() bool {
+	for _, e := range m.StorePartMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.StorePartMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterStorePartCounter) < 1 {
+		return false
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcStorePart != nil && mm_atomic.LoadUint64(&m.afterStorePartCounter) < 1 {
+		return false
+	}
+	return true
+}
+
+// MinimockStorePartInspect logs each unmet expectation
+func (m *StorageRepositoryMock) MinimockStorePartInspect() {
+	for _, e := range m.StorePartMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to StorageRepositoryMock.StorePart with params: %#v", *e.params)
+		}
+	}
+
+	// if default expectation was set then invocations count should be greater than zero
+	if m.StorePartMock.defaultExpectation != nil && mm_atomic.LoadUint64(&m.afterStorePartCounter) < 1 {
+		if m.StorePartMock.defaultExpectation.params == nil {
+			m.t.Error("Expected call to StorageRepositoryMock.StorePart")
+		} else {
+			m.t.Errorf("Expected call to StorageRepositoryMock.StorePart with params: %#v", *m.StorePartMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcStorePart != nil && mm_atomic.LoadUint64(&m.afterStorePartCounter) < 1 {
+		m.t.Error("Expected call to StorageRepositoryMock.StorePart")
+	}
+}
+
 // MinimockFinish checks that all mocked methods have been called the expected number of times
 func (m *StorageRepositoryMock) MinimockFinish() {
 	m.finishOnce.Do(func() {
 		if !m.minimockDone() {
+			m.MinimockAssemblePartsInspect()
+
+			m.MinimockCleanupMultipartInspect()
+
+			m.MinimockCreateMultipartSessionInspect()
+
 			m.MinimockDeleteBlobInspect()
 
 			m.MinimockHealthCheckInspect()
@@ -1178,6 +2093,8 @@ func (m *StorageRepositoryMock) MinimockFinish() {
 			m.MinimockRetrieveBlobRangeInspect()
 
 			m.MinimockStoreBlobInspect()
+
+			m.MinimockStorePartInspect()
 			m.t.FailNow()
 		}
 	})
@@ -1202,9 +2119,13 @@ func (m *StorageRepositoryMock) MinimockWait(timeout mm_time.Duration) {
 func (m *StorageRepositoryMock) minimockDone() bool {
 	done := true
 	return done &&
+		m.MinimockAssemblePartsDone() &&
+		m.MinimockCleanupMultipartDone() &&
+		m.MinimockCreateMultipartSessionDone() &&
 		m.MinimockDeleteBlobDone() &&
 		m.MinimockHealthCheckDone() &&
 		m.MinimockRetrieveBlobDone() &&
 		m.MinimockRetrieveBlobRangeDone() &&
-		m.MinimockStoreBlobDone()
+		m.MinimockStoreBlobDone() &&
+		m.MinimockStorePartDone()
 }

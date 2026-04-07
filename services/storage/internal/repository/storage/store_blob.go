@@ -2,75 +2,34 @@ package storage
 
 import (
 	"context"
-	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"syscall"
-
-	"github.com/google/uuid"
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/storage/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
 )
 
-func (r *repo) StoreBlob(ctx context.Context, reader io.Reader) (*model.BlobMeta, error) {
+func (r *repo) StoreBlob(ctx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	if err := os.MkdirAll(r.dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create data dir: %w", err)
-	}
-
-	if err := ensureWritableDiskSpace(r.dataDir); err != nil {
+	if err := ensureDirReady(r.dataDir); err != nil {
 		return nil, err
 	}
 
-	blobID := uuid.New().String()
-	finalPath := r.blobPath(blobID)
-	tempPath := finalPath + ".tmp"
-
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	result, err := writeAtomically(ctx, r.blobPath(blobID), reader, "blob")
 	if err != nil {
-		return nil, fmt.Errorf("create temp blob file: %w", err)
-	}
-
-	hasher := md5.New()
-	written, copyErr := io.Copy(io.MultiWriter(file, hasher), newContextReader(ctx, reader))
-	if copyErr != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
-
-		if isDiskFull(copyErr) {
-			return nil, domainerrors.ErrDiskFull
-		}
-
-		return nil, fmt.Errorf("write blob data: %w", copyErr)
-	}
-
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
-		return nil, fmt.Errorf("sync temp blob file: %w", err)
-	}
-
-	if err := file.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return nil, fmt.Errorf("close temp blob file: %w", err)
-	}
-
-	if err := os.Rename(tempPath, finalPath); err != nil {
-		_ = os.Remove(tempPath)
-		return nil, fmt.Errorf("commit blob file: %w", err)
+		return nil, err
 	}
 
 	return &model.BlobMeta{
 		BlobID:      blobID,
-		ChecksumMD5: fmt.Sprintf("%x", hasher.Sum(nil)),
-		SizeBytes:   written,
+		ChecksumMD5: result.checksumMD5,
+		SizeBytes:   result.sizeBytes,
 	}, nil
 }
 
