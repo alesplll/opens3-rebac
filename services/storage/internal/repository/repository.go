@@ -14,9 +14,8 @@ type StorageRepository interface {
 	DeleteBlob(ctx context.Context, blobID string) error
 	HealthCheck(ctx context.Context) error
 
-	// TODO(phase-2 multipart):
-	// CreateMultipartSession(ctx context.Context, uploadID string, expectedParts int32) error
-	// StorePart(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (checksumMD5 string, err error)
-	// AssembleParts(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (*model.BlobMeta, error)
-	// CleanupMultipart(ctx context.Context, uploadID string) error
+	CreateMultipartSession(ctx context.Context, uploadID string, expectedParts int32, contentType string) error
+	StorePart(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (checksumMD5 string, err error)
+	AssembleParts(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (*model.BlobMeta, error)
+	CleanupMultipart(ctx context.Context, uploadID string) error
 }
