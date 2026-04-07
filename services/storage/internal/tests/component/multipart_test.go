@@ -32,6 +32,29 @@ func TestMultipartUploadComplete_Success(t *testing.T) {
 	require.Equal(t, md5Hex(body), checksum)
 }
 
+func TestMultipartUploadComplete_SuccessMultiChunkPart(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uploadID := initiateMultipart(t, ctx, 2, "application/octet-stream")
+
+	partOne := makePattern(testChunkSize*2 + 123)
+	partTwo := makePattern(testChunkSize + 17)
+	checksumOne := uploadPart(t, ctx, uploadID, 1, partOne)
+	checksumTwo := uploadPart(t, ctx, uploadID, 2, partTwo)
+
+	blobID, checksum := completeMultipart(t, ctx, uploadID, []*desc.PartInfo{
+		{PartNumber: 1, ChecksumMd5: checksumOne},
+		{PartNumber: 2, ChecksumMd5: checksumTwo},
+	})
+
+	body, totalSize := retrieveBlob(t, ctx, blobID, 0, 0)
+	expectedBody := append(partOne, partTwo...)
+	require.Equal(t, int64(len(expectedBody)), totalSize)
+	require.Equal(t, expectedBody, body)
+	require.Equal(t, md5Hex(body), checksum)
+}
+
 func TestMultipartUploadAbort_Success(t *testing.T) {
 	t.Parallel()
 

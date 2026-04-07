@@ -81,6 +81,7 @@ func TestStoreObject_EmptyStream(t *testing.T) {
 
 type testStorageService struct {
 	storeObjectFn func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error)
+	uploadPartFn  func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error)
 }
 
 var _ service.StorageService = testStorageService{}
@@ -105,7 +106,10 @@ func (s testStorageService) InitiateMultipartUpload(ctx context.Context, expecte
 }
 
 func (s testStorageService) UploadPart(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
-	panic("unexpected call")
+	if s.uploadPartFn == nil {
+		panic("unexpected call")
+	}
+	return s.uploadPartFn(ctx, uploadID, partNumber, reader)
 }
 
 func (s testStorageService) CompleteMultipartUpload(ctx context.Context, uploadID string, parts []model.PartInfo) (*model.BlobMeta, error) {

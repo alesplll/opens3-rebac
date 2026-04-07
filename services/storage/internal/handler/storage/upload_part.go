@@ -1,35 +1,30 @@
 package storage
 
 import (
-	"bytes"
-	"io"
-
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 func (h *handler) UploadPart(stream desc.DataStorageService_UploadPartServer) error {
-	var buf bytes.Buffer
-	var uploadID string
-	var partNumber int32
-
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		if uploadID == "" {
-			uploadID = req.GetUploadId()
-			partNumber = req.GetPartNumber()
-		}
-
-		buf.Write(req.GetData())
+	firstReq, err := recvFirstMessage(stream.Recv)
+	if err != nil {
+		return err
 	}
 
-	checksum, err := h.service.UploadPart(stream.Context(), uploadID, partNumber, &buf)
+	reader := newChunkStreamReader(firstReq.GetData(), func() ([]byte, error) {
+		req, err := stream.Recv()
+		if err != nil {
+			return nil, err
+		}
+
+		return req.GetData(), nil
+	})
+
+	checksum, err := h.service.UploadPart(
+		stream.Context(),
+		firstReq.GetUploadId(),
+		firstReq.GetPartNumber(),
+		reader,
+	)
 	if err != nil {
 		return err
 	}
