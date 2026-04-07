@@ -65,6 +65,12 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     networks:
       - opens3-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 3s
 
   neo4j:
     image: neo4j:5.21.0
@@ -81,6 +87,12 @@ services:
       - neo4j-plugins:/plugins
     networks:
       - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.7.0
@@ -110,6 +122,12 @@ services:
       - "9092:9092"
     networks:
       - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
 
   # ── Services ───────────────────────────────────────────────────────────────
   # docker compose --profile services up
@@ -159,8 +177,10 @@ services:
       - opens3-network
     restart: unless-stopped
     depends_on:
-      - redis
-      - users
+      redis:
+        condition: service_healthy
+      users:
+        condition: service_started
 
   authz:
     profiles: [services]
@@ -175,9 +195,12 @@ services:
       - opens3-network
     restart: unless-stopped
     depends_on:
-      - neo4j
-      - redis
-      - kafka
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
 
   # placeholder — раскомментировать когда сервис будет готов
   # metadata:
@@ -210,6 +233,12 @@ services:
     networks:
       - opens3-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50053"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   # gateway:
   #   profiles: [services]

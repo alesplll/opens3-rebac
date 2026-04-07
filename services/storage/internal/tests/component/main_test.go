@@ -33,8 +33,12 @@ func TestMain(m *testing.M) {
 	svc := storageService.NewService(repo)
 	h := storageHandler.NewHandler(svc)
 
+	const maxMsgSize = 16 * 1024 * 1024 // 16 MB — must exceed handler's 8 MB chunk size
+
 	nopLog := &logger.NoopLogger{}
 	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
 		grpc.UnaryInterceptor(validationInterceptor.ErrorCodesUnaryInterceptor(nopLog)),
 		grpc.StreamInterceptor(validationInterceptor.ErrorCodesStreamInterceptor(nopLog)),
 	)
@@ -50,6 +54,10 @@ func TestMain(m *testing.M) {
 	conn, err := grpc.NewClient(
 		lis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
+		),
 	)
 	if err != nil {
 		panic(err)
