@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
+	"github.com/alesplll/opens3-rebac/services/storage/internal/observability"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"go.uber.org/zap"
 )
@@ -17,6 +18,7 @@ func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, _ in
 	}
 
 	meta.ContentType = contentType
+	observability.AddWriteBytes(ctx, meta.SizeBytes)
 	logger.Info(
 		ctx,
 		"stored blob",
