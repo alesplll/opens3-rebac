@@ -31,10 +31,17 @@ func TestStoreObject(t *testing.T) {
 		content     = []byte(gofakeit.Sentence(10))
 		contentType = "application/octet-stream"
 
-		blobMeta = &model.BlobMeta{
+		repoBlobMeta = &model.BlobMeta{
 			BlobID:      gofakeit.UUID(),
 			ChecksumMD5: gofakeit.UUID(),
 			SizeBytes:   int64(len(content)),
+			ContentType: "",
+		}
+
+		wantBlobMeta = &model.BlobMeta{
+			BlobID:      repoBlobMeta.BlobID,
+			ChecksumMD5: repoBlobMeta.ChecksumMD5,
+			SizeBytes:   repoBlobMeta.SizeBytes,
 			ContentType: contentType,
 		}
 
@@ -56,11 +63,16 @@ func TestStoreObject(t *testing.T) {
 				size:        int64(len(content)),
 				contentType: contentType,
 			},
-			want: blobMeta,
+			want: wantBlobMeta,
 			err:  nil,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.StoreBlobMock.Expect(ctx, bytes.NewReader(content)).Return(blobMeta, nil)
+				mock.StoreBlobMock.Expect(ctx, bytes.NewReader(content)).Return(&model.BlobMeta{
+					BlobID:      repoBlobMeta.BlobID,
+					ChecksumMD5: repoBlobMeta.ChecksumMD5,
+					SizeBytes:   repoBlobMeta.SizeBytes,
+					ContentType: repoBlobMeta.ContentType,
+				}, nil)
 				return mock
 			},
 		},

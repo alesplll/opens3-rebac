@@ -1,13 +1,16 @@
 package storage
 
 import (
+	"errors"
+	"io"
+
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 const chunkSize = 8 * 1024 * 1024 // 8 MB
 
 func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.DataStorageService_RetrieveObjectServer) error {
-	reader, totalSize, err := h.service.RetrieveObject(stream.Context(), req.GetBlobId(), req.GetRangeStart(), req.GetRangeEnd())
+	reader, totalSize, err := h.service.RetrieveObject(stream.Context(), req.GetBlobId(), req.GetOffset(), req.GetLength())
 	if err != nil {
 		return err
 	}
@@ -31,7 +34,11 @@ func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.Da
 			}
 		}
 		if readErr != nil {
-			break
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+
+			return readErr
 		}
 	}
 

@@ -1,35 +1,39 @@
 package storage
 
 import (
-	"bytes"
+	"errors"
 	"io"
 
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
 func (h *handler) StoreObject(stream desc.DataStorageService_StoreObjectServer) error {
-	var buf bytes.Buffer
-	var size int64
-	var contentType string
-
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			break
+	firstReq, err := stream.Recv()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
 		}
-		if err != nil {
-			return err
-		}
-
-		if size == 0 {
-			size = req.GetSize()
-			contentType = req.GetContentType()
-		}
-
-		buf.Write(req.GetData())
+		return err
 	}
 
-	meta, err := h.service.StoreObject(stream.Context(), &buf, size, contentType)
+	reader := &chunkReader{
+		recvChunk: func() ([]byte, error) {
+			req, err := stream.Recv()
+			if err != nil {
+				return nil, err
+			}
+
+			return req.GetData(), nil
+		},
+		pending: firstReq.GetData(),
+	}
+
+	meta, err := h.service.StoreObject(
+		stream.Context(),
+		reader,
+		firstReq.GetSize(),
+		firstReq.GetContentType(),
+	)
 	if err != nil {
 		return err
 	}
