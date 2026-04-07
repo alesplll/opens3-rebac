@@ -62,8 +62,8 @@ type StorageRepositoryMock struct {
 	beforeRetrieveBlobRangeCounter uint64
 	RetrieveBlobRangeMock          mStorageRepositoryMockRetrieveBlobRange
 
-	funcStoreBlob          func(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error)
-	inspectFuncStoreBlob   func(ctx context.Context, reader io.Reader)
+	funcStoreBlob          func(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error)
+	inspectFuncStoreBlob   func(ctx context.Context, blobID string, reader io.Reader)
 	afterStoreBlobCounter  uint64
 	beforeStoreBlobCounter uint64
 	StoreBlobMock          mStorageRepositoryMockStoreBlob
@@ -1657,6 +1657,7 @@ type StorageRepositoryMockStoreBlobExpectation struct {
 // StorageRepositoryMockStoreBlobParams contains parameters of the StorageRepository.StoreBlob
 type StorageRepositoryMockStoreBlobParams struct {
 	ctx    context.Context
+	blobID string
 	reader io.Reader
 }
 
@@ -1667,7 +1668,7 @@ type StorageRepositoryMockStoreBlobResults struct {
 }
 
 // Expect sets up expected params for StorageRepository.StoreBlob
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, reader io.Reader) *mStorageRepositoryMockStoreBlob {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, blobID string, reader io.Reader) *mStorageRepositoryMockStoreBlob {
 	if mmStoreBlob.mock.funcStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("StorageRepositoryMock.StoreBlob mock is already set by Set")
 	}
@@ -1676,7 +1677,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, 
 		mmStoreBlob.defaultExpectation = &StorageRepositoryMockStoreBlobExpectation{}
 	}
 
-	mmStoreBlob.defaultExpectation.params = &StorageRepositoryMockStoreBlobParams{ctx, reader}
+	mmStoreBlob.defaultExpectation.params = &StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 	for _, e := range mmStoreBlob.expectations {
 		if minimock.Equal(e.params, mmStoreBlob.defaultExpectation.params) {
 			mmStoreBlob.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmStoreBlob.defaultExpectation.params)
@@ -1687,7 +1688,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Expect(ctx context.Context, 
 }
 
 // Inspect accepts an inspector function that has same arguments as the StorageRepository.StoreBlob
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Inspect(f func(ctx context.Context, reader io.Reader)) *mStorageRepositoryMockStoreBlob {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Inspect(f func(ctx context.Context, blobID string, reader io.Reader)) *mStorageRepositoryMockStoreBlob {
 	if mmStoreBlob.mock.inspectFuncStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("Inspect function is already set for StorageRepositoryMock.StoreBlob")
 	}
@@ -1711,7 +1712,7 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Return(bp1 *model.BlobMeta, 
 }
 
 // Set uses given function f to mock the StorageRepository.StoreBlob method
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error)) *StorageRepositoryMock {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error)) *StorageRepositoryMock {
 	if mmStoreBlob.defaultExpectation != nil {
 		mmStoreBlob.mock.t.Fatalf("Default expectation is already set for the StorageRepository.StoreBlob method")
 	}
@@ -1726,14 +1727,14 @@ func (mmStoreBlob *mStorageRepositoryMockStoreBlob) Set(f func(ctx context.Conte
 
 // When sets expectation for the StorageRepository.StoreBlob which will trigger the result defined by the following
 // Then helper
-func (mmStoreBlob *mStorageRepositoryMockStoreBlob) When(ctx context.Context, reader io.Reader) *StorageRepositoryMockStoreBlobExpectation {
+func (mmStoreBlob *mStorageRepositoryMockStoreBlob) When(ctx context.Context, blobID string, reader io.Reader) *StorageRepositoryMockStoreBlobExpectation {
 	if mmStoreBlob.mock.funcStoreBlob != nil {
 		mmStoreBlob.mock.t.Fatalf("StorageRepositoryMock.StoreBlob mock is already set by Set")
 	}
 
 	expectation := &StorageRepositoryMockStoreBlobExpectation{
 		mock:   mmStoreBlob.mock,
-		params: &StorageRepositoryMockStoreBlobParams{ctx, reader},
+		params: &StorageRepositoryMockStoreBlobParams{ctx, blobID, reader},
 	}
 	mmStoreBlob.expectations = append(mmStoreBlob.expectations, expectation)
 	return expectation
@@ -1746,15 +1747,15 @@ func (e *StorageRepositoryMockStoreBlobExpectation) Then(bp1 *model.BlobMeta, er
 }
 
 // StoreBlob implements repository.StorageRepository
-func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader io.Reader) (bp1 *model.BlobMeta, err error) {
+func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, blobID string, reader io.Reader) (bp1 *model.BlobMeta, err error) {
 	mm_atomic.AddUint64(&mmStoreBlob.beforeStoreBlobCounter, 1)
 	defer mm_atomic.AddUint64(&mmStoreBlob.afterStoreBlobCounter, 1)
 
 	if mmStoreBlob.inspectFuncStoreBlob != nil {
-		mmStoreBlob.inspectFuncStoreBlob(ctx, reader)
+		mmStoreBlob.inspectFuncStoreBlob(ctx, blobID, reader)
 	}
 
-	mm_params := StorageRepositoryMockStoreBlobParams{ctx, reader}
+	mm_params := StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 
 	// Record call args
 	mmStoreBlob.StoreBlobMock.mutex.Lock()
@@ -1771,7 +1772,7 @@ func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader 
 	if mmStoreBlob.StoreBlobMock.defaultExpectation != nil {
 		mm_atomic.AddUint64(&mmStoreBlob.StoreBlobMock.defaultExpectation.Counter, 1)
 		mm_want := mmStoreBlob.StoreBlobMock.defaultExpectation.params
-		mm_got := StorageRepositoryMockStoreBlobParams{ctx, reader}
+		mm_got := StorageRepositoryMockStoreBlobParams{ctx, blobID, reader}
 		if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
 			mmStoreBlob.t.Errorf("StorageRepositoryMock.StoreBlob got unexpected parameters, want: %#v, got: %#v%s\n", *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
 		}
@@ -1783,9 +1784,9 @@ func (mmStoreBlob *StorageRepositoryMock) StoreBlob(ctx context.Context, reader 
 		return (*mm_results).bp1, (*mm_results).err
 	}
 	if mmStoreBlob.funcStoreBlob != nil {
-		return mmStoreBlob.funcStoreBlob(ctx, reader)
+		return mmStoreBlob.funcStoreBlob(ctx, blobID, reader)
 	}
-	mmStoreBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.StoreBlob. %v %v", ctx, reader)
+	mmStoreBlob.t.Fatalf("Unexpected call to StorageRepositoryMock.StoreBlob. %v %v %v", ctx, blobID, reader)
 	return
 }
 

@@ -47,7 +47,7 @@ func TestStoreObject(t *testing.T) {
 				contentType: contentType,
 			},
 			want: &model.BlobMeta{
-				BlobID:      "blob-1",
+				BlobID:      "",
 				ChecksumMD5: "checksum-1",
 				SizeBytes:   int64(len(content)),
 				ContentType: contentType,
@@ -55,14 +55,15 @@ func TestStoreObject(t *testing.T) {
 			err: nil,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.StoreBlobMock.Set(func(gotCtx context.Context, reader io.Reader) (*model.BlobMeta, error) {
+				mock.StoreBlobMock.Set(func(gotCtx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
 					require.Equal(t, ctx, gotCtx)
+					require.NotEmpty(t, blobID)
 					body, err := io.ReadAll(reader)
 					require.NoError(t, err)
 					require.Equal(t, content, body)
 
 					return &model.BlobMeta{
-						BlobID:      "blob-1",
+						BlobID:      blobID,
 						ChecksumMD5: "checksum-1",
 						SizeBytes:   int64(len(content)),
 					}, nil
@@ -79,7 +80,7 @@ func TestStoreObject(t *testing.T) {
 				contentType: "",
 			},
 			want: &model.BlobMeta{
-				BlobID:      "blob-2",
+				BlobID:      "",
 				ChecksumMD5: "checksum-2",
 				SizeBytes:   int64(len(content)),
 				ContentType: "application/octet-stream",
@@ -87,14 +88,15 @@ func TestStoreObject(t *testing.T) {
 			err: nil,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.StoreBlobMock.Set(func(gotCtx context.Context, reader io.Reader) (*model.BlobMeta, error) {
+				mock.StoreBlobMock.Set(func(gotCtx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
 					require.Equal(t, ctx, gotCtx)
+					require.NotEmpty(t, blobID)
 					body, err := io.ReadAll(reader)
 					require.NoError(t, err)
 					require.Equal(t, content, body)
 
 					return &model.BlobMeta{
-						BlobID:      "blob-2",
+						BlobID:      blobID,
 						ChecksumMD5: "checksum-2",
 						SizeBytes:   int64(len(content)),
 					}, nil
@@ -128,19 +130,24 @@ func TestStoreObject(t *testing.T) {
 			err:  domainerrors.ErrInvalidBlobSize,
 			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
 				mock := mocks.NewStorageRepositoryMock(mc)
-				mock.StoreBlobMock.Set(func(gotCtx context.Context, reader io.Reader) (*model.BlobMeta, error) {
+				mock.StoreBlobMock.Set(func(gotCtx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
 					require.Equal(t, ctx, gotCtx)
+					require.NotEmpty(t, blobID)
 					body, err := io.ReadAll(reader)
 					require.NoError(t, err)
 					require.Equal(t, content, body)
 
 					return &model.BlobMeta{
-						BlobID:      "blob-mismatch",
+						BlobID:      blobID,
 						ChecksumMD5: "checksum-mismatch",
 						SizeBytes:   int64(len(content)),
 					}, nil
 				})
-				mock.DeleteBlobMock.Expect(ctx, "blob-mismatch").Return(nil)
+				mock.DeleteBlobMock.Set(func(gotCtx context.Context, blobID string) error {
+					require.Equal(t, ctx, gotCtx)
+					require.NotEmpty(t, blobID)
+					return nil
+				})
 				return mock
 			},
 		},
@@ -154,7 +161,16 @@ func TestStoreObject(t *testing.T) {
 
 			res, err := svc.StoreObject(tt.args.ctx, tt.args.reader, tt.args.size, tt.args.contentType)
 			require.Equal(t, tt.err, err)
-			require.Equal(t, tt.want, res)
+			if tt.want == nil {
+				require.Nil(t, res)
+				return
+			}
+
+			require.NotNil(t, res)
+			require.NotEmpty(t, res.BlobID)
+			require.Equal(t, tt.want.ChecksumMD5, res.ChecksumMD5)
+			require.Equal(t, tt.want.SizeBytes, res.SizeBytes)
+			require.Equal(t, tt.want.ContentType, res.ContentType)
 		})
 	}
 }

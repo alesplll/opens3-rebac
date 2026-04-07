@@ -8,6 +8,7 @@ import (
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/observability"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -22,9 +23,16 @@ func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, size
 		contentType = defaultContentType
 	}
 
-	meta, err := s.repo.StoreBlob(ctx, reader)
+	blobID := uuid.New().String()
+	meta, err := s.repo.StoreBlob(ctx, blobID, reader)
 	if err != nil {
-		logger.Error(ctx, "failed to store blob", zap.Error(err), zap.String("content_type", contentType))
+		logger.Error(
+			ctx,
+			"failed to store blob",
+			zap.Error(err),
+			zap.String("blob_id", blobID),
+			zap.String("content_type", contentType),
+		)
 		return nil, err
 	}
 

@@ -10,13 +10,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/google/uuid"
-
 	domainerrors "github.com/alesplll/opens3-rebac/services/storage/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
 )
 
-func (r *repo) StoreBlob(ctx context.Context, reader io.Reader) (*model.BlobMeta, error) {
+func (r *repo) StoreBlob(ctx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -29,7 +27,6 @@ func (r *repo) StoreBlob(ctx context.Context, reader io.Reader) (*model.BlobMeta
 		return nil, err
 	}
 
-	blobID := uuid.New().String()
 	finalPath := r.blobPath(blobID)
 	tempPath := finalPath + ".tmp"
 
