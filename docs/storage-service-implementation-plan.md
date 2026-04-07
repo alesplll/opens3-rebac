@@ -263,55 +263,235 @@ type StorageRepository interface {
 
 Статус: ⏭️ следующий этап
 
-#### 3.1. Producer: `object-stored`
+Фаза 3 нужно проектировать уже не как "добавим один producer и один consumer", а как часть
+полного object lifecycle в системе. Если целевая архитектура — **Metadata authoritative + pending/finalize**,
+то Kafka нужна не для замены Metadata как источника истины, а для:
 
-Когда: после успешного `StoreObject` или `CompleteMultipartUpload`
+- надёжной межсервисной координации
+- async cleanup
+- repair/reconcile flow
+- outbox-driven интеграций с AuthZ и Storage
 
-Payload:
+#### 3.1. Какие топики нужны в системе
+
+Ниже перечислены топики не только для Storage Service, а для всей системы object lifecycle.
+
+| Топик | Тип | Producer | Consumer | Обязателен | Назначение |
+|---|---|---|---|---|---|
+| `object-delete-requested` | command | Metadata | Storage, AuthZ | ✅ | Объект логически удалён, нужно асинхронно почистить blob и графовые связи |
+| `object-blob-stored` | event | Storage | Metadata | ⚠️ Желателен | Storage подтверждает, что blob/staging blob успешно записан и доступен для finalize/reconcile |
+| `object-finalized` | event | Metadata | AuthZ, audit/reconcile workers | ✅ | Metadata зафиксировала объект как committed и сделала его видимым |
+| `object-aborted` | event | Metadata | Storage, reconcile workers | ✅ | Upload session отменена или истекла, staging-данные можно очищать |
+| `object-delete-confirmed` | event | Storage | Metadata, reconcile workers | ⚠️ Желателен | Storage подтверждает физическое удаление blob |
+| `bucket-deleted` | event | Metadata | AuthZ, cleanup workers | ✅ | Бакет удалён из metadata, нужно чистить внешние проекции |
+
+#### 3.2. Семантика топиков
+
+##### `object-delete-requested`
+
+Главная команда удаления blob из Storage.
+
+Когда публикуется:
+- Metadata завершила логическое удаление объекта
+- объект больше не должен быть доступен через `GET/HEAD/List`
+
+Минимальный payload:
+
 ```json
 {
-  "blob_id": "550e8400-...",
-  "checksum_md5": "d41d8cd9...",
-  "size_bytes": 1048576
+  "event_id": "uuid",
+  "object_id": "uuid",
+  "version_id": "uuid",
+  "blob_id": "uuid",
+  "bucket_id": "uuid",
+  "bucket_name": "photos",
+  "object_key": "2026/cat.jpg",
+  "occurred_at": 1775606400000
 }
 ```
 
-Где добавлять: в **service-слой** (не в handler и не в repo). Service вызывает `repo.StoreBlob()`, получает `BlobMeta`, публикует событие, возвращает результат.
+Что делают consumers:
+- Storage удаляет blob идемпотентно
+- AuthZ удаляет объект и связанные отношения из своей проекции
+
+##### `object-blob-stored`
+
+Это событие не делает объект опубликованным само по себе. Оно подтверждает, что Storage успешно записал blob
+или staging-данные и их можно использовать для finalize/reconcile.
+
+Когда публикуется:
+- после успешного `StoreObject`
+- после успешного `CompleteMultipartUpload`
+
+Минимальный payload:
+
+```json
+{
+  "event_id": "uuid",
+  "upload_id": "uuid",
+  "blob_id": "uuid",
+  "checksum_md5": "d41d8cd9...",
+  "size_bytes": 1048576,
+  "occurred_at": 1775606400000
+}
+```
+
+Использование:
+- Metadata может сверять pending uploads и blob writes
+- reconcile worker может находить orphan staging/final blobs
+
+##### `object-finalized`
+
+Событие публикации объекта как committed в authoritative metadata plane.
+
+Когда публикуется:
+- после успешного `FinalizeUpload` / commit version в Metadata
+
+Минимальный payload:
+
+```json
+{
+  "event_id": "uuid",
+  "object_id": "uuid",
+  "version_id": "uuid",
+  "blob_id": "uuid",
+  "bucket_id": "uuid",
+  "bucket_name": "photos",
+  "object_key": "2026/cat.jpg",
+  "etag": "d41d8cd9...",
+  "size_bytes": 1048576,
+  "content_type": "image/jpeg",
+  "occurred_at": 1775606400000
+}
+```
+
+Использование:
+- AuthZ может создать/обновить проекцию объектного ресурса
+- audit и indexer-процессы получают единый authoritative event
+- downstream-системы узнают о committed object, а не о факте записи байт
+
+##### `object-aborted`
+
+Событие очистки незавершённой upload session.
+
+Когда публикуется:
+- пользователь вызвал AbortMultipartUpload
+- pending upload протух по TTL
+- Metadata перевела upload в `failed/expired/aborted`
+
+Минимальный payload:
+
+```json
+{
+  "event_id": "uuid",
+  "upload_id": "uuid",
+  "bucket_id": "uuid",
+  "bucket_name": "photos",
+  "object_key": "2026/cat.jpg",
+  "reason": "expired",
+  "occurred_at": 1775606400000
+}
+```
+
+Использование:
+- Storage удаляет staging-файлы
+- reconcile worker закрывает зависшие workflow
+
+##### `object-delete-confirmed`
+
+Подтверждение физического удаления blob.
+
+Когда публикуется:
+- Storage реально удалил blob
+- или установил, что blob уже отсутствует
+
+Использование:
+- Metadata может завершить internal cleanup и пометить blob как purged
+- reconcile worker видит завершённый delete flow
+
+#### 3.3. Как эти топики используются в системе целиком
+
+##### PutObject / CompleteMultipartUpload
+
+Основной commit path:
+1. Gateway создаёт upload intent через Metadata
+2. Gateway пишет байты в Storage
+3. Storage публикует `object-blob-stored`
+4. Gateway вызывает finalize в Metadata
+5. Metadata в своей транзакции фиксирует новую версию
+6. Metadata публикует `object-finalized`
+
+Важно:
+- объект становится видимым только после шага 5
+- `object-blob-stored` — это сигнал о durable write, но не о публикации объекта
+
+##### DeleteObject
+
+1. Gateway вызывает delete в Metadata
+2. Metadata логически удаляет объект или создаёт delete marker
+3. Metadata публикует `object-delete-requested`
+4. Storage удаляет blob
+5. Storage публикует `object-delete-confirmed`
+
+Важно:
+- пользователь больше не видит объект уже после шага 2
+- физическое удаление происходит асинхронно
+
+##### Abort / TTL cleanup
+
+1. Metadata переводит upload в `aborted` или `expired`
+2. Metadata публикует `object-aborted`
+3. Storage чистит staging-данные
+
+#### 3.4. Что должен реализовать именно Storage Service в Фазе 3
+
+Обязательный минимум для Storage:
+
+1. Consumer `object-delete-requested`
+2. Producer `object-blob-stored`
+3. Опционально producer `object-delete-confirmed`
+4. Idempotent delete handler
+5. Kafka lifecycle в `app.go`
+
+Где добавлять:
+- producer в service-слой
+- consumer в отдельный пакет `internal/consumer/`
+- запуск consumer параллельно с gRPC сервером из `app.go`
 
 Новая зависимость service-слоя:
+
 ```go
 type storageService struct {
     repo     repository.StorageRepository
-    producer kafka.Producer  // новое
+    producer kafka.Producer
 }
 ```
 
-#### 3.2. Consumer: `object-deleted`
+#### 3.5. Подводные камни Kafka
 
-Когда: Metadata помечает объект удалённым → публикует `object-deleted`
-
-Обработка:
-1. Прочитать `blob_id` из сообщения
-2. Вызвать `repo.DeleteBlob(ctx, blobID)`
-3. Идемпотентно: если файл уже удалён — commit offset
-
-Где добавлять: отдельный пакет `internal/consumer/` с собственным lifecycle, запускаемый параллельно с gRPC сервером из `app.go`.
-
-#### Подводные камни Kafka
-
-- **At-least-once delivery:** `DeleteBlob` должен быть идемпотентным (уже так)
-- **Ordering:** события в одном partition приходят по порядку; если нужно — партиционировать по `blob_id`
-- **Dead letter queue:** если обработка фейлится 3+ раз → отправлять в DLQ для ручного разбора
+- **At-least-once delivery:** delete и cleanup handlers должны быть идемпотентными
+- **Outbox нужен на стороне Metadata:** commit object и публикация `object-finalized` должны быть связаны через одну локальную транзакционную границу
+- **`object-blob-stored` не должен считаться publish-событием:** иначе появится двойной источник истины
+- **Ordering:** если критичен порядок по одному объекту, партиционировать по `object_id` или `blob_id`
+- **DLQ:** для poison messages и систематических ошибок нужен отдельный dead-letter topic
 - **Graceful shutdown:** consumer должен закрываться вместе с gRPC сервером
 
-#### Новые env vars
+#### 3.6. Новые env vars
 
 ```env
 KAFKA_BOOTSTRAP=kafka:9092
-KAFKA_OBJECT_STORED_TOPIC=object-stored
-KAFKA_OBJECT_DELETED_TOPIC=object-deleted
+KAFKA_OBJECT_BLOB_STORED_TOPIC=object-blob-stored
+KAFKA_OBJECT_DELETE_REQUESTED_TOPIC=object-delete-requested
+KAFKA_OBJECT_DELETE_CONFIRMED_TOPIC=object-delete-confirmed
+KAFKA_OBJECT_FINALIZED_TOPIC=object-finalized
+KAFKA_OBJECT_ABORTED_TOPIC=object-aborted
+KAFKA_BUCKET_DELETED_TOPIC=bucket-deleted
 KAFKA_CONSUMER_GROUP=storage-consumer
 ```
+
+Примечание:
+- для ближайшей реализации Storage Service достаточно начать с `object-delete-requested` и `object-blob-stored`
+- остальные топики стоит зафиксировать уже сейчас как целевую архитектуру, чтобы не зацементировать слишком узкую модель `object-stored/object-deleted`
 
 ---
 
