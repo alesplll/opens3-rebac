@@ -179,6 +179,8 @@ make rebuild
 
 ```bash
 make up-observability
+
+docker compose --profile services --profile observability down
 ```
 
 | UI | Адрес |
