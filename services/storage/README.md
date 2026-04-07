@@ -161,6 +161,9 @@ Gateway                          Storage
 - `upload_id` и `part_number` фиксируются по первому сообщению stream-а
 - в последующих сообщениях они не должны меняться, иначе возвращается `INVALID_ARGUMENT`
 - данные части пишутся потоково, без буферизации всего part в памяти handler-а
+- части можно загружать в любом порядке; порядок фактической загрузки не влияет на итоговую сборку
+- при `CompleteMultipartUpload` список `parts` должен быть отсортирован по возрастанию `part_number`
+- текущая реализация не требует непрерывной последовательности `1..N`: сервис собирает итоговый blob из тех `part_number`, которые явно переданы в `CompleteMultipartUpload` и реально существуют на диске
 
 **Server-streaming** (`RetrieveObject`):
 ```
@@ -274,6 +277,27 @@ grpcurl -plaintext localhost:50053 list opens3.storage.v1.DataStorageService
 grpcurl -plaintext -d '{"blob_id": "550e8400-e29b-41d4-a716-446655440000"}' \
   localhost:50053 opens3.storage.v1.DataStorageService/DeleteObject
 ```
+
+### Multipart Smoke Test
+
+Для быстрого ручного happy-path smoke test multipart upload:
+
+```bash
+go run ./services/storage/cmd/multipart-smoke
+```
+
+С кастомными параметрами:
+
+```bash
+go run ./services/storage/cmd/multipart-smoke \
+  -addr localhost:50053 \
+  -content-type text/plain \
+  -part1 "hello " \
+  -part2 "world" \
+  -chunk-size 3
+```
+
+CLI создаёт multipart session, загружает 2 части несколькими чанками, выполняет `CompleteMultipartUpload`, затем читает итоговый blob обратно и проверяет содержимое и MD5.
 
 ---
 
