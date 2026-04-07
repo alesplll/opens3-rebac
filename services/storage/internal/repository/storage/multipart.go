@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/json"
@@ -12,13 +13,19 @@ import (
 
 	domainerrors "github.com/alesplll/opens3-rebac/services/storage/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/storage/internal/model"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"go.uber.org/zap"
 )
 
 const multipartMetaFilename = "meta.json"
+const multipartCompletionDirname = "completed"
+
+var afterAssemblePartsCommitHook = func(context.Context) {}
 
 type multipartSessionMeta struct {
 	ExpectedParts int32  `json:"expected_parts"`
 	ContentType   string `json:"content_type"`
+	BlobID        string `json:"blob_id"`
 }
 
 func (r *repo) CreateMultipartSession(ctx context.Context, uploadID string, expectedParts int32, contentType string) error {
@@ -34,6 +41,7 @@ func (r *repo) CreateMultipartSession(ctx context.Context, uploadID string, expe
 	metaBytes, err := json.Marshal(multipartSessionMeta{
 		ExpectedParts: expectedParts,
 		ContentType:   contentType,
+		BlobID:        blobIDForUpload(uploadID),
 	})
 	if err != nil {
 		return fmt.Errorf("marshal multipart session meta: %w", err)
@@ -68,6 +76,39 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		return nil, err
 	}
 
+	completedMeta, err := r.readCompletedMultipartMeta(uploadID)
+	switch {
+	case err == nil:
+		exists, existsErr := r.blobExists(completedMeta.BlobID)
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if exists {
+			return completedMeta, nil
+		}
+
+		if removeErr := r.removeCompletedMultipartMeta(uploadID); removeErr != nil {
+			logger.Error(
+				ctx,
+				"failed to remove stale completed multipart meta",
+				zap.Error(removeErr),
+				zap.String("upload_id", uploadID),
+				zap.String("blob_id", completedMeta.BlobID),
+			)
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// No completed marker yet, continue with assembly from multipart session.
+	default:
+		if removeErr := r.removeCompletedMultipartMeta(uploadID); removeErr != nil {
+			logger.Error(
+				ctx,
+				"failed to remove corrupted completed multipart meta",
+				zap.Error(removeErr),
+				zap.String("upload_id", uploadID),
+			)
+		}
+	}
+
 	// TODO: consider cleanup on assembly failure or add TTL-based garbage collection
 	// without breaking retry semantics for recoverable CompleteMultipartUpload errors.
 	sessionMeta, err := r.readMultipartSessionMeta(uploadID)
@@ -77,6 +118,9 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 
 	if sessionMeta.ExpectedParts > 0 && int32(len(parts)) != sessionMeta.ExpectedParts {
 		return nil, domainerrors.ErrInvalidParts
+	}
+	if sessionMeta.BlobID != "" {
+		destBlobID = sessionMeta.BlobID
 	}
 
 	if err := ensureDirReady(r.dataDir); err != nil {
@@ -149,16 +193,24 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		return nil, fmt.Errorf("commit assembled blob file: %w", err)
 	}
 
-	if err := r.CleanupMultipart(ctx, uploadID); err != nil {
-		return nil, err
-	}
-
-	return &model.BlobMeta{
+	meta := &model.BlobMeta{
 		BlobID:      destBlobID,
 		ChecksumMD5: fmt.Sprintf("%x", hasher.Sum(nil)),
 		SizeBytes:   written,
 		ContentType: sessionMeta.ContentType,
-	}, nil
+	}
+	if err := r.writeCompletedMultipartMeta(uploadID, meta); err != nil {
+		if deleteErr := r.DeleteBlob(context.WithoutCancel(ctx), destBlobID); deleteErr != nil {
+			return nil, fmt.Errorf("persist completed multipart meta: %w (cleanup blob: %v)", err, deleteErr)
+		}
+
+		return nil, err
+	}
+
+	afterAssemblePartsCommitHook(ctx)
+	r.cleanupMultipartBestEffort(ctx, uploadID)
+
+	return meta, nil
 }
 
 func (r *repo) CleanupMultipart(ctx context.Context, uploadID string) error {
@@ -177,8 +229,53 @@ func (r *repo) CleanupMultipart(ctx context.Context, uploadID string) error {
 	return nil
 }
 
+func (r *repo) cleanupMultipartBestEffort(ctx context.Context, uploadID string) {
+	// Complete becomes externally visible after the final rename, so cleanup
+	// must still be attempted even if the request context is already cancelled.
+	cleanupCtx := context.WithoutCancel(ctx)
+
+	if err := r.CleanupMultipart(cleanupCtx, uploadID); err != nil {
+		logger.Error(
+			cleanupCtx,
+			"failed to cleanup multipart session after assembled blob commit",
+			zap.Error(err),
+			zap.String("upload_id", uploadID),
+		)
+	}
+}
+
+func (r *repo) writeCompletedMultipartMeta(uploadID string, meta *model.BlobMeta) error {
+	if err := ensureDirReady(r.multipartCompletedDir()); err != nil {
+		return err
+	}
+
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal completed multipart meta: %w", err)
+	}
+
+	if _, err := writeAtomically(
+		context.Background(),
+		r.completedMultipartMetaPath(uploadID),
+		bytes.NewReader(metaBytes),
+		"completed multipart meta",
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (r *repo) multipartSessionPath(uploadID string) string {
 	return filepath.Join(r.multipartDir, uploadID)
+}
+
+func (r *repo) multipartCompletedDir() string {
+	return filepath.Join(r.multipartDir, multipartCompletionDirname)
+}
+
+func (r *repo) completedMultipartMetaPath(uploadID string) string {
+	return filepath.Join(r.multipartCompletedDir(), uploadID+".json")
 }
 
 func (r *repo) multipartMetaPath(uploadID string) string {
@@ -210,4 +307,50 @@ func (r *repo) readMultipartSessionMeta(uploadID string) (*multipartSessionMeta,
 	}
 
 	return &meta, nil
+}
+
+func (r *repo) readCompletedMultipartMeta(uploadID string) (*model.BlobMeta, error) {
+	metaBytes, err := os.ReadFile(r.completedMultipartMetaPath(uploadID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, os.ErrNotExist
+		}
+
+		return nil, fmt.Errorf("read completed multipart meta: %w", err)
+	}
+
+	var meta model.BlobMeta
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		return nil, fmt.Errorf("unmarshal completed multipart meta: %w", err)
+	}
+
+	return &meta, nil
+}
+
+func (r *repo) removeCompletedMultipartMeta(uploadID string) error {
+	if err := os.Remove(r.completedMultipartMetaPath(uploadID)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+
+		return fmt.Errorf("remove completed multipart meta: %w", err)
+	}
+
+	return nil
+}
+
+func (r *repo) blobExists(blobID string) (bool, error) {
+	info, err := os.Stat(r.blobPath(blobID))
+	if err == nil {
+		return !info.IsDir(), nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("stat blob file: %w", err)
+}
+
+func blobIDForUpload(uploadID string) string {
+	return uploadID
 }
