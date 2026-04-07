@@ -55,42 +55,12 @@ func (r *repo) StorePart(ctx context.Context, uploadID string, partNumber int32,
 		return "", domainerrors.ErrUploadNotFound
 	}
 
-	partPath := r.multipartPartPath(uploadID, partNumber)
-	tempPath := partPath + ".tmp"
-
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	result, err := writeAtomically(ctx, r.multipartPartPath(uploadID, partNumber), reader, "multipart part")
 	if err != nil {
-		return "", fmt.Errorf("create temp multipart part: %w", err)
+		return "", err
 	}
 
-	hasher := md5.New()
-	if _, copyErr := io.Copy(io.MultiWriter(file, hasher), newContextReader(ctx, reader)); copyErr != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
-		if isDiskFull(copyErr) {
-			return "", domainerrors.ErrDiskFull
-		}
-
-		return "", fmt.Errorf("write multipart part: %w", copyErr)
-	}
-
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("sync multipart part: %w", err)
-	}
-
-	if err := file.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("close multipart part: %w", err)
-	}
-
-	if err := os.Rename(tempPath, partPath); err != nil {
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("commit multipart part: %w", err)
-	}
-
-	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
+	return result.checksumMD5, nil
 }
 
 func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model.PartInfo, destBlobID string) (*model.BlobMeta, error) {
@@ -109,11 +79,7 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		return nil, domainerrors.ErrInvalidParts
 	}
 
-	if err := os.MkdirAll(r.dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create data dir: %w", err)
-	}
-
-	if err := ensureWritableDiskSpace(r.dataDir); err != nil {
+	if err := ensureDirReady(r.dataDir); err != nil {
 		return nil, err
 	}
 
