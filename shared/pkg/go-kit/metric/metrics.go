@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/metric"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc/credentials/insecure"
@@ -60,10 +61,18 @@ func Init(_ context.Context, cfg MetricsConfig) error {
 }
 
 func IncRequestCounter(ctx context.Context) {
+	if requestCounter == nil {
+		return
+	}
+
 	requestCounter.Add(ctx, 1)
 }
 
 func IncResponseCounter(ctx context.Context, status, method string) {
+	if responseCounter == nil {
+		return
+	}
+
 	responseCounter.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("status", status),
@@ -73,11 +82,35 @@ func IncResponseCounter(ctx context.Context, status, method string) {
 }
 
 func HistogramResponseTimeObserve(ctx context.Context, status string, time float64) {
+	if histogramResponseTime == nil {
+		return
+	}
+
 	histogramResponseTime.Record(ctx, time,
 		metric.WithAttributes(
 			attribute.String("status", status),
 		),
 	)
+}
+
+func Meter() metric.Meter {
+	if meter == nil {
+		return noopmetric.Meter{}
+	}
+
+	return meter
+}
+
+func NewInt64Counter(name string, opts ...metric.Int64CounterOption) (metric.Int64Counter, error) {
+	return Meter().Int64Counter(name, opts...)
+}
+
+func NewInt64ObservableGauge(name string, opts ...metric.Int64ObservableGaugeOption) (metric.Int64ObservableGauge, error) {
+	return Meter().Int64ObservableGauge(name, opts...)
+}
+
+func RegisterCallback(callback func(context.Context, metric.Observer) error, instruments ...metric.Observable) (metric.Registration, error) {
+	return Meter().RegisterCallback(callback, instruments...)
 }
 
 func InitOTELMetrics(cfg MetricsConfig) (*sdkmetric.MeterProvider, error) {
