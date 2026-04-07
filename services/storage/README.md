@@ -153,9 +153,14 @@ Gateway                          Storage
   │──── StoreObjectRequest ──────► │  (data)
   │──── StoreObjectRequest ──────► │  (data)
   │──── EOF ─────────────────────► │
-  │                                │  собирает все чанки, сохраняет
+  │                                │  потоково читает чанки и пишет на диск
   │◄─── StoreObjectResponse ────── │  (blob_id, checksum_md5)
 ```
+
+Для `UploadPart` действуют те же streaming semantics:
+- `upload_id` и `part_number` фиксируются по первому сообщению stream-а
+- в последующих сообщениях они не должны меняться, иначе возвращается `INVALID_ARGUMENT`
+- данные части пишутся потоково, без буферизации всего part в памяти handler-а
 
 **Server-streaming** (`RetrieveObject`):
 ```
@@ -278,8 +283,11 @@ DATA_DIR/                            (по умолчанию /data/blobs)
 └── ...
 
 MULTIPART_DIR/                       (по умолчанию /data/multipart)
+├── completed/
+│   ├── {upload_id}.json            ← persisted result completed multipart upload
+│   └── ...
 ├── {upload_id}/
-│   ├── meta.json                    ← expected_parts + content_type
+│   ├── meta.json                    ← expected_parts + content_type + blob_id
 │   ├── part_1
 │   ├── part_2
 │   └── ...
@@ -287,9 +295,10 @@ MULTIPART_DIR/                       (по умолчанию /data/multipart)
     └── ...
 ```
 
-- `blob_id` — UUID v4, генерируется сервисом при `StoreObject` / `CompleteMultipartUpload`
+- `blob_id` — UUID v4, генерируется сервисом при `StoreObject`; для multipart фиксируется при `InitiateMultipartUpload` и затем переиспользуется в `CompleteMultipartUpload`
 - `upload_id` — UUID v4, генерируется при `InitiateMultipartUpload`
-- Временные файлы частей удаляются после `CompleteMultipartUpload` или `AbortMultipartUpload`
+- После успешного `CompleteMultipartUpload` session cleanup выполняется best-effort; идемпотентность retry обеспечивается через `completed/{upload_id}.json`
+- Для атомарной записи используются уникальные temp-файлы с последующим `os.Rename`, поэтому stale `*.tmp` после crash не должны ломать retry
 
 > **Рекомендация:** для production с большим количеством файлов стоит использовать
 > вложенность `DATA_DIR/{blob_id[0:2]}/{blob_id}` (шардирование по первым 2 символам UUID).
