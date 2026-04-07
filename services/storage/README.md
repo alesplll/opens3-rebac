@@ -279,6 +279,7 @@ DATA_DIR/                            (по умолчанию /data/blobs)
 
 MULTIPART_DIR/                       (по умолчанию /data/multipart)
 ├── {upload_id}/
+│   ├── meta.json                    ← expected_parts + content_type
 │   ├── part_1
 │   ├── part_2
 │   └── ...
@@ -327,6 +328,9 @@ Handler → StorageService (interface) → StorageRepository (interface)
 |---|---|---|
 | `ErrBlobNotFound` | `NOT_FOUND` | blob_id не существует на диске |
 | `ErrUploadNotFound` | `NOT_FOUND` | upload_id multipart не найден |
+| `ErrInvalidBlobSize` | `INVALID_ARGUMENT` | size < 0 или фактический размер не совпал с ожидаемым |
+| `ErrInvalidUpload` | `INVALID_ARGUMENT` | некорректная multipart-сессия |
+| `ErrInvalidParts` | `INVALID_ARGUMENT` | пустой/невалидный список частей или не совпало expected_parts |
 | `ErrInvalidPartNumber` | `INVALID_ARGUMENT` | Некорректный номер части |
 | `ErrChecksumMismatch` | `INVALID_ARGUMENT` | MD5 не совпадает при CompleteMultipart |
 | `ErrDiskFull` | `RESOURCE_EXHAUSTED` | Недостаточно места на диске |
@@ -376,7 +380,7 @@ Handler → StorageService (interface) → StorageRepository (interface)
 
 ## Kafka-интеграция
 
-> **Текущий статус:** не реализована (Phase 2)
+> **Текущий статус:** не реализована (следующий этап: Phase 3)
 
 Планируемая интеграция:
 
@@ -408,6 +412,16 @@ make generate-storage
 ```bash
 # Из корня репозитория (go.work подтягивает shared)
 go build ./services/storage/...
+
+# Unit + component tests
+go test ./services/storage/...
+```
+
+### Генерация minimock для service tests
+
+```bash
+cd services/storage
+PATH="$PWD/bin:$PATH" go generate ./pkg/mocks
 ```
 
 ### Структура модулей
@@ -440,13 +454,14 @@ go.work
 Подробный план реализации с описанием всех фаз, взаимодействий и подводных камней:
 [docs/storage-service-implementation-plan.md](../../docs/storage-service-implementation-plan.md)
 
-- [ ] Реализовать реальное чтение/запись на файловую систему в Repository
-- [ ] Подсчёт MD5 при записи blob
-- [ ] Range-запросы при чтении (RetrieveObject)
-- [ ] Multipart: хранение частей, склейка, отмена
+- [x] Реализовать реальное чтение/запись на файловую систему в Repository
+- [x] Подсчёт MD5 при записи blob
+- [x] Range-запросы при чтении (RetrieveObject)
+- [x] Multipart: хранение частей, склейка, отмена
 - [ ] Kafka producer (`object-stored`) и consumer (`object-deleted`)
-- [ ] Проверка свободного места на диске в HealthCheck
+- [x] Проверка свободного места на диске в HealthCheck
 - [ ] Шардирование файлов по первым байтам UUID
-- [ ] Unit-тесты для всех слоёв
-- [ ] Dockerfile
-- [ ] Интеграция в docker-compose.yml
+- [ ] TTL/garbage collection для зависших multipart-сессий
+- [x] Unit/component-тесты для service и repository слоёв
+- [x] Dockerfile
+- [x] Интеграция в docker-compose.yml
