@@ -194,10 +194,10 @@ type RetrieveObjectRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// UUID blob'а, полученный из Metadata GetObjectMeta.
 	BlobId string `protobuf:"bytes,1,opt,name=blob_id,json=blobId,proto3" json:"blob_id,omitempty"`
-	// Смещение от начала файла в байтах. 0 = читать с начала файла.
-	Offset int64 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
-	// Сколько байт вернуть. 0 = читать до конца файла начиная с offset.
-	Length        int64 `protobuf:"varint,3,opt,name=length,proto3" json:"length,omitempty"`
+	// Начальный байт (включительно) для range-запроса. 0 = начало файла.
+	RangeStart int64 `protobuf:"varint,2,opt,name=range_start,json=rangeStart,proto3" json:"range_start,omitempty"`
+	// Конечный байт (не включается в ответ) для range-запроса. -1 = конец файла.
+	RangeEnd      int64 `protobuf:"varint,3,opt,name=range_end,json=rangeEnd,proto3" json:"range_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -239,16 +239,16 @@ func (x *RetrieveObjectRequest) GetBlobId() string {
 	return ""
 }
 
-func (x *RetrieveObjectRequest) GetOffset() int64 {
+func (x *RetrieveObjectRequest) GetRangeStart() int64 {
 	if x != nil {
-		return x.Offset
+		return x.RangeStart
 	}
 	return 0
 }
 
-func (x *RetrieveObjectRequest) GetLength() int64 {
+func (x *RetrieveObjectRequest) GetRangeEnd() int64 {
 	if x != nil {
-		return x.Length
+		return x.RangeEnd
 	}
 	return 0
 }
@@ -957,11 +957,12 @@ const file_storage_proto_rawDesc = "" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\"Q\n" +
 	"\x13StoreObjectResponse\x12\x17\n" +
 	"\ablob_id\x18\x01 \x01(\tR\x06blobId\x12!\n" +
-	"\fchecksum_md5\x18\x02 \x01(\tR\vchecksumMd5\"`\n" +
+	"\fchecksum_md5\x18\x02 \x01(\tR\vchecksumMd5\"n\n" +
 	"\x15RetrieveObjectRequest\x12\x17\n" +
-	"\ablob_id\x18\x01 \x01(\tR\x06blobId\x12\x16\n" +
-	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x16\n" +
-	"\x06length\x18\x03 \x01(\x03R\x06length\"K\n" +
+	"\ablob_id\x18\x01 \x01(\tR\x06blobId\x12\x1f\n" +
+	"\vrange_start\x18\x02 \x01(\x03R\n" +
+	"rangeStart\x12\x1b\n" +
+	"\trange_end\x18\x03 \x01(\x03R\brangeEnd\"K\n" +
 	"\x16RetrieveObjectResponse\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +

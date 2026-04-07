@@ -26,6 +26,8 @@ COPY --from=builder /install /usr/local
 # Copy source (with generated stubs)
 COPY --from=builder /app /app
 
+ENV PYTHONPATH=/app
+
 EXPOSE 50051
 
 ENTRYPOINT ["python", "entrypoints/server/main.py"]
