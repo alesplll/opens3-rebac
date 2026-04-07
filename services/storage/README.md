@@ -333,7 +333,7 @@ Handler → StorageService (interface) → StorageRepository (interface)
 | `ErrInternal` | `INTERNAL` | Внутренняя ошибка сервиса |
 
 Ошибки автоматически конвертируются в gRPC status codes через middleware
-`validationInterceptor.ErrorCodesUnaryInterceptor` из shared kit.
+`validationInterceptor.ErrorCodesUnaryInterceptor` и `validationInterceptor.ErrorCodesStreamInterceptor` из shared kit.
 
 ---
 
@@ -354,8 +354,13 @@ Handler → StorageService (interface) → StorageRepository (interface)
 ### Метрики
 
 - OpenTelemetry SDK
-- Latency гистограммы и error rate для каждого gRPC метода
-- Автоматический сбор через `metricsInterceptor.MetricsInterceptor`
+- Latency гистограммы и error rate для unary и streaming gRPC методов
+- Автоматический сбор через `metricsInterceptor.MetricsInterceptor` и `metricsInterceptor.StreamMetricsInterceptor`
+- Дополнительно для storage:
+  - `storage_read_bytes_total`
+  - `storage_write_bytes_total`
+  - `storage_filesystem_usage_bytes`
+  - `storage_data_dir_usage_bytes`
 
 ### Health Check
 

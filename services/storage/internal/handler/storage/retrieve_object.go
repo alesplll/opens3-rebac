@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/alesplll/opens3-rebac/services/storage/internal/observability"
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
@@ -18,6 +19,7 @@ func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.Da
 
 	buf := make([]byte, chunkSize)
 	first := true
+	var totalSent int64
 
 	for {
 		n, readErr := reader.Read(buf)
@@ -32,6 +34,7 @@ func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.Da
 			if err := stream.Send(resp); err != nil {
 				return err
 			}
+			totalSent += int64(n)
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
@@ -42,5 +45,6 @@ func (h *handler) RetrieveObject(req *desc.RetrieveObjectRequest, stream desc.Da
 		}
 	}
 
+	observability.AddReadBytes(stream.Context(), totalSent)
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/storage/internal/config"
+	"github.com/alesplll/opens3-rebac/services/storage/internal/observability"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/metric"
@@ -108,6 +109,17 @@ func (a *App) initMetrics(ctx context.Context) error {
 		logger.Error(ctx, "failed to init metrics", zap.Error(err))
 		return err
 	}
+
+	if err := observability.InitMetrics(config.AppConfig().Storage.DataDir()); err != nil {
+		logger.Error(ctx, "failed to init storage metrics", zap.Error(err))
+		return err
+	}
+
+	closer.AddNamed("storage metrics", func(context.Context) error {
+		observability.Shutdown()
+		return nil
+	})
+
 	return nil
 }
 
@@ -123,7 +135,10 @@ func (a *App) initGRPCServer(ctx context.Context) error {
 			),
 		),
 		grpc.StreamInterceptor(
-			validationInterceptor.ErrorCodesStreamInterceptor(logger.Logger()),
+			grpcMiddleware.ChainStreamServer(
+				metricsInterceptor.StreamMetricsInterceptor,
+				validationInterceptor.ErrorCodesStreamInterceptor(logger.Logger()),
+			),
 		),
 	)
 

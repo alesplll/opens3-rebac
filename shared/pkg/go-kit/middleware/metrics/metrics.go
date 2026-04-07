@@ -26,3 +26,21 @@ func MetricsInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 
 	return res, err
 }
+
+func StreamMetricsInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	metric.IncRequestCounter(ss.Context())
+
+	timeStart := time.Now()
+	err := handler(srv, ss)
+	diffTime := time.Since(timeStart)
+
+	if err != nil {
+		metric.IncResponseCounter(ss.Context(), "error", info.FullMethod)
+		metric.HistogramResponseTimeObserve(ss.Context(), "error", diffTime.Seconds())
+	} else {
+		metric.IncResponseCounter(ss.Context(), "success", info.FullMethod)
+		metric.HistogramResponseTimeObserve(ss.Context(), "success", diffTime.Seconds())
+	}
+
+	return err
+}
