@@ -103,6 +103,87 @@ func retrieveBlob(t *testing.T, ctx context.Context, blobID string, offset, leng
 	return buf.Bytes(), totalSize
 }
 
+func initiateMultipart(t *testing.T, ctx context.Context, expectedParts int32, contentType string) string {
+	t.Helper()
+
+	resp, err := client.InitiateMultipartUpload(ctx, &desc.InitiateMultipartUploadRequest{
+		ExpectedParts: expectedParts,
+		ContentType:   contentType,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.GetUploadId())
+
+	return resp.GetUploadId()
+}
+
+func uploadPart(t *testing.T, ctx context.Context, uploadID string, partNumber int32, data []byte) string {
+	t.Helper()
+
+	stream, err := client.UploadPart(ctx)
+	require.NoError(t, err)
+
+	buf := bytes.NewReader(data)
+	chunk := make([]byte, testChunkSize)
+	first := true
+
+	for {
+		n, readErr := buf.Read(chunk)
+		if n > 0 {
+			req := &desc.UploadPartRequest{
+				Data: chunk[:n],
+			}
+			if first {
+				req.UploadId = uploadID
+				req.PartNumber = partNumber
+				first = false
+			}
+
+			err := stream.Send(req)
+			require.NoError(t, err)
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			require.NoError(t, readErr)
+		}
+	}
+
+	if first {
+		err := stream.Send(&desc.UploadPartRequest{
+			UploadId:   uploadID,
+			PartNumber: partNumber,
+		})
+		require.NoError(t, err)
+	}
+
+	resp, err := stream.CloseAndRecv()
+	require.NoError(t, err)
+	return resp.GetPartChecksumMd5()
+}
+
+func completeMultipart(t *testing.T, ctx context.Context, uploadID string, parts []*desc.PartInfo) (string, string) {
+	t.Helper()
+
+	resp, err := client.CompleteMultipartUpload(ctx, &desc.CompleteMultipartUploadRequest{
+		UploadId: uploadID,
+		Parts:    parts,
+	})
+	require.NoError(t, err)
+
+	return resp.GetBlobId(), resp.GetChecksumMd5()
+}
+
+func abortMultipart(t *testing.T, ctx context.Context, uploadID string) {
+	t.Helper()
+
+	resp, err := client.AbortMultipartUpload(ctx, &desc.AbortMultipartUploadRequest{
+		UploadId: uploadID,
+	})
+	require.NoError(t, err)
+	require.True(t, resp.GetSuccess())
+}
+
 func md5Hex(data []byte) string {
 	sum := md5.Sum(data)
 	return fmt.Sprintf("%x", sum)
