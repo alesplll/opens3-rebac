@@ -1,0 +1,27 @@
+name: Auth CI
+
+on:
+  push:
+    paths:
+      - "services/auth/**"
+  pull_request:
+    paths:
+      - "services/auth/**"
+
+defaults:
+  run:
+    working-directory: services/auth
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.1'
+
+      - name: Run tests
+        run: go test ./... -count=1
