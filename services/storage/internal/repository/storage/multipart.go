@@ -21,6 +21,7 @@ const multipartMetaFilename = "meta.json"
 const multipartCompletionDirname = "completed"
 
 var afterAssemblePartsCommitHook = func(context.Context) {}
+var beforeAssemblePartCopyHook = func(context.Context, int32) {}
 
 type multipartSessionMeta struct {
 	ExpectedParts int32  `json:"expected_parts"`
@@ -142,6 +143,8 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 	var written int64
 
 	for _, part := range parts {
+		beforeAssemblePartCopyHook(ctx, part.PartNumber)
+
 		partPath := r.multipartPartPath(uploadID, part.PartNumber)
 		partFile, openErr := os.Open(partPath)
 		if openErr != nil {

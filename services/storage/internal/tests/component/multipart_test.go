@@ -100,3 +100,72 @@ func TestMultipartUploadComplete_ChecksumMismatch(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, codes.InvalidArgument, st.Code())
 }
+
+func TestMultipartUploadPart_RetryOverwritesPart(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uploadID := initiateMultipart(t, ctx, 1, "video/mp4")
+
+	firstPart := []byte("first body")
+	_ = uploadPart(t, ctx, uploadID, 1, firstPart)
+
+	secondPart := []byte("second body")
+	secondChecksum := uploadPart(t, ctx, uploadID, 1, secondPart)
+
+	blobID, checksum := completeMultipart(t, ctx, uploadID, []*desc.PartInfo{
+		{PartNumber: 1, ChecksumMd5: secondChecksum},
+	})
+
+	body, totalSize := retrieveBlob(t, ctx, blobID, 0, 0)
+	require.Equal(t, int64(len(secondPart)), totalSize)
+	require.Equal(t, secondPart, body)
+	require.Equal(t, md5Hex(secondPart), checksum)
+}
+
+func TestMultipartUploadComplete_MissingPartReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uploadID := initiateMultipart(t, ctx, 2, "video/mp4")
+
+	partOne := []byte("hello")
+	checksumOne := uploadPart(t, ctx, uploadID, 1, partOne)
+
+	_, err := client.CompleteMultipartUpload(ctx, &desc.CompleteMultipartUploadRequest{
+		UploadId: uploadID,
+		Parts: []*desc.PartInfo{
+			{PartNumber: 1, ChecksumMd5: checksumOne},
+			{PartNumber: 2, ChecksumMd5: "missing-part-checksum"},
+		},
+	})
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestMultipartUploadAbort_AfterPartialUploadPreventsComplete(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uploadID := initiateMultipart(t, ctx, 2, "video/mp4")
+
+	partOne := []byte("hello")
+	checksumOne := uploadPart(t, ctx, uploadID, 1, partOne)
+
+	abortMultipart(t, ctx, uploadID)
+
+	_, err := client.CompleteMultipartUpload(ctx, &desc.CompleteMultipartUploadRequest{
+		UploadId: uploadID,
+		Parts: []*desc.PartInfo{
+			{PartNumber: 1, ChecksumMd5: checksumOne},
+		},
+	})
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.NotFound, st.Code())
+}

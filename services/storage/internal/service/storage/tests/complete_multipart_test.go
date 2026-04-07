@@ -104,6 +104,23 @@ func TestCompleteMultipartUpload(t *testing.T) {
 				return mock
 			},
 		},
+		{
+			name:     "missing part propagates not found",
+			uploadID: "upload-1",
+			parts:    parts,
+			wantErr:  domainerrors.ErrUploadNotFound,
+			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
+				mock := mocks.NewStorageRepositoryMock(mc)
+				mock.AssemblePartsMock.Set(func(gotCtx context.Context, uploadID string, gotParts []model.PartInfo, destBlobID string) (*model.BlobMeta, error) {
+					require.Equal(t, ctx, gotCtx)
+					require.Equal(t, "upload-1", uploadID)
+					require.Equal(t, parts, gotParts)
+					require.Equal(t, "upload-1", destBlobID)
+					return nil, domainerrors.ErrUploadNotFound
+				})
+				return mock
+			},
+		},
 	}
 
 	for _, tt := range tests {

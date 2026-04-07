@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,4 +98,66 @@ func TestStorePart_RetryOverwritesExistingPart(t *testing.T) {
 	stored, err := os.ReadFile(partPath)
 	require.NoError(t, err)
 	require.Equal(t, secondContent, stored)
+}
+
+func TestStorePart_CanceledDuringWriteCleansUpTempFile(t *testing.T) {
+	t.Parallel()
+
+	multipartDir := t.TempDir()
+	repository := storageRepo.NewRepository(testStorageConfig{
+		dataDir:      t.TempDir(),
+		multipartDir: multipartDir,
+	})
+	err := repository.CreateMultipartSession(context.Background(), "upload-1", 2, "video/mp4")
+	require.NoError(t, err)
+
+	reader := &cancelAwareReader{
+		firstChunk:        []byte("partial"),
+		secondReadStarted: make(chan struct{}),
+		unblock:           make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		_, storeErr := repository.StorePart(ctx, "upload-1", 2, reader)
+		done <- storeErr
+	}()
+
+	<-reader.secondReadStarted
+	cancel()
+	close(reader.unblock)
+
+	err = <-done
+	require.ErrorIs(t, err, context.Canceled)
+
+	partPath := filepath.Join(multipartDir, "upload-1", "part_2")
+	_, statErr := os.Stat(partPath)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+
+	tempMatches, globErr := filepath.Glob(partPath + ".*.tmp")
+	require.NoError(t, globErr)
+	require.Empty(t, tempMatches)
+}
+
+type cancelAwareReader struct {
+	firstChunk        []byte
+	secondReadStarted chan struct{}
+	unblock           chan struct{}
+	readIndex         int
+}
+
+func (r *cancelAwareReader) Read(p []byte) (int, error) {
+	switch r.readIndex {
+	case 0:
+		r.readIndex++
+		return copy(p, r.firstChunk), nil
+	case 1:
+		r.readIndex++
+		close(r.secondReadStarted)
+		<-r.unblock
+		return 0, nil
+	default:
+		return 0, io.EOF
+	}
 }

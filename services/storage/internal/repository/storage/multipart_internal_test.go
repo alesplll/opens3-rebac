@@ -47,3 +47,44 @@ func TestAssembleParts_CleanupUsesDetachedContext(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(multipartDir, "upload-1"))
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
+
+func TestAssembleParts_CanceledBeforeNextPartCopyLeavesNoBlob(t *testing.T) {
+	previousHook := beforeAssemblePartCopyHook
+	t.Cleanup(func() {
+		beforeAssemblePartCopyHook = previousHook
+	})
+
+	dataDir := t.TempDir()
+	multipartDir := t.TempDir()
+	repository := &repo{
+		dataDir:      dataDir,
+		multipartDir: multipartDir,
+	}
+
+	err := repository.CreateMultipartSession(context.Background(), "upload-1", 2, "video/mp4")
+	require.NoError(t, err)
+
+	partOne := []byte("hello ")
+	partTwo := []byte("world")
+	_, err = repository.StorePart(context.Background(), "upload-1", 1, bytes.NewReader(partOne))
+	require.NoError(t, err)
+	_, err = repository.StorePart(context.Background(), "upload-1", 2, bytes.NewReader(partTwo))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	beforeAssemblePartCopyHook = func(_ context.Context, partNumber int32) {
+		if partNumber == 2 {
+			cancel()
+		}
+	}
+
+	meta, err := repository.AssembleParts(ctx, "upload-1", []model.PartInfo{
+		{PartNumber: 1, ChecksumMD5: fmt.Sprintf("%x", md5.Sum(partOne))},
+		{PartNumber: 2, ChecksumMD5: fmt.Sprintf("%x", md5.Sum(partTwo))},
+	}, "blob-1")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, meta)
+
+	_, statErr := os.Stat(filepath.Join(dataDir, "upload-1"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
