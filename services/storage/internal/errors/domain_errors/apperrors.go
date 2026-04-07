@@ -9,6 +9,9 @@ var (
 	ErrBlobNotFound   = sys.NewCommonError("blob not found", codes.NotFound)
 	ErrUploadNotFound = sys.NewCommonError("upload not found", codes.NotFound)
 
+	ErrInvalidBlobSize   = sys.NewCommonError("invalid blob size", codes.InvalidArgument)
+	ErrInvalidUpload     = sys.NewCommonError("invalid upload", codes.InvalidArgument)
+	ErrInvalidParts      = sys.NewCommonError("invalid parts", codes.InvalidArgument)
 	ErrInvalidPartNumber = sys.NewCommonError("invalid part number", codes.InvalidArgument)
 	ErrChecksumMismatch  = sys.NewCommonError("checksum mismatch", codes.InvalidArgument)
 
