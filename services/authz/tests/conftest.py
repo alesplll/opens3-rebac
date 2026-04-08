@@ -1,11 +1,20 @@
 """Pytest configuration and shared fixtures."""
 import os
+from pathlib import Path
+import sys
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from shared.pkg.py_kit.logger import set_nop_logger
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "integration: mark test as integration (requires Neo4j)")
+    set_nop_logger()
 
 
 @pytest.fixture
