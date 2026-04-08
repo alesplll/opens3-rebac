@@ -75,7 +75,7 @@
 
 ### `internal/repository/storage/tests/create_multipart_session_test.go`
 
-- `TestCreateMultipartSession_Success` — проверяет создание multipart session directory и `meta.json`.
+- `TestCreateMultipartSession_Success` — проверяет создание multipart session directory в `uploads/` и `manifest.json`.
 
 ### `internal/repository/storage/tests/cleanup_multipart_test.go`
 

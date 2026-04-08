@@ -6,7 +6,7 @@ import (
 
 type storageEnvConfig struct {
 	DataDir      string `env:"DATA_DIR" envDefault:"/data/blobs"`
-	MultipartDir string `env:"MULTIPART_DIR" envDefault:"/data/multipart"`
+	MultipartDir string `env:"MULTIPART_DIR" envDefault:"/data/staging"`
 }
 
 type storageConfig struct {

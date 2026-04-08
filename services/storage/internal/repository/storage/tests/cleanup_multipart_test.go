@@ -3,7 +3,6 @@ package tests
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
 	storageRepo "github.com/alesplll/opens3-rebac/services/storage/internal/repository/storage"
@@ -24,7 +23,7 @@ func TestCleanupMultipart_Success(t *testing.T) {
 	err = repository.CleanupMultipart(context.Background(), "upload-1")
 	require.NoError(t, err)
 
-	_, err = os.Stat(filepath.Join(multipartDir, "upload-1"))
+	_, err = os.Stat(multipartSessionPath(multipartDir, "upload-1"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 

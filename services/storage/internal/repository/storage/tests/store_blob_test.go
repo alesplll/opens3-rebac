@@ -18,9 +18,10 @@ func TestStoreBlob_Success(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
+	multipartDir := t.TempDir()
 	repository := storageRepo.NewRepository(testStorageConfig{
 		dataDir:      dataDir,
-		multipartDir: t.TempDir(),
+		multipartDir: multipartDir,
 	})
 	content := []byte("storage blob content")
 	blobID := "blob-1"
@@ -31,9 +32,12 @@ func TestStoreBlob_Success(t *testing.T) {
 	require.Equal(t, int64(len(content)), meta.SizeBytes)
 	require.Equal(t, fmt.Sprintf("%x", md5.Sum(content)), meta.ChecksumMD5)
 
-	storedContent, err := os.ReadFile(filepath.Join(dataDir, blobID))
+	storedContent, err := os.ReadFile(blobFilePath(dataDir, blobID))
 	require.NoError(t, err)
 	require.Equal(t, content, storedContent)
+
+	_, err = os.Stat(singlePartUploadPath(multipartDir, blobID))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestStoreBlob_CleanupTempFileOnReadError(t *testing.T) {
@@ -77,7 +81,7 @@ func TestStoreBlob_LargeFile(t *testing.T) {
 	require.Equal(t, int64(len(content)), meta.SizeBytes)
 	require.Equal(t, fmt.Sprintf("%x", md5.Sum(content)), meta.ChecksumMD5)
 
-	storedContent, err := os.ReadFile(filepath.Join(dataDir, blobID))
+	storedContent, err := os.ReadFile(blobFilePath(dataDir, blobID))
 	require.NoError(t, err)
 	require.Equal(t, content, storedContent)
 }
@@ -98,7 +102,7 @@ func TestStoreBlob_EmptyBlob(t *testing.T) {
 	require.Equal(t, int64(0), meta.SizeBytes)
 	require.Equal(t, "d41d8cd98f00b204e9800998ecf8427e", meta.ChecksumMD5)
 
-	storedContent, err := os.ReadFile(filepath.Join(dataDir, blobID))
+	storedContent, err := os.ReadFile(blobFilePath(dataDir, blobID))
 	require.NoError(t, err)
 	require.Empty(t, storedContent)
 }
@@ -133,14 +137,15 @@ func TestStoreBlob_IgnoresStaleTempFileOnRetry(t *testing.T) {
 	})
 
 	blobID := "blob-1"
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, blobID)+".tmp", []byte("stale temp"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(blobFilePath(dataDir, blobID)), 0o755))
+	require.NoError(t, os.WriteFile(blobFilePath(dataDir, blobID)+".tmp", []byte("stale temp"), 0o644))
 
 	content := []byte("storage blob content")
 	meta, err := repository.StoreBlob(context.Background(), blobID, bytes.NewReader(content))
 	require.NoError(t, err)
 	require.Equal(t, blobID, meta.BlobID)
 
-	storedContent, err := os.ReadFile(filepath.Join(dataDir, blobID))
+	storedContent, err := os.ReadFile(blobFilePath(dataDir, blobID))
 	require.NoError(t, err)
 	require.Equal(t, content, storedContent)
 }
@@ -156,6 +161,43 @@ func (c testStorageConfig) DataDir() string {
 
 func (c testStorageConfig) MultipartDir() string {
 	return c.multipartDir
+}
+
+func blobFilePath(dataDir, blobID string) string {
+	return filepath.Join(dataDir, blobShardDirName(blobID), blobID)
+}
+
+func blobShardDirName(blobID string) string {
+	shard := blobID
+	if len(blobID) >= 2 {
+		shard = blobID[:2]
+	}
+
+	return shard
+}
+
+func stagingUploadsPath(multipartDir string) string {
+	return filepath.Join(multipartDir, "uploads")
+}
+
+func singlePartUploadPath(multipartDir, blobID string) string {
+	return filepath.Join(stagingUploadsPath(multipartDir), blobID)
+}
+
+func multipartSessionPath(multipartDir, uploadID string) string {
+	return filepath.Join(stagingUploadsPath(multipartDir), uploadID)
+}
+
+func multipartPartPath(multipartDir, uploadID string, partNumber int32) string {
+	return filepath.Join(multipartSessionPath(multipartDir, uploadID), fmt.Sprintf("part_%05d", partNumber))
+}
+
+func completedMetaPath(multipartDir, uploadID string) string {
+	return filepath.Join(multipartDir, "completed", completedMetaShardDirName(uploadID), uploadID+".json")
+}
+
+func completedMetaShardDirName(uploadID string) string {
+	return blobShardDirName(uploadID)
 }
 
 type failingReader struct {

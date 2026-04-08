@@ -44,7 +44,7 @@ func TestAssembleParts_CleanupUsesDetachedContext(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 
-	_, statErr := os.Stat(filepath.Join(multipartDir, "upload-1"))
+	_, statErr := os.Stat(filepath.Join(multipartDir, stagingUploadsDirname, "upload-1"))
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
@@ -85,6 +85,6 @@ func TestAssembleParts_CanceledBeforeNextPartCopyLeavesNoBlob(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, meta)
 
-	_, statErr := os.Stat(filepath.Join(dataDir, "upload-1"))
+	_, statErr := os.Stat(filepath.Join(dataDir, "up", "upload-1"))
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }

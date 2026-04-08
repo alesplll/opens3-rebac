@@ -31,7 +31,7 @@ func TestStorePart_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, fmt.Sprintf("%x", md5.Sum(content)), checksum)
 
-	partPath := filepath.Join(multipartDir, "upload-1", "part_2")
+	partPath := multipartPartPath(multipartDir, "upload-1", 2)
 	stored, err := os.ReadFile(partPath)
 	require.NoError(t, err)
 	require.Equal(t, content, stored)
@@ -61,7 +61,7 @@ func TestStorePart_IgnoresStaleTempFileOnRetry(t *testing.T) {
 	err := repository.CreateMultipartSession(context.Background(), "upload-1", 2, "video/mp4")
 	require.NoError(t, err)
 
-	partPath := filepath.Join(multipartDir, "upload-1", "part_2")
+	partPath := multipartPartPath(multipartDir, "upload-1", 2)
 	require.NoError(t, os.WriteFile(partPath+".tmp", []byte("stale temp"), 0o644))
 
 	content := []byte("part content")
@@ -94,7 +94,7 @@ func TestStorePart_RetryOverwritesExistingPart(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, fmt.Sprintf("%x", md5.Sum(secondContent)), checksum)
 
-	partPath := filepath.Join(multipartDir, "upload-1", "part_2")
+	partPath := multipartPartPath(multipartDir, "upload-1", 2)
 	stored, err := os.ReadFile(partPath)
 	require.NoError(t, err)
 	require.Equal(t, secondContent, stored)
@@ -131,7 +131,7 @@ func TestStorePart_CanceledDuringWriteCleansUpTempFile(t *testing.T) {
 	err = <-done
 	require.ErrorIs(t, err, context.Canceled)
 
-	partPath := filepath.Join(multipartDir, "upload-1", "part_2")
+	partPath := multipartPartPath(multipartDir, "upload-1", 2)
 	_, statErr := os.Stat(partPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 

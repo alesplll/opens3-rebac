@@ -204,8 +204,8 @@ Gateway                          Storage
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
-| `DATA_DIR` | `/data/blobs` | Директория для хранения blob-файлов |
-| `MULTIPART_DIR` | `/data/multipart` | Директория для временных частей multipart |
+| `DATA_DIR` | `/data/blobs` | Корневая директория для финальных blob (`<shard>/<blob_id>`) |
+| `MULTIPART_DIR` | `/data/staging` | Корневая директория staging-зоны (`uploads/` + `completed/`) |
 | `RATE_LIMITER_LIMIT` | `100` | Максимум запросов в окно |
 | `RATE_LIMITER_PERIOD` | `1s` | Окно rate limiter |
 
@@ -216,7 +216,7 @@ GRPC_HOST=0.0.0.0
 GRPC_PORT=50053
 
 DATA_DIR=/data/blobs
-MULTIPART_DIR=/data/multipart
+MULTIPART_DIR=/data/staging
 
 LOGGER_LEVEL=DEBUG
 LOGGER_AS_JSON=false
@@ -305,30 +305,33 @@ CLI создаёт multipart session, загружает 2 части неско
 
 ```
 DATA_DIR/                            (по умолчанию /data/blobs)
-├── {blob_id}                        ← финальные объекты (UUID v4)
-├── {blob_id}
+├── ab/
+│   └── abcd1111-2222-3333-4444-555566667777
+├── c4/
+│   └── c4ef1111-2222-3333-4444-555566667777
 └── ...
 
-MULTIPART_DIR/                       (по умолчанию /data/multipart)
+MULTIPART_DIR/                       (по умолчанию /data/staging)
 ├── completed/
-│   ├── {upload_id}.json            ← persisted result completed multipart upload
+│   ├── ab/
+│   │   └── abcd1111-2222-3333-4444-555566667777.json
 │   └── ...
-├── {upload_id}/
-│   ├── meta.json                    ← expected_parts + content_type + blob_id
-│   ├── part_1
-│   ├── part_2
-│   └── ...
-└── {upload_id}/
-    └── ...
+└── uploads/
+    ├── {upload_id}/
+    │   ├── manifest.json            ← expected_parts + content_type + blob_id
+    │   ├── part_00001
+    │   ├── part_00002
+    │   └── ...
+    └── {blob_id}/
+        ├── manifest.json            ← staging single-part upload
+        └── object.bin
 ```
 
-- `blob_id` — UUID v4, генерируется сервисом при `StoreObject`; для multipart фиксируется при `InitiateMultipartUpload` и затем переиспользуется в `CompleteMultipartUpload`
-- `upload_id` — UUID v4, генерируется при `InitiateMultipartUpload`
-- После успешного `CompleteMultipartUpload` session cleanup выполняется best-effort; идемпотентность retry обеспечивается через `completed/{upload_id}.json`
+- `blob_id` — UUID v4, генерируется сервисом при `StoreObject`; финальный файл публикуется как `DATA_DIR/{blob_id[0:2]}/{blob_id}`
+- `upload_id` — UUID v4, генерируется при `InitiateMultipartUpload`; multipart-части складываются в `MULTIPART_DIR/uploads/{upload_id}/`
+- Single-part upload тоже проходит через staging: сначала создаётся `object.bin`, затем файл атомарно публикуется в `blobs/`
+- После успешного `CompleteMultipartUpload` session cleanup выполняется best-effort; идемпотентность retry обеспечивается через `completed/{upload_id[0:2]}/{upload_id}.json`
 - Для атомарной записи используются уникальные temp-файлы с последующим `os.Rename`, поэтому stale `*.tmp` после crash не должны ломать retry
-
-> **Рекомендация:** для production с большим количеством файлов стоит использовать
-> вложенность `DATA_DIR/{blob_id[0:2]}/{blob_id}` (шардирование по первым 2 символам UUID).
 
 ---
 

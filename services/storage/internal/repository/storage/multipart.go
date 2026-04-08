@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const multipartMetaFilename = "meta.json"
+const multipartMetaFilename = stagingManifestFilename
 const multipartCompletionDirname = "completed"
 
 var afterAssemblePartsCommitHook = func(context.Context) {}
@@ -124,7 +124,7 @@ func (r *repo) AssembleParts(ctx context.Context, uploadID string, parts []model
 		destBlobID = sessionMeta.BlobID
 	}
 
-	if err := ensureDirReady(r.dataDir); err != nil {
+	if err := ensureDirReady(r.blobsRootPath()); err != nil {
 		return nil, err
 	}
 
@@ -269,15 +269,15 @@ func (r *repo) writeCompletedMultipartMeta(uploadID string, meta *model.BlobMeta
 }
 
 func (r *repo) multipartSessionPath(uploadID string) string {
-	return filepath.Join(r.multipartDir, uploadID)
+	return filepath.Join(r.stagingUploadsPath(), uploadID)
 }
 
 func (r *repo) multipartCompletedDir() string {
-	return filepath.Join(r.multipartDir, multipartCompletionDirname)
+	return filepath.Join(r.stagingRootPath(), multipartCompletionDirname)
 }
 
 func (r *repo) completedMultipartMetaPath(uploadID string) string {
-	return filepath.Join(r.multipartCompletedDir(), uploadID+".json")
+	return filepath.Join(r.multipartCompletedDir(), completedMetaShard(uploadID), uploadID+".json")
 }
 
 func (r *repo) multipartMetaPath(uploadID string) string {
@@ -285,7 +285,7 @@ func (r *repo) multipartMetaPath(uploadID string) string {
 }
 
 func (r *repo) multipartPartPath(uploadID string, partNumber int32) string {
-	return filepath.Join(r.multipartSessionPath(uploadID), fmt.Sprintf("part_%d", partNumber))
+	return filepath.Join(r.multipartSessionPath(uploadID), fmt.Sprintf("part_%05d", partNumber))
 }
 
 func (r *repo) multipartSessionExists(uploadID string) bool {
@@ -355,4 +355,8 @@ func (r *repo) blobExists(blobID string) (bool, error) {
 
 func blobIDForUpload(uploadID string) string {
 	return uploadID
+}
+
+func completedMetaShard(uploadID string) string {
+	return blobShard(uploadID)
 }

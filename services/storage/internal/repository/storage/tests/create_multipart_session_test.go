@@ -23,7 +23,7 @@ func TestCreateMultipartSession_Success(t *testing.T) {
 	err := repository.CreateMultipartSession(context.Background(), "upload-1", 3, "video/mp4")
 	require.NoError(t, err)
 
-	metaPath := filepath.Join(multipartDir, "upload-1", "meta.json")
+	metaPath := filepath.Join(multipartSessionPath(multipartDir, "upload-1"), "manifest.json")
 	metaRaw, err := os.ReadFile(metaPath)
 	require.NoError(t, err)
 
