@@ -19,7 +19,8 @@ func TestDeleteBlob_Success(t *testing.T) {
 		multipartDir: t.TempDir(),
 	})
 
-	blobPath := filepath.Join(dataDir, "blob-1")
+	blobPath := blobFilePath(dataDir, "blob-1")
+	require.NoError(t, os.MkdirAll(filepath.Dir(blobPath), 0o755))
 	err := os.WriteFile(blobPath, []byte("content"), 0o644)
 	require.NoError(t, err)
 
@@ -52,13 +53,13 @@ func TestDeleteBlob_RemovesCompletedMultipartMeta(t *testing.T) {
 		multipartDir: multipartDir,
 	})
 
-	blobPath := filepath.Join(dataDir, "upload-1")
+	blobPath := blobFilePath(dataDir, "upload-1")
+	require.NoError(t, os.MkdirAll(filepath.Dir(blobPath), 0o755))
 	require.NoError(t, os.WriteFile(blobPath, []byte("content"), 0o644))
 
-	completedDir := filepath.Join(multipartDir, "completed")
-	require.NoError(t, os.MkdirAll(completedDir, 0o755))
-	completedMetaPath := filepath.Join(completedDir, "upload-1.json")
-	require.NoError(t, os.WriteFile(completedMetaPath, []byte(`{"blob_id":"upload-1"}`), 0o644))
+	metaPath := completedMetaPath(multipartDir, "upload-1")
+	require.NoError(t, os.MkdirAll(filepath.Dir(metaPath), 0o755))
+	require.NoError(t, os.WriteFile(metaPath, []byte(`{"blob_id":"upload-1"}`), 0o644))
 
 	err := repository.DeleteBlob(context.Background(), "upload-1")
 	require.NoError(t, err)
@@ -66,6 +67,6 @@ func TestDeleteBlob_RemovesCompletedMultipartMeta(t *testing.T) {
 	_, err = os.Stat(blobPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
 
-	_, err = os.Stat(completedMetaPath)
+	_, err = os.Stat(metaPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }

@@ -16,3 +16,10 @@ func NewRepository(cfg config.StorageConfig) repository.StorageRepository {
 		multipartDir: cfg.MultipartDir(),
 	}
 }
+
+const (
+	blobsShardLength        = 2
+	stagingUploadsDirname   = "uploads"
+	stagingObjectFilename   = "object.bin"
+	stagingManifestFilename = "manifest.json"
+)

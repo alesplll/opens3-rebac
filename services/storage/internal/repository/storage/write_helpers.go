@@ -72,6 +72,10 @@ func createAtomicTempFile(finalPath string, entity string) (*os.File, string, er
 	dir := filepath.Dir(finalPath)
 	base := filepath.Base(finalPath)
 
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, "", fmt.Errorf("create dir for %s file: %w", entity, err)
+	}
+
 	file, err := os.CreateTemp(dir, base+".*.tmp")
 	if err != nil {
 		return nil, "", fmt.Errorf("create temp %s file: %w", entity, err)

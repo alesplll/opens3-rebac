@@ -70,7 +70,7 @@ func TestAssembleParts_Success(t *testing.T) {
 	require.Equal(t, append(partOne, partTwo...), body)
 	require.Equal(t, fmt.Sprintf("%x", md5.Sum(body)), meta.ChecksumMD5)
 
-	_, err = os.Stat(filepath.Join(multipartDir, "upload-1"))
+	_, err = os.Stat(multipartSessionPath(multipartDir, "upload-1"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	retryMeta, err := repository.AssembleParts(context.Background(), "upload-1", parts, "blob-retry")
@@ -100,7 +100,7 @@ func TestAssembleParts_ChecksumMismatch(t *testing.T) {
 	require.ErrorIs(t, err, domainerrors.ErrChecksumMismatch)
 	require.Nil(t, meta)
 
-	_, err = os.Stat(filepath.Join(dataDir, "upload-1"))
+	_, err = os.Stat(blobFilePath(dataDir, "upload-1"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
@@ -138,10 +138,10 @@ func TestAssembleParts_SucceedsWhenCleanupFails(t *testing.T) {
 	part := []byte("hello world")
 	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
 
-	require.NoError(t, os.Mkdir(filepath.Join(multipartDir, "completed"), 0o755))
-	require.NoError(t, os.Chmod(multipartDir, 0o555))
+	require.NoError(t, os.MkdirAll(filepath.Dir(completedMetaPath(multipartDir, "upload-1")), 0o755))
+	require.NoError(t, os.Chmod(stagingUploadsPath(multipartDir), 0o555))
 	t.Cleanup(func() {
-		_ = os.Chmod(multipartDir, 0o755)
+		_ = os.Chmod(stagingUploadsPath(multipartDir), 0o755)
 	})
 
 	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
@@ -151,11 +151,11 @@ func TestAssembleParts_SucceedsWhenCleanupFails(t *testing.T) {
 	require.NotNil(t, meta)
 	require.Equal(t, "upload-1", meta.BlobID)
 
-	body, readErr := os.ReadFile(filepath.Join(dataDir, "upload-1"))
+	body, readErr := os.ReadFile(blobFilePath(dataDir, "upload-1"))
 	require.NoError(t, readErr)
 	require.Equal(t, part, body)
 
-	_, statErr := os.Stat(filepath.Join(multipartDir, "upload-1"))
+	_, statErr := os.Stat(multipartSessionPath(multipartDir, "upload-1"))
 	require.NoError(t, statErr)
 }
 
@@ -172,10 +172,10 @@ func TestAssembleParts_IdempotentRetryAfterCleanupFailure(t *testing.T) {
 	part := []byte("hello world")
 	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
 
-	require.NoError(t, os.Mkdir(filepath.Join(multipartDir, "completed"), 0o755))
-	require.NoError(t, os.Chmod(multipartDir, 0o555))
+	require.NoError(t, os.MkdirAll(filepath.Dir(completedMetaPath(multipartDir, "upload-1")), 0o755))
+	require.NoError(t, os.Chmod(stagingUploadsPath(multipartDir), 0o555))
 	t.Cleanup(func() {
-		_ = os.Chmod(multipartDir, 0o755)
+		_ = os.Chmod(stagingUploadsPath(multipartDir), 0o755)
 	})
 
 	firstMeta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
@@ -194,7 +194,7 @@ func TestAssembleParts_IdempotentRetryAfterCleanupFailure(t *testing.T) {
 	entries, readErr := os.ReadDir(dataDir)
 	require.NoError(t, readErr)
 	require.Len(t, entries, 1)
-	require.Equal(t, "upload-1", entries[0].Name())
+	require.Equal(t, blobShardDirName("upload-1"), entries[0].Name())
 }
 
 func TestAssembleParts_FallsBackWhenCompletedMetaIsCorrupted(t *testing.T) {
@@ -210,9 +210,8 @@ func TestAssembleParts_FallsBackWhenCompletedMetaIsCorrupted(t *testing.T) {
 	part := []byte("hello world")
 	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
 
-	completedDir := filepath.Join(multipartDir, "completed")
-	require.NoError(t, os.MkdirAll(completedDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(completedDir, "upload-1.json"), []byte("{"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(completedMetaPath(multipartDir, "upload-1")), 0o755))
+	require.NoError(t, os.WriteFile(completedMetaPath(multipartDir, "upload-1"), []byte("{"), 0o644))
 
 	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
 		{PartNumber: 1, ChecksumMD5: checksum},
@@ -221,11 +220,11 @@ func TestAssembleParts_FallsBackWhenCompletedMetaIsCorrupted(t *testing.T) {
 	require.NotNil(t, meta)
 	require.Equal(t, "upload-1", meta.BlobID)
 
-	body, readErr := os.ReadFile(filepath.Join(dataDir, "upload-1"))
+	body, readErr := os.ReadFile(blobFilePath(dataDir, "upload-1"))
 	require.NoError(t, readErr)
 	require.Equal(t, part, body)
 
-	completedMetaBytes, readMetaErr := os.ReadFile(filepath.Join(completedDir, "upload-1.json"))
+	completedMetaBytes, readMetaErr := os.ReadFile(completedMetaPath(multipartDir, "upload-1"))
 	require.NoError(t, readMetaErr)
 
 	var completedMeta model.BlobMeta
@@ -246,8 +245,7 @@ func TestAssembleParts_RebuildsWhenCompletedMetaExistsButBlobIsMissing(t *testin
 	part := []byte("hello world")
 	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
 
-	completedDir := filepath.Join(multipartDir, "completed")
-	require.NoError(t, os.MkdirAll(completedDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(completedMetaPath(multipartDir, "upload-1")), 0o755))
 
 	completedMetaBytes, err := json.Marshal(model.BlobMeta{
 		BlobID:      "upload-1",
@@ -256,7 +254,7 @@ func TestAssembleParts_RebuildsWhenCompletedMetaExistsButBlobIsMissing(t *testin
 		ContentType: "video/mp4",
 	})
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(completedDir, "upload-1.json"), completedMetaBytes, 0o644))
+	require.NoError(t, os.WriteFile(completedMetaPath(multipartDir, "upload-1"), completedMetaBytes, 0o644))
 
 	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
 		{PartNumber: 1, ChecksumMD5: checksum},
@@ -266,7 +264,7 @@ func TestAssembleParts_RebuildsWhenCompletedMetaExistsButBlobIsMissing(t *testin
 	require.Equal(t, "upload-1", meta.BlobID)
 	require.Equal(t, int64(len(part)), meta.SizeBytes)
 
-	body, readErr := os.ReadFile(filepath.Join(dataDir, "upload-1"))
+	body, readErr := os.ReadFile(blobFilePath(dataDir, "upload-1"))
 	require.NoError(t, readErr)
 	require.Equal(t, part, body)
 
@@ -287,9 +285,8 @@ func TestAssembleParts_CorruptedCompletedMetaWithoutSessionReturnsUploadNotFound
 		multipartDir: multipartDir,
 	})
 
-	completedDir := filepath.Join(multipartDir, "completed")
-	require.NoError(t, os.MkdirAll(completedDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(completedDir, "upload-1.json"), []byte("{"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(completedMetaPath(multipartDir, "upload-1")), 0o755))
+	require.NoError(t, os.WriteFile(completedMetaPath(multipartDir, "upload-1"), []byte("{"), 0o644))
 
 	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
 		{PartNumber: 1, ChecksumMD5: "unused"},
@@ -311,7 +308,8 @@ func TestAssembleParts_IgnoresStaleTempFileOnRetry(t *testing.T) {
 	part := []byte("hello world")
 	checksum := setupMultipartSinglePart(t, repository, "upload-1", part)
 
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "upload-1.tmp"), []byte("stale temp"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(blobFilePath(dataDir, "upload-1")), 0o755))
+	require.NoError(t, os.WriteFile(blobFilePath(dataDir, "upload-1")+".tmp", []byte("stale temp"), 0o644))
 
 	meta, err := repository.AssembleParts(context.Background(), "upload-1", []model.PartInfo{
 		{PartNumber: 1, ChecksumMD5: checksum},
@@ -320,7 +318,7 @@ func TestAssembleParts_IgnoresStaleTempFileOnRetry(t *testing.T) {
 	require.NotNil(t, meta)
 	require.Equal(t, "upload-1", meta.BlobID)
 
-	body, readErr := os.ReadFile(filepath.Join(dataDir, "upload-1"))
+	body, readErr := os.ReadFile(blobFilePath(dataDir, "upload-1"))
 	require.NoError(t, readErr)
 	require.Equal(t, part, body)
 }
