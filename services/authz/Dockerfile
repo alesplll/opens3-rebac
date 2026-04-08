@@ -27,6 +27,7 @@ COPY --from=builder /install /usr/local
 COPY --from=builder /app /app
 
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 50051
 
