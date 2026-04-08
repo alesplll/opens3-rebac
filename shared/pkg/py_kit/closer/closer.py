@@ -168,7 +168,7 @@ def configure_default(*signals: signal.Signals) -> Closer:
     Mirrors Go's closer.ConfigureDefault().
     """
     sigs = signals if signals else (signal.SIGINT, signal.SIGTERM)
-    return configure(signals=sigs)
+    return configure(None, _DEFAULT_SHUTDOWN_TIMEOUT, *sigs)
 
 
 def add(*funcs: Callable) -> None:

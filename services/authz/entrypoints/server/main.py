@@ -1,6 +1,5 @@
 """ReBAC Auth Service entrypoint"""
-import logging
-import os
+import signal
 import sys
 from pathlib import Path
 from concurrent import futures
@@ -9,7 +8,11 @@ import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# Find repo root by locating the shared/ directory — works both locally and in Docker
+for _p in Path(__file__).resolve().parents:
+    if (_p / "shared").exists():
+        REPO_ROOT = _p
+        break
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -19,17 +22,23 @@ from internal.neo4j.store import Neo4jStore
 from internal.types import Tuple
 from internal.cache.redis_cache import RedisDecisionCache
 from internal.kafka.producer import AuditProducer
+from internal.config import cfg
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from shared.pkg.py_kit import logger, metric
+from shared.pkg.py_kit.tracing import init_tracer, shutdown_tracer
+from shared.pkg.py_kit.tracing.grpc_interceptor import TracingServerInterceptor
+from shared.pkg.py_kit.middleware import MetricsServerInterceptor
+from shared.pkg.py_kit.closer import configure_default, add_named
 
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+import os
+
+NEO4J_URI     = os.environ.get("NEO4J_URI",      "bolt://localhost:7687")
+NEO4J_USER    = os.environ.get("NEO4J_USER",     "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password123")
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+REDIS_HOST    = os.environ.get("REDIS_HOST",     "localhost")
+REDIS_PORT    = int(os.environ.get("REDIS_PORT", "6379"))
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
-GRPC_PORT = os.environ.get("GRPC_PORT", "50051")
+GRPC_PORT     = os.environ.get("GRPC_PORT",      "50051")
 
 
 class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
@@ -74,26 +83,50 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
         try:
             self._neo4j_store.driver.verify_connectivity()
         except Exception as e:
-            logger.warning("Neo4j health check failed: %s", e)
+            logger.warn({}, "Neo4j health check failed", error=str(e))
             status = authz_pb2.HealthCheckResponse.NOT_SERVING
         try:
             self._cache._client.ping()
         except Exception as e:
-            logger.warning("Redis health check failed: %s", e)
+            logger.warn({}, "Redis health check failed", error=str(e))
             status = authz_pb2.HealthCheckResponse.NOT_SERVING
         return authz_pb2.HealthCheckResponse(status=status)
 
 
 def serve():
-    """Start gRPC server"""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    # ── Observability init (порядок как в Go: logger → metrics → tracing) ──
 
-    # Business service
+    logger.init(cfg)
+
+    provider = metric.init_otel_metrics(cfg)
+    metric.init(cfg)
+
+    init_tracer(cfg)
+
+    # ── Graceful shutdown ──────────────────────────────────────────────────
+
+    closer = configure_default(signal.SIGINT, signal.SIGTERM)
+
+    add_named("otel-tracing",  shutdown_tracer)
+    add_named("otel-metrics",  lambda: metric.shutdown())
+
+    # ── gRPC server ────────────────────────────────────────────────────────
+
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        interceptors=[
+            TracingServerInterceptor(cfg.service_name()),
+            MetricsServerInterceptor(),
+        ],
+    )
+
+    add_named("grpc-server", lambda: server.stop(grace=5).wait())
+
     authz_pb2_grpc.add_PermissionServiceServicer_to_server(
         PermissionServiceServicer(), server
     )
 
-    # gRPC Health (standard protocol — used by K8s liveness/readiness probes)
+    # gRPC Health
     health_servicer = health.HealthServicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
     health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
@@ -102,7 +135,7 @@ def serve():
         health_pb2.HealthCheckResponse.SERVING,
     )
 
-    # gRPC Reflection (grpcurl / Postman)
+    # gRPC Reflection
     SERVICE_NAMES = (
         authz_pb2.DESCRIPTOR.services_by_name["PermissionService"].full_name,
         health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
@@ -112,11 +145,14 @@ def serve():
 
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
     server.start()
-    logger.info("ReBAC Auth Service gRPC :%s", GRPC_PORT)
+
+    logger.info({}, "ReBAC Auth Service started", port=GRPC_PORT)
+
     try:
         server.wait_for_termination()
     finally:
-        logger.info("Shutting down...")
+        logger.info({}, "Shutting down...")
+        logger.sync()
 
 
 def run_server():
