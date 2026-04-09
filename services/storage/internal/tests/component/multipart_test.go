@@ -67,9 +67,13 @@ func TestMultipartUploadAbort_Success(t *testing.T) {
 	stream, err := client.UploadPart(ctx)
 	require.NoError(t, err)
 	err = stream.Send(&desc.UploadPartRequest{
-		UploadId:   uploadID,
-		PartNumber: 1,
-		Data:       []byte("retry"),
+		Payload: &desc.UploadPartRequest_Header{
+			Header: &desc.UploadPartHeader{
+				UploadId:   uploadID,
+				PartNumber: 1,
+				Data:       []byte("retry"),
+			},
+		},
 	})
 	require.NoError(t, err)
 
