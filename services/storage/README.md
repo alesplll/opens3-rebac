@@ -154,27 +154,28 @@ services/storage/
 ```
 Gateway                          Storage
   │                                │
-  │──── StoreObjectRequest ──────► │  (data + size + content_type в первом чанке)
-  │──── StoreObjectRequest ──────► │  (data)
-  │──── StoreObjectRequest ──────► │  (data)
+  │──── StoreObjectRequest ──────► │  (header: metadata + optional first data)
+  │──── StoreObjectRequest ──────► │  (chunk: data)
+  │──── StoreObjectRequest ──────► │  (chunk: data)
   │──── EOF ─────────────────────► │
   │                                │  потоково читает чанки и пишет на диск
   │◄─── StoreObjectResponse ────── │  (blob_id, checksum_md5)
 ```
 
 Для `StoreObject` streaming contract:
-- первое сообщение может содержать первые байты файла и metadata: `size`, `content_type`
-- `size` опционален: если он не передан, сервис не проверяет итоговый размер; `0` интерпретируется как "пустой объект" или "размер не указан"
-- `content_type` опционален: если он не передан, service подставит `application/octet-stream`
-- все последующие сообщения должны содержать только `data`
+- первое сообщение обязано быть `header`
+- `header` может содержать metadata и первые байты файла
+- `size` в `header` опционален: если он не передан, сервис не проверяет итоговый размер; `0` остаётся легитимным значением для пустого объекта
+- `content_type` в `header` опционален: если он не передан, service подставит `application/octet-stream`
+- все последующие сообщения обязаны быть `chunk`
 - пустой объект всё равно требует хотя бы одно сообщение в stream-е
-- если `size` или `content_type` пришли не в первом сообщении, сервер вернёт `INVALID_ARGUMENT`
-- metadata в непервом сообщении валидируется лениво во время чтения `reader`, поэтому ошибка может всплыть уже после входа в service; service обязан пробрасывать её без собственного оборачивания
+- если первым сообщением пришёл `chunk` или после первого сообщения снова пришёл `header`, сервер вернёт `INVALID_ARGUMENT`
 
 Для `UploadPart` действуют те же streaming semantics:
-- первое сообщение обязано содержать `upload_id` и `part_number`, и может одновременно содержать `data`
-- все последующие сообщения должны содержать только `data`
-- если `upload_id` или `part_number` повторно присланы после первого сообщения, сервер вернёт `INVALID_ARGUMENT`
+- первое сообщение обязано быть `header`
+- `header` обязан содержать `upload_id` и `part_number`, и может одновременно содержать первые байты части
+- все последующие сообщения обязаны быть `chunk`
+- если первым сообщением пришёл `chunk` или после первого сообщения снова пришёл `header`, сервер вернёт `INVALID_ARGUMENT`
 - данные части пишутся потоково, без буферизации всего part в памяти handler-а
 - части можно загружать в любом порядке; порядок фактической загрузки не влияет на итоговую сборку
 - при `CompleteMultipartUpload` список `parts` должен быть отсортирован по возрастанию `part_number`
@@ -402,7 +403,7 @@ Handler → StorageService (interface) → StorageRepository (interface)
 
 Также есть transport-level ошибки, которые возникают ещё в handler/middleware:
 
-- `INVALID_ARGUMENT` для нарушенного streaming contract (`size`, `content_type`, `upload_id`, `part_number` не в том сообщении) и для пустого client stream (`io.ErrUnexpectedEOF`)
+- `INVALID_ARGUMENT` для нарушенного streaming contract (ожидался `header`/`chunk`, но пришёл другой тип сообщения), для отсутствующего `upload_id`/`part_number` в `UploadPart`, и для пустого client stream (`io.ErrUnexpectedEOF`)
 - `CANCELED` если клиент отменил контекст
 - `DEADLINE_EXCEEDED` если истёк deadline запроса
 - `INTERNAL` для неожиданных ошибок FS

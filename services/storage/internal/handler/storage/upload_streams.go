@@ -19,25 +19,31 @@ func readStoreObjectStream(stream desc.DataStorageService_StoreObjectServer) (*s
 	if err != nil {
 		return nil, err
 	}
+	firstHeader := firstReq.GetHeader()
+	if firstHeader == nil {
+		return nil, status.Error(codes.InvalidArgument, "first message must be store_object header")
+	}
 
-	reader := newChunkStreamReader(firstReq.GetData(), func() ([]byte, error) {
+	reader := newChunkStreamReader(firstHeader.GetData(), func() ([]byte, error) {
 		req, err := stream.Recv()
 		if err != nil {
 			return nil, err
 		}
-		if req.GetSize() != 0 {
-			return nil, status.Error(codes.InvalidArgument, "size is only allowed in the first message")
+		chunk := req.GetChunk()
+		if chunk == nil {
+			return nil, status.Error(codes.InvalidArgument, "messages after the first must be store_object chunks")
 		}
-		if req.GetContentType() != "" {
-			return nil, status.Error(codes.InvalidArgument, "content_type is only allowed in the first message")
-		}
-
-		return req.GetData(), nil
+		return chunk.GetData(), nil
 	})
 
+	size := int64(0)
+	if firstHeader.Size != nil {
+		size = firstHeader.GetSize()
+	}
+
 	return &storeObjectStreamPayload{
-		size:        firstReq.GetSize(),
-		contentType: firstReq.GetContentType(),
+		size:        size,
+		contentType: firstHeader.GetContentType(),
 		reader:      reader,
 	}, nil
 }
@@ -53,31 +59,33 @@ func readUploadPartStream(stream desc.DataStorageService_UploadPartServer) (*upl
 	if err != nil {
 		return nil, err
 	}
-	if firstReq.GetUploadId() == "" {
+	firstHeader := firstReq.GetHeader()
+	if firstHeader == nil {
+		return nil, status.Error(codes.InvalidArgument, "first message must be upload_part header")
+	}
+	if firstHeader.GetUploadId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "upload_id is required in the first message")
 	}
-	if firstReq.GetPartNumber() == 0 {
+	if firstHeader.GetPartNumber() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "part_number is required in the first message")
 	}
 
-	reader := newChunkStreamReader(firstReq.GetData(), func() ([]byte, error) {
+	reader := newChunkStreamReader(firstHeader.GetData(), func() ([]byte, error) {
 		req, err := stream.Recv()
 		if err != nil {
 			return nil, err
 		}
-		if req.GetUploadId() != "" {
-			return nil, status.Error(codes.InvalidArgument, "upload_id is only allowed in the first message")
-		}
-		if req.GetPartNumber() != 0 {
-			return nil, status.Error(codes.InvalidArgument, "part_number is only allowed in the first message")
+		chunk := req.GetChunk()
+		if chunk == nil {
+			return nil, status.Error(codes.InvalidArgument, "messages after the first must be upload_part chunks")
 		}
 
-		return req.GetData(), nil
+		return chunk.GetData(), nil
 	})
 
 	return &uploadPartStreamPayload{
-		uploadID:   firstReq.GetUploadId(),
-		partNumber: firstReq.GetPartNumber(),
+		uploadID:   firstHeader.GetUploadId(),
+		partNumber: firstHeader.GetPartNumber(),
 		reader:     reader,
 	}, nil
 }

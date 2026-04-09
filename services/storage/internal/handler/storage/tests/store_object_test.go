@@ -22,12 +22,18 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 	ctx := context.Background()
 	reqs := []*desc.StoreObjectRequest{
 		{
-			Data:        []byte("hello "),
-			Size:        11,
-			ContentType: "text/plain",
+			Payload: &desc.StoreObjectRequest_Header{
+				Header: &desc.StoreObjectHeader{
+					Data:        []byte("hello "),
+					Size:        int64Ptr(11),
+					ContentType: "text/plain",
+				},
+			},
 		},
 		{
-			Data: []byte("world"),
+			Payload: &desc.StoreObjectRequest_Chunk{
+				Chunk: &desc.StoreObjectChunk{Data: []byte("world")},
+			},
 		},
 	}
 
@@ -98,24 +104,32 @@ func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
 		ctx: context.Background(),
 		requests: []*desc.StoreObjectRequest{
 			{
-				Data:        []byte("hello "),
-				Size:        11,
-				ContentType: "text/plain",
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data:        []byte("hello "),
+						Size:        int64Ptr(11),
+						ContentType: "text/plain",
+					},
+				},
 			},
 			{
-				Data: []byte("world"),
-				Size: 5,
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data: []byte("world"),
+						Size: int64Ptr(5),
+					},
+				},
 			},
 		},
 	})
 
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "size is only allowed in the first message")
+	require.Contains(t, err.Error(), "messages after the first must be store_object chunks")
 	require.True(t, serviceCalled)
 }
 
-func TestStoreObject_RejectsContentTypeOutsideFirstMessage(t *testing.T) {
+func TestStoreObject_RejectsHeaderAfterFirstMessage(t *testing.T) {
 	t.Parallel()
 
 	serviceCalled := false
@@ -132,21 +146,95 @@ func TestStoreObject_RejectsContentTypeOutsideFirstMessage(t *testing.T) {
 		ctx: context.Background(),
 		requests: []*desc.StoreObjectRequest{
 			{
-				Data:        []byte("hello "),
-				Size:        11,
-				ContentType: "text/plain",
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data:        []byte("hello "),
+						Size:        int64Ptr(11),
+						ContentType: "text/plain",
+					},
+				},
 			},
 			{
-				Data:        []byte("world"),
-				ContentType: "application/json",
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data:        []byte("world"),
+						ContentType: "application/json",
+					},
+				},
 			},
 		},
 	})
 
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "content_type is only allowed in the first message")
+	require.Contains(t, err.Error(), "messages after the first must be store_object chunks")
 	require.True(t, serviceCalled)
+}
+
+func TestStoreObject_RejectsChunkAsFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.StoreObject(&storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Payload: &desc.StoreObjectRequest_Chunk{
+					Chunk: &desc.StoreObjectChunk{Data: []byte("hello")},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "first message must be store_object header")
+}
+
+func TestStoreObject_AllowsEmptyObjectInHeaderOnly(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotSize        int64
+		gotContentType string
+		gotBody        []byte
+	)
+
+	h := handlerStorage.NewHandler(testStorageService{
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+			body, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			gotSize = size
+			gotContentType = contentType
+			gotBody = body
+			return &model.BlobMeta{BlobID: "blob-empty", ChecksumMD5: "md5-empty"}, nil
+		},
+	})
+
+	stream := &storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Size:        int64Ptr(0),
+						ContentType: "application/octet-stream",
+					},
+				},
+			},
+		},
+	}
+
+	err := h.StoreObject(stream)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), gotSize)
+	require.Equal(t, "application/octet-stream", gotContentType)
+	require.Empty(t, gotBody)
+	require.Equal(t, "blob-empty", stream.closedWith.GetBlobId())
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
 }
 
 type testStorageService struct {

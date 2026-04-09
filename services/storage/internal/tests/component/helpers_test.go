@@ -35,14 +35,28 @@ func storeBlob(t *testing.T, ctx context.Context, data []byte, contentType strin
 	for {
 		n, readErr := buf.Read(chunk)
 		if n > 0 {
-			req := &desc.StoreObjectRequest{Data: chunk[:n]}
 			if first {
-				req.Size = int64(len(data))
-				req.ContentType = contentType
+				req := &desc.StoreObjectRequest{
+					Payload: &desc.StoreObjectRequest_Header{
+						Header: &desc.StoreObjectHeader{
+							Size:        int64Ptr(int64(len(data))),
+							ContentType: contentType,
+							Data:        chunk[:n],
+						},
+					},
+				}
+				err := stream.Send(req)
+				require.NoError(t, err)
 				first = false
+			} else {
+				req := &desc.StoreObjectRequest{
+					Payload: &desc.StoreObjectRequest_Chunk{
+						Chunk: &desc.StoreObjectChunk{Data: chunk[:n]},
+					},
+				}
+				err := stream.Send(req)
+				require.NoError(t, err)
 			}
-			err := stream.Send(req)
-			require.NoError(t, err)
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
@@ -55,9 +69,12 @@ func storeBlob(t *testing.T, ctx context.Context, data []byte, contentType strin
 	// Handle empty blob: must send at least one message
 	if first {
 		err := stream.Send(&desc.StoreObjectRequest{
-			Data:        nil,
-			Size:        0,
-			ContentType: contentType,
+			Payload: &desc.StoreObjectRequest_Header{
+				Header: &desc.StoreObjectHeader{
+					Size:        int64Ptr(0),
+					ContentType: contentType,
+				},
+			},
 		})
 		require.NoError(t, err)
 	}
@@ -129,17 +146,28 @@ func uploadPart(t *testing.T, ctx context.Context, uploadID string, partNumber i
 	for {
 		n, readErr := buf.Read(chunk)
 		if n > 0 {
-			req := &desc.UploadPartRequest{
-				Data: chunk[:n],
-			}
 			if first {
-				req.UploadId = uploadID
-				req.PartNumber = partNumber
+				req := &desc.UploadPartRequest{
+					Payload: &desc.UploadPartRequest_Header{
+						Header: &desc.UploadPartHeader{
+							UploadId:   uploadID,
+							PartNumber: partNumber,
+							Data:       chunk[:n],
+						},
+					},
+				}
+				err := stream.Send(req)
+				require.NoError(t, err)
 				first = false
+			} else {
+				req := &desc.UploadPartRequest{
+					Payload: &desc.UploadPartRequest_Chunk{
+						Chunk: &desc.UploadPartChunk{Data: chunk[:n]},
+					},
+				}
+				err := stream.Send(req)
+				require.NoError(t, err)
 			}
-
-			err := stream.Send(req)
-			require.NoError(t, err)
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
@@ -151,8 +179,12 @@ func uploadPart(t *testing.T, ctx context.Context, uploadID string, partNumber i
 
 	if first {
 		err := stream.Send(&desc.UploadPartRequest{
-			UploadId:   uploadID,
-			PartNumber: partNumber,
+			Payload: &desc.UploadPartRequest_Header{
+				Header: &desc.UploadPartHeader{
+					UploadId:   uploadID,
+					PartNumber: partNumber,
+				},
+			},
 		})
 		require.NoError(t, err)
 	}
@@ -195,4 +227,8 @@ func makePattern(size int) []byte {
 		data[i] = byte(i % 256)
 	}
 	return data
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
 }

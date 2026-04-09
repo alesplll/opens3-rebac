@@ -128,16 +128,29 @@ func uploadPart(ctx context.Context, client desc.DataStorageServiceClient, uploa
 	for {
 		n, readErr := reader.Read(chunk)
 		if n > 0 {
-			req := &desc.UploadPartRequest{
-				Data: chunk[:n],
-			}
 			if first {
-				req.UploadId = uploadID
-				req.PartNumber = partNumber
+				req := &desc.UploadPartRequest{
+					Payload: &desc.UploadPartRequest_Header{
+						Header: &desc.UploadPartHeader{
+							UploadId:   uploadID,
+							PartNumber: partNumber,
+							Data:       chunk[:n],
+						},
+					},
+				}
+				if err := stream.Send(req); err != nil {
+					return "", err
+				}
 				first = false
-			}
-			if err := stream.Send(req); err != nil {
-				return "", err
+			} else {
+				req := &desc.UploadPartRequest{
+					Payload: &desc.UploadPartRequest_Chunk{
+						Chunk: &desc.UploadPartChunk{Data: chunk[:n]},
+					},
+				}
+				if err := stream.Send(req); err != nil {
+					return "", err
+				}
 			}
 		}
 
@@ -151,8 +164,12 @@ func uploadPart(ctx context.Context, client desc.DataStorageServiceClient, uploa
 
 	if first {
 		if err := stream.Send(&desc.UploadPartRequest{
-			UploadId:   uploadID,
-			PartNumber: partNumber,
+			Payload: &desc.UploadPartRequest_Header{
+				Header: &desc.UploadPartHeader{
+					UploadId:   uploadID,
+					PartNumber: partNumber,
+				},
+			},
 		}); err != nil {
 			return "", err
 		}
