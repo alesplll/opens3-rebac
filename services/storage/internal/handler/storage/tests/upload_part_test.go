@@ -144,7 +144,7 @@ func TestUploadPart_StartsStreamingBeforeClientStreamEnds(t *testing.T) {
 	}
 }
 
-func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
+func TestUploadPart_ReturnsInvalidArgumentOnUploadIDInNonFirstMessage(t *testing.T) {
 	t.Parallel()
 
 	serviceCalled := false
@@ -181,7 +181,7 @@ func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
 	require.Nil(t, stream.closedWith)
 }
 
-func TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch(t *testing.T) {
+func TestUploadPart_ReturnsInvalidArgumentOnPartNumberInNonFirstMessage(t *testing.T) {
 	t.Parallel()
 
 	serviceCalled := false
