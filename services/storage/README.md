@@ -164,9 +164,12 @@ Gateway                          Storage
 
 Для `StoreObject` streaming contract:
 - первое сообщение может содержать первые байты файла и metadata: `size`, `content_type`
+- `size` опционален: если он не передан, сервис не проверяет итоговый размер; `0` интерпретируется как "пустой объект" или "размер не указан"
+- `content_type` опционален: если он не передан, service подставит `application/octet-stream`
 - все последующие сообщения должны содержать только `data`
 - пустой объект всё равно требует хотя бы одно сообщение в stream-е
 - если `size` или `content_type` пришли не в первом сообщении, сервер вернёт `INVALID_ARGUMENT`
+- metadata в непервом сообщении валидируется лениво во время чтения `reader`, поэтому ошибка может всплыть уже после входа в service; service обязан пробрасывать её без собственного оборачивания
 
 Для `UploadPart` действуют те же streaming semantics:
 - первое сообщение обязано содержать `upload_id` и `part_number`, и может одновременно содержать `data`
@@ -399,10 +402,10 @@ Handler → StorageService (interface) → StorageRepository (interface)
 
 Также есть transport-level ошибки, которые возникают ещё в handler/middleware:
 
-- `INVALID_ARGUMENT` для нарушенного streaming contract (`size`, `content_type`, `upload_id`, `part_number` не в том сообщении)
+- `INVALID_ARGUMENT` для нарушенного streaming contract (`size`, `content_type`, `upload_id`, `part_number` не в том сообщении) и для пустого client stream (`io.ErrUnexpectedEOF`)
 - `CANCELED` если клиент отменил контекст
 - `DEADLINE_EXCEEDED` если истёк deadline запроса
-- `INTERNAL` для неожиданных ошибок FS и для пустого client stream, потому что `io.ErrUnexpectedEOF` сейчас не маппится в CommonError
+- `INTERNAL` для неожиданных ошибок FS
 
 ---
 

@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"io"
 
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/sys/validate"
@@ -42,7 +43,10 @@ func handleError(ctx context.Context, err error, logger Logger) error {
 		if errors.As(err, &se) {
 			return se.GRPCStatus().Err()
 		} else {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				logger.Info(ctx, "error interceptor handle unexpected eof", zap.Error(err))
+				return status.Error(grpcCodes.InvalidArgument, err.Error())
+			} else if errors.Is(err, context.DeadlineExceeded) {
 				logger.Info(ctx, "error interceptor deadlineExceeded error", zap.Error(err))
 				return status.Error(grpcCodes.DeadlineExceeded, err.Error())
 			} else if errors.Is(err, context.Canceled) {
