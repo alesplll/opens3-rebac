@@ -166,9 +166,8 @@ func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
 				Data:       []byte("hello "),
 			},
 			{
-				UploadId:   "upload-2",
-				PartNumber: 3,
-				Data:       []byte("world"),
+				UploadId: "upload-2",
+				Data:     []byte("world"),
 			},
 		},
 	}
@@ -177,7 +176,7 @@ func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
 	err := h.UploadPart(stream)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "upload_id changed within stream")
+	require.Contains(t, err.Error(), "upload_id is only allowed in the first message")
 	require.True(t, serviceCalled)
 	require.Nil(t, stream.closedWith)
 }
@@ -204,7 +203,6 @@ func TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch(t *testing.T) {
 				Data:       []byte("hello "),
 			},
 			{
-				UploadId:   "upload-1",
 				PartNumber: 4,
 				Data:       []byte("world"),
 			},
@@ -215,9 +213,47 @@ func TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch(t *testing.T) {
 	err := h.UploadPart(stream)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "part_number changed within stream")
+	require.Contains(t, err.Error(), "part_number is only allowed in the first message")
 	require.True(t, serviceCalled)
 	require.Nil(t, stream.closedWith)
+}
+
+func TestUploadPart_RequiresUploadIDInFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.UploadPart(&uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				PartNumber: 1,
+				Data:       []byte("hello"),
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "upload_id is required in the first message")
+}
+
+func TestUploadPart_RequiresPartNumberInFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.UploadPart(&uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				UploadId: "upload-1",
+				Data:     []byte("hello"),
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "part_number is required in the first message")
 }
 
 type uploadPartServerMock struct {

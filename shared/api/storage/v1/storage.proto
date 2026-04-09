@@ -11,8 +11,10 @@ option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1;s
 // Порт: 50053 (конфигурируется через GRPC_PORT)
 //
 // Структура хранилища на диске:
-//   /data/blobs/{blob_id}           — готовые объекты
-//   /data/multipart/{upload_id}/    — временные части multipart-загрузки
+//   {DATA_DIR}/{shard}/{blob_id}                       — готовые объекты
+//   {MULTIPART_DIR}/uploads/{upload_id}/               — multipart session + parts
+//   {MULTIPART_DIR}/uploads/{blob_id}/                 — staging single-part upload
+//   {MULTIPART_DIR}/completed/{shard}/{upload_id}.json — marker для идемпотентного CompleteMultipartUpload
 //
 // Kafka:
 //   Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)
@@ -20,6 +22,8 @@ option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1;s
 service DataStorageService {
   // StoreObject принимает поток байт и сохраняет их как blob на диск.
   // Client-streaming: Gateway отправляет файл чанками, сервис собирает и сохраняет.
+  // Первое сообщение должно содержать size/content_type и может содержать data.
+  // Все последующие сообщения должны содержать только data.
   // Возвращает blob_id (UUID) и MD5 для последующей регистрации в Metadata.
   // Ошибки: RESOURCE_EXHAUSTED (недостаточно места), INTERNAL.
   rpc StoreObject(stream StoreObjectRequest) returns (StoreObjectResponse);
@@ -43,7 +47,9 @@ service DataStorageService {
 
   // UploadPart сохраняет одну часть multipart-загрузки.
   // Client-streaming: Gateway отправляет байты одной части.
-  // Части хранятся как /data/multipart/{upload_id}/part_{part_number}.
+  // Первое сообщение должно содержать upload_id/part_number и может содержать data.
+  // Все последующие сообщения должны содержать только data.
+  // Части хранятся как {MULTIPART_DIR}/uploads/{upload_id}/part_{part_number}.
   // Ошибки: NOT_FOUND (upload_id не существует), INVALID_ARGUMENT (неверный part_number).
   rpc UploadPart(stream UploadPartRequest) returns (UploadPartResponse);
 
@@ -67,7 +73,7 @@ service DataStorageService {
 
 // StoreObjectRequest — один чанк стримингового запроса.
 message StoreObjectRequest {
-  // Чанк байт файла. Отправляется в нескольких сообщениях для больших файлов.
+  // Чанк байт файла. Может присутствовать и в первом, и в последующих сообщениях.
   bytes  data         = 1;
   // Ожидаемый итоговый размер файла в байтах.
   // Передаётся только в первом сообщении потока — используется для предварительного выделения.
@@ -130,9 +136,10 @@ message InitiateMultipartUploadResponse {
 
 // UploadPartRequest — один чанк стримингового запроса части.
 message UploadPartRequest {
-  // UUID сессии из InitiateMultipartUpload.
+  // UUID сессии из InitiateMultipartUpload. Обязателен только в первом сообщении потока.
   string upload_id   = 1;
-  // Порядковый номер части (начиная с 1). Определяет порядок склейки в CompleteMultipartUpload.
+  // Порядковый номер части (начиная с 1). Обязателен только в первом сообщении потока.
+  // Определяет порядок склейки в CompleteMultipartUpload.
   int32  part_number = 2;
   // Чанк байт данной части.
   bytes  data        = 3;

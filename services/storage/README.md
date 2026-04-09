@@ -40,21 +40,23 @@ gRPC request
                │
                ▼
 ┌──────────────────────────────────────────┐
-│  Handler     (internal/handler/storage/) │  ← gRPC ↔ domain model конвертация
-│              Принимает/отдаёт стримы,    │     сборка чанков, отправка чанков
-│              делегирует в Service         │
+│  Handler     (internal/handler/storage/) │  ← transport layer:
+│              разбирает первый message     │     стрима, валидирует streaming
+│              и прокидывает byte-stream    │     contract, делегирует в Service
 └──────────────┬───────────────────────────┘
                │
                ▼
 ┌──────────────────────────────────────────┐
-│  Service     (internal/service/storage/) │  ← бизнес-логика: валидация,
-│              Оркестрирует Repository      │     MD5-подсчёт, multipart-сборка
+│  Service     (internal/service/storage/) │  ← application/domain layer:
+│              валидирует команды,          │     назначает id, логирует,
+│              оркестрирует Repository      │     обновляет метрики
 └──────────────┬───────────────────────────┘
                │
                ▼
 ┌──────────────────────────────────────────┐
-│  Repository  (internal/repository/       │  ← работа с файловой системой:
-│              storage/)                   │     чтение/запись/удаление blob-файлов
+│  Repository  (internal/repository/       │  ← persistence layer:
+│              storage/)                   │     staging, атомарная запись,
+│                                          │     чтение/удаление blob-файлов
 └──────────────────────────────────────────┘
 ```
 
@@ -84,6 +86,7 @@ services/storage/
 │   │       └── rate_limiter.go              # RATE_LIMITER_*
 │   ├── handler/storage/                     # Слой 1: gRPC-хэндлеры
 │   │   ├── handler.go                       # Конструктор, embed Unimplemented
+│   │   ├── upload_streams.go                # Контракт и разбор client-streaming запросов
 │   │   ├── store_object.go                  # Client-streaming: приём blob
 │   │   ├── retrieve_object.go               # Server-streaming: отдача blob
 │   │   ├── delete_object.go                 # Unary: удаление blob
@@ -109,8 +112,10 @@ services/storage/
 │   ├── repository/storage/                  # Слой 3: доступ к FS
 │   │   ├── repository.go                    # Конструктор (принимает StorageConfig)
 │   │   ├── store_blob.go                    # Запись файла на диск
+│   │   ├── multipart.go                     # Multipart session, part upload, final assemble
 │   │   ├── retrieve_blob.go                 # Чтение файла с диска
 │   │   ├── delete_blob.go                   # Удаление файла
+│   │   ├── write_helpers.go                 # Атомарная запись и temp-файлы
 │   │   └── health.go                        # Проверка доступности DATA_DIR
 │   ├── model/
 │   │   └── blob.go                          # Доменные модели: BlobMeta, PartInfo
@@ -157,9 +162,16 @@ Gateway                          Storage
   │◄─── StoreObjectResponse ────── │  (blob_id, checksum_md5)
 ```
 
+Для `StoreObject` streaming contract:
+- первое сообщение может содержать первые байты файла и metadata: `size`, `content_type`
+- все последующие сообщения должны содержать только `data`
+- пустой объект всё равно требует хотя бы одно сообщение в stream-е
+- если `size` или `content_type` пришли не в первом сообщении, сервер вернёт `INVALID_ARGUMENT`
+
 Для `UploadPart` действуют те же streaming semantics:
-- `upload_id` и `part_number` фиксируются по первому сообщению stream-а
-- в последующих сообщениях они не должны меняться, иначе возвращается `INVALID_ARGUMENT`
+- первое сообщение обязано содержать `upload_id` и `part_number`, и может одновременно содержать `data`
+- все последующие сообщения должны содержать только `data`
+- если `upload_id` или `part_number` повторно присланы после первого сообщения, сервер вернёт `INVALID_ARGUMENT`
 - данные части пишутся потоково, без буферизации всего part в памяти handler-а
 - части можно загружать в любом порядке; порядок фактической загрузки не влияет на итоговую сборку
 - при `CompleteMultipartUpload` список `parts` должен быть отсортирован по возрастанию `part_number`
@@ -178,6 +190,13 @@ Gateway                          Storage
 ```
 
 Размер чанка при отдаче: **8 MB** (константа `chunkSize` в `handler/storage/retrieve_object.go`).
+
+### Когда именно появляются blob и part
+
+- `StoreObject`: staging-директория и `manifest.json` создаются сразу при вызове метода repository; финальный blob в `DATA_DIR/.../<blob_id>` появляется только после полного чтения stream-а и атомарного `rename`.
+- `InitiateMultipartUpload`: сразу создаются директория сессии `MULTIPART_DIR/uploads/<upload_id>/` и manifest с metadata upload-а.
+- `UploadPart`: файл `part_<number>` создаётся во время записи входного stream-а; фактически part появляется, когда repository начинает читать и писать байты, а не в момент открытия RPC.
+- `CompleteMultipartUpload`: итоговый blob сначала собирается во временный файл и становится видимым только после финального `rename`; затем multipart staging удаляется best-effort.
 
 ---
 
@@ -377,6 +396,13 @@ Handler → StorageService (interface) → StorageRepository (interface)
 
 Ошибки автоматически конвертируются в gRPC status codes через middleware
 `validationInterceptor.ErrorCodesUnaryInterceptor` и `validationInterceptor.ErrorCodesStreamInterceptor` из shared kit.
+
+Также есть transport-level ошибки, которые возникают ещё в handler/middleware:
+
+- `INVALID_ARGUMENT` для нарушенного streaming contract (`size`, `content_type`, `upload_id`, `part_number` не в том сообщении)
+- `CANCELED` если клиент отменил контекст
+- `DEADLINE_EXCEEDED` если истёк deadline запроса
+- `INTERNAL` для неожиданных ошибок FS и для пустого client stream, потому что `io.ErrUnexpectedEOF` сейчас не маппится в CommonError
 
 ---
 
