@@ -312,6 +312,48 @@ func TestUploadPart_RequiresPartNumberInFirstMessage(t *testing.T) {
 	require.Contains(t, err.Error(), "part_number is required in the first message")
 }
 
+func TestUploadPart_AllowsEmptyPartInHeaderOnly(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotUploadID   string
+		gotPartNumber int32
+		gotBody       []byte
+	)
+
+	h := handlerStorage.NewHandler(testStorageService{
+		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
+			body, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			gotUploadID = uploadID
+			gotPartNumber = partNumber
+			gotBody = body
+			return "md5-empty", nil
+		},
+	})
+
+	stream := &uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId:   "upload-1",
+						PartNumber: 3,
+					},
+				},
+			},
+		},
+	}
+
+	err := h.UploadPart(stream)
+	require.NoError(t, err)
+	require.Equal(t, "upload-1", gotUploadID)
+	require.Equal(t, int32(3), gotPartNumber)
+	require.Empty(t, gotBody)
+	require.Equal(t, "md5-empty", stream.closedWith.GetPartChecksumMd5())
+}
+
 type uploadPartServerMock struct {
 	grpc.ServerStream
 	ctx        context.Context
