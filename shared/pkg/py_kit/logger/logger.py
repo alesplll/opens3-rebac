@@ -3,9 +3,10 @@ Structured logger — Python analogue of go-kit/logger.
 
 Features:
 - JSON or console output to stdout (mirrors zap behaviour)
-- Automatic context enrichment: trace_id, user_id from context dict
+- Automatic context enrichment: trace_id, span_id from active OTel span
 - Optional OTLP log export via gRPC (same collector as traces/metrics)
 - Singleton init pattern matching Go version
+- Configures root Python logger so stdlib loggers in internal/* produce output
 
 Usage:
     from shared.pkg.py_kit.logger import init, info, with_context
@@ -31,6 +32,29 @@ from typing import Any, Optional
 
 from .config import LoggerConfig
 
+
+# ---------------------------------------------------------------------------
+# OTel trace context helpers
+# ---------------------------------------------------------------------------
+
+def _current_trace_context() -> dict:
+    """
+    Extract trace_id and span_id from the current active OTel span.
+    Returns empty dict if OTel is not installed or no span is active.
+    """
+    try:
+        from opentelemetry import trace
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx is None or not ctx.is_valid:
+            return {}
+        return {
+            "trace_id": format(ctx.trace_id, "032x"),
+            "span_id": format(ctx.span_id, "016x"),
+        }
+    except Exception:
+        return {}
+
 # ---------------------------------------------------------------------------
 # Internal state (mirrors Go's globalLogger + initOnce)
 # ---------------------------------------------------------------------------
@@ -52,7 +76,7 @@ _log_level_map = {
 # ---------------------------------------------------------------------------
 
 class _JSONFormatter(logging.Formatter):
-    """Single-line JSON log records — compatible with Grafana Loki."""
+    """Single-line JSON log records — compatible with Grafana Loki / Elasticsearch."""
 
     def format(self, record: logging.LogRecord) -> str:
         import json
@@ -65,6 +89,9 @@ class _JSONFormatter(logging.Formatter):
             "caller": f"{record.filename}:{record.lineno}",
             "message": record.getMessage(),
         }
+
+        # Inject active OTel trace context so every log line carries trace_id/span_id
+        payload.update(_current_trace_context())
 
         # Extra fields attached via LoggerAdapter or record.__dict__
         skip = {
@@ -87,11 +114,27 @@ class _JSONFormatter(logging.Formatter):
 class _ConsoleFormatter(logging.Formatter):
     """Human-readable format: timestamp level caller message [key=val ...]"""
 
+    _LEVEL_COLORS = {
+        "DEBUG":    "\033[36m",   # cyan
+        "INFO":     "\033[32m",   # green
+        "WARNING":  "\033[33m",   # yellow
+        "ERROR":    "\033[31m",   # red
+        "CRITICAL": "\033[35m",   # magenta
+    }
+    _RESET = "\033[0m"
+
     def format(self, record: logging.LogRecord) -> str:
         import datetime
 
         ts = datetime.datetime.utcfromtimestamp(record.created).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        base = f"{ts}\t{record.levelname:<5}\t{record.filename}:{record.lineno}\t{record.getMessage()}"
+        color = self._LEVEL_COLORS.get(record.levelname, "")
+        level_str = f"{color}{record.levelname:<5}{self._RESET}" if color else f"{record.levelname:<5}"
+        base = f"{ts}  {level_str}  {record.filename}:{record.lineno}  {record.getMessage()}"
+
+        # Inject trace context inline
+        trace_ctx = _current_trace_context()
+        if trace_ctx:
+            base += f"  trace_id={trace_ctx['trace_id']} span_id={trace_ctx['span_id']}"
 
         skip = {
             "name", "msg", "args", "levelname", "levelno", "pathname",
@@ -102,8 +145,8 @@ class _ConsoleFormatter(logging.Formatter):
         }
         extras = {k: v for k, v in record.__dict__.items() if k not in skip}
         if extras:
-            kv = "\t".join(f"{k}={v}" for k, v in extras.items())
-            base = f"{base}\t{kv}"
+            kv = "  ".join(f"{k}={v}" for k, v in extras.items())
+            base = f"{base}  {kv}"
 
         if record.exc_info:
             base += "\n" + self.formatException(record.exc_info)
@@ -118,12 +161,19 @@ class _ConsoleFormatter(logging.Formatter):
 def _build_otlp_handler(cfg: LoggerConfig) -> Optional[logging.Handler]:
     """Create a logging.Handler that ships records to the OTLP collector."""
     try:
-        from opentelemetry.sdk._logs import LoggerProvider
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        # OTel SDK >= 1.20 uses public opentelemetry.sdk.logs
+        # Older versions used private opentelemetry.sdk._logs — try both
+        try:
+            from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
+            from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
+            from opentelemetry._logs import set_logger_provider
+        except ImportError:
+            from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # type: ignore[no-redef]
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # type: ignore[no-redef]
+            from opentelemetry._logs import set_logger_provider  # type: ignore[no-redef]
+
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
         from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-        from opentelemetry._logs import set_logger_provider
-        from opentelemetry.sdk._logs import LoggingHandler  # type: ignore[attr-defined]
     except ImportError:
         logging.getLogger(__name__).warning(
             "opentelemetry packages not installed — OTLP log export disabled. "
@@ -221,6 +271,12 @@ def init(cfg: LoggerConfig) -> None:
     """
     Initialise the global logger. Call once at startup.
     Idempotent — subsequent calls are no-ops (mirrors Go's sync.Once).
+
+    Configures two loggers:
+    - Named logger (cfg.service_name()) — used by py_kit API (logger.info, etc.)
+      Gets both stdout + OTLP handlers.
+    - Root logger — gets stdout handler only so that stdlib loggers in
+      internal/* packages produce visible output in the container console.
     """
     global _logger, _cfg
 
@@ -230,27 +286,37 @@ def init(cfg: LoggerConfig) -> None:
     _cfg = cfg
     level = _log_level_map.get(cfg.log_level().lower(), logging.INFO)
 
-    root = logging.getLogger(cfg.service_name())
-    root.setLevel(level)
-    root.propagate = False
+    formatter = _JSONFormatter() if cfg.as_json() else _ConsoleFormatter()
 
-    # Stdout handler
+    # ── Named logger (py_kit API) ─────────────────────────────────────────
+    named = logging.getLogger(cfg.service_name())
+    named.setLevel(level)
+    named.propagate = False
+
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setLevel(level)
-    if cfg.as_json():
-        stdout_handler.setFormatter(_JSONFormatter())
-    else:
-        stdout_handler.setFormatter(_ConsoleFormatter())
-    root.addHandler(stdout_handler)
+    stdout_handler.setFormatter(formatter)
+    named.addHandler(stdout_handler)
 
-    # OTLP handler (optional)
+    # OTLP handler (optional) — only on named logger to avoid noise from libs
     if cfg.enable_otlp():
         otlp_handler = _build_otlp_handler(cfg)
         if otlp_handler is not None:
             otlp_handler.setLevel(level)
-            root.addHandler(otlp_handler)
+            named.addHandler(otlp_handler)
 
-    _logger = _Logger(root)
+    # ── Root logger — makes stdlib loggers in internal/* visible in console ─
+    # Named logger has propagate=False so no double-logging for its records.
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Only add handler if root has none yet (avoid duplicates on re-init)
+    if not root.handlers:
+        root_stdout = logging.StreamHandler(sys.stdout)
+        root_stdout.setLevel(level)
+        root_stdout.setFormatter(formatter)
+        root.addHandler(root_stdout)
+
+    _logger = _Logger(named)
 
 
 def set_nop_logger() -> None:
