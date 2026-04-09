@@ -8,7 +8,7 @@ import (
 )
 
 type StorageService interface {
-	StoreObject(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error)
+	StoreObject(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error)
 	RetrieveObject(ctx context.Context, blobID string, offset, length int64) (io.ReadCloser, int64, error)
 	DeleteObject(ctx context.Context, blobID string) error
 

@@ -21,12 +21,18 @@ func TestUploadPart_StreamsAllChunksToService(t *testing.T) {
 	ctx := context.Background()
 	reqs := []*desc.UploadPartRequest{
 		{
-			UploadId:   "upload-1",
-			PartNumber: 3,
-			Data:       []byte("hello "),
+			Payload: &desc.UploadPartRequest_Header{
+				Header: &desc.UploadPartHeader{
+					UploadId:   "upload-1",
+					PartNumber: 3,
+					Data:       []byte("hello "),
+				},
+			},
 		},
 		{
-			Data: []byte("world"),
+			Payload: &desc.UploadPartRequest_Chunk{
+				Chunk: &desc.UploadPartChunk{Data: []byte("world")},
+			},
 		},
 	}
 
@@ -108,12 +114,18 @@ func TestUploadPart_StartsStreamingBeforeClientStreamEnds(t *testing.T) {
 		ctx: ctx,
 		requests: []*desc.UploadPartRequest{
 			{
-				UploadId:   "upload-1",
-				PartNumber: 3,
-				Data:       []byte("hello "),
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId:   "upload-1",
+						PartNumber: 3,
+						Data:       []byte("hello "),
+					},
+				},
 			},
 			{
-				Data: []byte("world"),
+				Payload: &desc.UploadPartRequest_Chunk{
+					Chunk: &desc.UploadPartChunk{Data: []byte("world")},
+				},
 			},
 		},
 		beforeRecv: func(recvIndex int) {
@@ -144,7 +156,7 @@ func TestUploadPart_StartsStreamingBeforeClientStreamEnds(t *testing.T) {
 	}
 }
 
-func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
+func TestUploadPart_RejectsHeaderAfterFirstMessage(t *testing.T) {
 	t.Parallel()
 
 	serviceCalled := false
@@ -161,14 +173,21 @@ func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
 		ctx: context.Background(),
 		requests: []*desc.UploadPartRequest{
 			{
-				UploadId:   "upload-1",
-				PartNumber: 3,
-				Data:       []byte("hello "),
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId:   "upload-1",
+						PartNumber: 3,
+						Data:       []byte("hello "),
+					},
+				},
 			},
 			{
-				UploadId:   "upload-2",
-				PartNumber: 3,
-				Data:       []byte("world"),
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId: "upload-2",
+						Data:     []byte("world"),
+					},
+				},
 			},
 		},
 	}
@@ -177,47 +196,117 @@ func TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch(t *testing.T) {
 	err := h.UploadPart(stream)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "upload_id changed within stream")
+	require.Contains(t, err.Error(), "messages after the first must be upload_part chunks")
 	require.True(t, serviceCalled)
 	require.Nil(t, stream.closedWith)
 }
 
-func TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch(t *testing.T) {
+func TestUploadPart_RejectsChunkAsFirstMessage(t *testing.T) {
 	t.Parallel()
 
-	serviceCalled := false
-	svc := testStorageService{
-		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
-			serviceCalled = true
-			_, err := io.ReadAll(reader)
-			require.Error(t, err)
-			return "", err
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.UploadPart(&uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				Payload: &desc.UploadPartRequest_Chunk{
+					Chunk: &desc.UploadPartChunk{Data: []byte("hello")},
+				},
+			},
 		},
-	}
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "first message must be upload_part header")
+}
+
+func TestUploadPart_RequiresUploadIDInFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.UploadPart(&uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						PartNumber: 1,
+						Data:       []byte("hello"),
+					},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "upload_id is required in the first message")
+}
+
+func TestUploadPart_RequiresPartNumberInFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.UploadPart(&uploadPartServerMock{
+		ctx: context.Background(),
+		requests: []*desc.UploadPartRequest{
+			{
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId: "upload-1",
+						Data:     []byte("hello"),
+					},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "part_number is required in the first message")
+}
+
+func TestUploadPart_AllowsEmptyPartInHeaderOnly(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotUploadID   string
+		gotPartNumber int32
+		gotBody       []byte
+	)
+
+	h := handlerStorage.NewHandler(testStorageService{
+		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
+			body, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			gotUploadID = uploadID
+			gotPartNumber = partNumber
+			gotBody = body
+			return "md5-empty", nil
+		},
+	})
 
 	stream := &uploadPartServerMock{
 		ctx: context.Background(),
 		requests: []*desc.UploadPartRequest{
 			{
-				UploadId:   "upload-1",
-				PartNumber: 3,
-				Data:       []byte("hello "),
-			},
-			{
-				UploadId:   "upload-1",
-				PartNumber: 4,
-				Data:       []byte("world"),
+				Payload: &desc.UploadPartRequest_Header{
+					Header: &desc.UploadPartHeader{
+						UploadId:   "upload-1",
+						PartNumber: 3,
+					},
+				},
 			},
 		},
 	}
 
-	h := handlerStorage.NewHandler(svc)
 	err := h.UploadPart(stream)
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "part_number changed within stream")
-	require.True(t, serviceCalled)
-	require.Nil(t, stream.closedWith)
+	require.NoError(t, err)
+	require.Equal(t, "upload-1", gotUploadID)
+	require.Equal(t, int32(3), gotPartNumber)
+	require.Empty(t, gotBody)
+	require.Equal(t, "md5-empty", stream.closedWith.GetPartChecksumMd5())
 }
 
 type uploadPartServerMock struct {

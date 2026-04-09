@@ -47,7 +47,7 @@ type testRetrieveStorageService struct {
 
 var _ service.StorageService = testRetrieveStorageService{}
 
-func (s testRetrieveStorageService) StoreObject(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+func (s testRetrieveStorageService) StoreObject(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 	panic("unexpected call")
 }
 

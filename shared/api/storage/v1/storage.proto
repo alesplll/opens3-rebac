@@ -11,15 +11,18 @@ option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1;s
 // Порт: 50053 (конфигурируется через GRPC_PORT)
 //
 // Структура хранилища на диске:
-//   /data/blobs/{blob_id}           — готовые объекты
-//   /data/multipart/{upload_id}/    — временные части multipart-загрузки
+//   {DATA_DIR}/{shard}/{blob_id}                       — готовые объекты
+//   {MULTIPART_DIR}/uploads/{upload_id}/               — multipart session + parts
+//   {MULTIPART_DIR}/uploads/{blob_id}/                 — staging single-part upload
+//   {MULTIPART_DIR}/completed/{shard}/{upload_id}.json — marker для идемпотентного CompleteMultipartUpload
 //
 // Kafka:
 //   Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)
 //   Публикует  → object-stored:  после успешного StoreObject (резервный путь для Metadata)
 service DataStorageService {
   // StoreObject принимает поток байт и сохраняет их как blob на диск.
-  // Client-streaming: Gateway отправляет файл чанками, сервис собирает и сохраняет.
+  // Client-streaming: первое сообщение должно быть header, все последующие — chunk.
+  // Header содержит metadata и может также содержать первые байты файла.
   // Возвращает blob_id (UUID) и MD5 для последующей регистрации в Metadata.
   // Ошибки: RESOURCE_EXHAUSTED (недостаточно места), INTERNAL.
   rpc StoreObject(stream StoreObjectRequest) returns (StoreObjectResponse);
@@ -42,8 +45,9 @@ service DataStorageService {
   rpc InitiateMultipartUpload(InitiateMultipartUploadRequest) returns (InitiateMultipartUploadResponse);
 
   // UploadPart сохраняет одну часть multipart-загрузки.
-  // Client-streaming: Gateway отправляет байты одной части.
-  // Части хранятся как /data/multipart/{upload_id}/part_{part_number}.
+  // Client-streaming: первое сообщение должно быть header, все последующие — chunk.
+  // Header содержит upload_id/part_number и может также содержать первые байты части.
+  // Части хранятся как {MULTIPART_DIR}/uploads/{upload_id}/part_{part_number}.
   // Ошибки: NOT_FOUND (upload_id не существует), INVALID_ARGUMENT (неверный part_number).
   rpc UploadPart(stream UploadPartRequest) returns (UploadPartResponse);
 
@@ -65,16 +69,27 @@ service DataStorageService {
 
 // ─── StoreObject ──────────────────────────────────────────────────────────────
 
-// StoreObjectRequest — один чанк стримингового запроса.
-message StoreObjectRequest {
-  // Чанк байт файла. Отправляется в нескольких сообщениях для больших файлов.
-  bytes  data         = 1;
+message StoreObjectHeader {
   // Ожидаемый итоговый размер файла в байтах.
-  // Передаётся только в первом сообщении потока — используется для предварительного выделения.
-  int64  size         = 2;
+  // Optional позволяет различать "размер не передан" и "размер = 0".
+  optional int64 size = 1;
   // MIME тип (напр. "image/jpeg", "application/octet-stream").
-  // Передаётся только в первом сообщении потока.
-  string content_type = 3;
+  string content_type = 2;
+  // Первые байты файла, если клиент хочет начать загрузку уже в header.
+  bytes data = 3;
+}
+
+message StoreObjectChunk {
+  // Последующие байты файла после header.
+  bytes data = 1;
+}
+
+// StoreObjectRequest — одно сообщение client-streaming запроса.
+message StoreObjectRequest {
+  oneof payload {
+    StoreObjectHeader header = 1;
+    StoreObjectChunk  chunk  = 2;
+  }
 }
 
 message StoreObjectResponse {
@@ -128,14 +143,26 @@ message InitiateMultipartUploadResponse {
   string upload_id = 1;
 }
 
-// UploadPartRequest — один чанк стримингового запроса части.
-message UploadPartRequest {
+message UploadPartHeader {
   // UUID сессии из InitiateMultipartUpload.
-  string upload_id   = 1;
+  string upload_id = 1;
   // Порядковый номер части (начиная с 1). Определяет порядок склейки в CompleteMultipartUpload.
-  int32  part_number = 2;
-  // Чанк байт данной части.
-  bytes  data        = 3;
+  int32 part_number = 2;
+  // Первые байты данной части, если клиент хочет начать загрузку уже в header.
+  bytes data = 3;
+}
+
+message UploadPartChunk {
+  // Последующие байты данной части после header.
+  bytes data = 1;
+}
+
+// UploadPartRequest — одно сообщение client-streaming запроса части.
+message UploadPartRequest {
+  oneof payload {
+    UploadPartHeader header = 1;
+    UploadPartChunk  chunk  = 2;
+  }
 }
 
 message UploadPartResponse {

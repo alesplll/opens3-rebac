@@ -11,7 +11,9 @@ import (
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
@@ -20,23 +22,29 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 	ctx := context.Background()
 	reqs := []*desc.StoreObjectRequest{
 		{
-			Data:        []byte("hello "),
-			Size:        11,
-			ContentType: "text/plain",
+			Payload: &desc.StoreObjectRequest_Header{
+				Header: &desc.StoreObjectHeader{
+					Data:        []byte("hello "),
+					Size:        int64Ptr(11),
+					ContentType: "text/plain",
+				},
+			},
 		},
 		{
-			Data: []byte("world"),
+			Payload: &desc.StoreObjectRequest_Chunk{
+				Chunk: &desc.StoreObjectChunk{Data: []byte("world")},
+			},
 		},
 	}
 
 	var (
-		gotSize        int64
+		gotSize        *int64
 		gotContentType string
 		gotBody        []byte
 	)
 
 	svc := testStorageService{
-		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 			body, err := io.ReadAll(reader)
 			require.NoError(t, err)
 
@@ -60,7 +68,8 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 	err := h.StoreObject(stream)
 	require.NoError(t, err)
 
-	require.Equal(t, int64(11), gotSize)
+	require.NotNil(t, gotSize)
+	require.Equal(t, int64(11), *gotSize)
 	require.Equal(t, "text/plain", gotContentType)
 	require.Equal(t, []byte("hello world"), gotBody)
 	require.Equal(t, &desc.StoreObjectResponse{
@@ -79,14 +88,124 @@ func TestStoreObject_EmptyStream(t *testing.T) {
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
+func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	serviceCalled := false
+	h := handlerStorage.NewHandler(testStorageService{
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
+			serviceCalled = true
+			_, err := io.ReadAll(reader)
+			require.Error(t, err)
+			return nil, err
+			return nil, err
+		},
+	})
+
+	err := h.StoreObject(&storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data:        []byte("hello "),
+						Size:        int64Ptr(11),
+						ContentType: "text/plain",
+					},
+				},
+			},
+			{
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Data:        []byte("world"),
+						ContentType: "application/json",
+					},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "messages after the first must be store_object chunks")
+	require.True(t, serviceCalled)
+}
+
+func TestStoreObject_RejectsChunkAsFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	h := handlerStorage.NewHandler(testStorageService{})
+	err := h.StoreObject(&storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Payload: &desc.StoreObjectRequest_Chunk{
+					Chunk: &desc.StoreObjectChunk{Data: []byte("hello")},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "first message must be store_object header")
+}
+
+func TestStoreObject_AllowsEmptyObjectInHeaderOnly(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotSize        *int64
+		gotContentType string
+		gotBody        []byte
+	)
+
+	h := handlerStorage.NewHandler(testStorageService{
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
+			body, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			gotSize = size
+			gotContentType = contentType
+			gotBody = body
+			return &model.BlobMeta{BlobID: "blob-empty", ChecksumMD5: "md5-empty"}, nil
+		},
+	})
+
+	stream := &storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Payload: &desc.StoreObjectRequest_Header{
+					Header: &desc.StoreObjectHeader{
+						Size:        int64Ptr(0),
+						ContentType: "application/octet-stream",
+					},
+				},
+			},
+		},
+	}
+
+	err := h.StoreObject(stream)
+	require.NoError(t, err)
+	require.NotNil(t, gotSize)
+	require.Equal(t, int64(0), *gotSize)
+	require.Equal(t, "application/octet-stream", gotContentType)
+	require.Empty(t, gotBody)
+	require.Equal(t, "blob-empty", stream.closedWith.GetBlobId())
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
 type testStorageService struct {
-	storeObjectFn func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error)
+	storeObjectFn func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error)
 	uploadPartFn  func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error)
 }
 
 var _ service.StorageService = testStorageService{}
 
-func (s testStorageService) StoreObject(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+func (s testStorageService) StoreObject(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 	if s.storeObjectFn == nil {
 		return nil, nil
 	}

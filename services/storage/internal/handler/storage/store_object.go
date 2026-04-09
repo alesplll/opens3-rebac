@@ -5,25 +5,16 @@ import (
 )
 
 func (h *handler) StoreObject(stream desc.DataStorageService_StoreObjectServer) error {
-	firstReq, err := recvFirstMessage(stream.Recv)
+	payload, err := readStoreObjectStream(stream)
 	if err != nil {
 		return err
 	}
 
-	reader := newChunkStreamReader(firstReq.GetData(), func() ([]byte, error) {
-		req, err := stream.Recv()
-		if err != nil {
-			return nil, err
-		}
-
-		return req.GetData(), nil
-	})
-
 	meta, err := h.service.StoreObject(
 		stream.Context(),
-		reader,
-		firstReq.GetSize(),
-		firstReq.GetContentType(),
+		payload.reader,
+		payload.size,
+		payload.contentType,
 	)
 	if err != nil {
 		return err
