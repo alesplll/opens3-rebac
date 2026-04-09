@@ -21,7 +21,7 @@ func TestStoreObject(t *testing.T) {
 	type args struct {
 		ctx         context.Context
 		reader      io.Reader
-		size        int64
+		size        *int64
 		contentType string
 	}
 
@@ -43,7 +43,7 @@ func TestStoreObject(t *testing.T) {
 			args: args{
 				ctx:         ctx,
 				reader:      bytes.NewReader(content),
-				size:        int64(len(content)),
+				size:        int64Ptr(int64(len(content))),
 				contentType: contentType,
 			},
 			want: &model.BlobMeta{
@@ -76,7 +76,7 @@ func TestStoreObject(t *testing.T) {
 			args: args{
 				ctx:         ctx,
 				reader:      bytes.NewReader(content),
-				size:        int64(len(content)),
+				size:        int64Ptr(int64(len(content))),
 				contentType: "",
 			},
 			want: &model.BlobMeta{
@@ -109,7 +109,7 @@ func TestStoreObject(t *testing.T) {
 			args: args{
 				ctx:         ctx,
 				reader:      bytes.NewReader(content),
-				size:        -1,
+				size:        int64Ptr(-1),
 				contentType: contentType,
 			},
 			want: nil,
@@ -119,11 +119,44 @@ func TestStoreObject(t *testing.T) {
 			},
 		},
 		{
+			name: "skips size validation when size is not provided",
+			args: args{
+				ctx:         ctx,
+				reader:      bytes.NewReader(content),
+				size:        nil,
+				contentType: contentType,
+			},
+			want: &model.BlobMeta{
+				BlobID:      "",
+				ChecksumMD5: "checksum-3",
+				SizeBytes:   int64(len(content) + 7),
+				ContentType: contentType,
+			},
+			err: nil,
+			repoMock: func(mc *minimock.Controller) repository.StorageRepository {
+				mock := mocks.NewStorageRepositoryMock(mc)
+				mock.StoreBlobMock.Set(func(gotCtx context.Context, blobID string, reader io.Reader) (*model.BlobMeta, error) {
+					require.Equal(t, ctx, gotCtx)
+					require.NotEmpty(t, blobID)
+					body, err := io.ReadAll(reader)
+					require.NoError(t, err)
+					require.Equal(t, content, body)
+
+					return &model.BlobMeta{
+						BlobID:      blobID,
+						ChecksumMD5: "checksum-3",
+						SizeBytes:   int64(len(content) + 7),
+					}, nil
+				})
+				return mock
+			},
+		},
+		{
 			name: "cleans up stored blob when actual size mismatches expected size",
 			args: args{
 				ctx:         ctx,
 				reader:      bytes.NewReader(content),
-				size:        int64(len(content) + 5),
+				size:        int64Ptr(int64(len(content) + 5)),
 				contentType: contentType,
 			},
 			want: nil,
@@ -173,4 +206,8 @@ func TestStoreObject(t *testing.T) {
 			require.Equal(t, tt.want.ContentType, res.ContentType)
 		})
 	}
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
 }
