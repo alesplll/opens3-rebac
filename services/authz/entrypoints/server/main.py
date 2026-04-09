@@ -25,10 +25,11 @@ from internal.kafka.producer import AuditProducer
 from internal.config import cfg
 
 from shared.pkg.py_kit import logger, metric
-from shared.pkg.py_kit.tracing import init_tracer, shutdown_tracer
+from shared.pkg.py_kit.tracing import init_tracer, shutdown_tracer, trace_id_from_context
 from shared.pkg.py_kit.tracing.grpc_interceptor import TracingServerInterceptor
 from shared.pkg.py_kit.middleware import MetricsServerInterceptor
 from shared.pkg.py_kit.closer import configure_default, add_named
+from internal import metric as authz_metrics
 
 import os
 
@@ -52,43 +53,59 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
             store=self._neo4j_store, cache=self._cache, audit_producer=audit_producer
         )
 
+    def _ctx(self) -> dict:
+        return {"trace_id": trace_id_from_context()}
+
     def Check(self, request, context):
+        ctx = self._ctx()
+        logger.debug(ctx, "Check RPC", subject=request.subject, action=request.action, object=request.object)
         allowed = self.rebac.check(request.subject, request.action, request.object)
+        logger.info(ctx, "Check RPC done", subject=request.subject, action=request.action, object=request.object, allowed=allowed)
         return authz_pb2.CheckResponse(
             allowed=allowed, reason="Neo4j ReBAC (transitive + HAS_PERMISSION)"
         )
 
     def WriteTuple(self, request, context):
+        ctx = self._ctx()
+        logger.debug(ctx, "WriteTuple RPC", subject=request.subject, relation=request.relation, object=request.object)
         level = request.level if request.level else None
         tuple_ = Tuple(request.subject, request.relation, request.object, level=level)
         success = self.rebac.write_tuple(tuple_)
+        logger.info(ctx, "WriteTuple RPC done", success=success)
         return authz_pb2.WriteTupleResponse(success=success)
 
     def DeleteTuple(self, request, context):
+        ctx = self._ctx()
+        logger.debug(ctx, "DeleteTuple RPC", subject=request.subject, relation=request.relation, object=request.object)
         tuple_ = Tuple(request.subject, request.relation, request.object)
         success = self.rebac.delete_tuple(tuple_)
+        logger.info(ctx, "DeleteTuple RPC done", success=success)
         return authz_pb2.DeleteTupleResponse(success=success)
 
     def Read(self, request, context):
+        ctx = self._ctx()
+        logger.debug(ctx, "Read RPC", subject=request.subject)
         tuples = self.rebac.read_tuples(request.subject)
         response = authz_pb2.ReadResponse()
         for t in tuples:
             rt = response.tuples.add(subject=t.subject, relation=t.relation, object=t.object)
             if t.level:
                 rt.level = t.level
+        logger.debug(ctx, "Read RPC done", count=len(tuples))
         return response
 
     def HealthCheck(self, request, context):
+        ctx = self._ctx()
         status = authz_pb2.HealthCheckResponse.SERVING
         try:
             self._neo4j_store.driver.verify_connectivity()
         except Exception as e:
-            logger.warn({}, "Neo4j health check failed", error=str(e))
+            logger.warn(ctx, "Neo4j health check failed", error=str(e))
             status = authz_pb2.HealthCheckResponse.NOT_SERVING
         try:
             self._cache._client.ping()
         except Exception as e:
-            logger.warn({}, "Redis health check failed", error=str(e))
+            logger.warn(ctx, "Redis health check failed", error=str(e))
             status = authz_pb2.HealthCheckResponse.NOT_SERVING
         return authz_pb2.HealthCheckResponse(status=status)
 
@@ -100,6 +117,7 @@ def serve():
 
     provider = metric.init_otel_metrics(cfg)
     metric.init(cfg)
+    authz_metrics.init()
 
     init_tracer(cfg)
 

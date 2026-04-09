@@ -65,6 +65,7 @@ def init_otel_metrics(cfg: MetricsConfig):
         from opentelemetry import metrics as otel_metrics
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.metrics.view import View, ExplicitBucketHistogramAggregation
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
         from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
         from opentelemetry.semconv.resource import ResourceAttributes
@@ -91,7 +92,17 @@ def init_otel_metrics(cfg: MetricsConfig):
         export_interval_millis=int(cfg.push_interval_seconds() * 1000),
     )
 
-    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    # Apply explicit histogram buckets matching go-kit boundaries
+    histogram_view = View(
+        instrument_name=f"grpc_{cfg.service_name()}_histogram_response_time_seconds",
+        aggregation=ExplicitBucketHistogramAggregation(boundaries=_HISTOGRAM_BOUNDARIES),
+    )
+
+    provider = MeterProvider(
+        resource=resource,
+        metric_readers=[reader],
+        views=[histogram_view],
+    )
     otel_metrics.set_meter_provider(provider)
 
     _meter = otel_metrics.get_meter(cfg.service_name())
@@ -111,15 +122,6 @@ def init(cfg: MetricsConfig) -> None:
     meter = get_meter()
     if meter is None:
         return
-
-    try:
-        from opentelemetry.sdk.metrics.view import View
-        from opentelemetry.sdk.metrics import Histogram as _Hist
-        from opentelemetry.sdk.metrics.instrument import (
-            Histogram as HistInstrument,
-        )
-    except ImportError:
-        pass
 
     svc = cfg.service_name()
 
@@ -184,6 +186,6 @@ def shutdown(timeout_seconds: float = 5.0) -> None:
     if _provider is None:
         return
     try:
-        _provider.shutdown(timeout_millis=int(timeout_seconds * 1000))
+        _provider.shutdown()
     except Exception as exc:
         log.error("Error shutting down MeterProvider: %s", exc)
