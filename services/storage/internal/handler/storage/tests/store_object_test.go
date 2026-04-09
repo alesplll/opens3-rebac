@@ -11,7 +11,9 @@ import (
 	desc "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
@@ -77,6 +79,74 @@ func TestStoreObject_EmptyStream(t *testing.T) {
 		ctx: context.Background(),
 	})
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	serviceCalled := false
+	h := handlerStorage.NewHandler(testStorageService{
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+			serviceCalled = true
+			_, err := io.ReadAll(reader)
+			require.Error(t, err)
+			return nil, err
+		},
+	})
+
+	err := h.StoreObject(&storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Data:        []byte("hello "),
+				Size:        11,
+				ContentType: "text/plain",
+			},
+			{
+				Data: []byte("world"),
+				Size: 5,
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "size is only allowed in the first message")
+	require.True(t, serviceCalled)
+}
+
+func TestStoreObject_RejectsContentTypeOutsideFirstMessage(t *testing.T) {
+	t.Parallel()
+
+	serviceCalled := false
+	h := handlerStorage.NewHandler(testStorageService{
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+			serviceCalled = true
+			_, err := io.ReadAll(reader)
+			require.Error(t, err)
+			return nil, err
+		},
+	})
+
+	err := h.StoreObject(&storeObjectServerMock{
+		ctx: context.Background(),
+		requests: []*desc.StoreObjectRequest{
+			{
+				Data:        []byte("hello "),
+				Size:        11,
+				ContentType: "text/plain",
+			},
+			{
+				Data:        []byte("world"),
+				ContentType: "application/json",
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "content_type is only allowed in the first message")
+	require.True(t, serviceCalled)
 }
 
 type testStorageService struct {
