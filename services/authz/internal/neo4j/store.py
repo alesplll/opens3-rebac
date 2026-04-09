@@ -25,7 +25,7 @@ class Neo4jStore:
         """Create nodes and relationship in Neo4j. For HAS_PERMISSION, level is required."""
         if tuple_.relation == RelationType.HAS_PERMISSION.value:
             if not tuple_.level or not is_valid_permission_level(tuple_.level):
-                logger.warn({"trace_id": trace_id_from_context()}, "HAS_PERMISSION requires valid level", level=tuple_.level)
+                logger.warn({"trace_id": trace_id_from_context()}, "HAS_PERMISSION requires valid level", permission_level=tuple_.level)
                 return False
             return self._write_has_permission(tuple_)
         return self._write_plain_relation(tuple_)
