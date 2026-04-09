@@ -191,7 +191,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(grpc_authz_response_total{status=\"error\"}[$__rate_interval])) / sum(rate(grpc_authz_response_total[$__rate_interval]))",
+          "expr": "(sum(rate(grpc_authz_response_total{status=\"error\"}[5m])) or vector(0)) / sum(rate(grpc_authz_response_total[5m]))",
           "instant": true,
           "range": false,
           "legendFormat": "gRPC Error Rate",
@@ -265,7 +265,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (action, result) (rate(authz_decisions_total[$__rate_interval]))",
+          "expr": "sum by (action, result) (rate(authz_decisions_total[5m]))",
           "legendFormat": "{{action}} → {{result}}",
           "range": true,
           "refId": "A"
@@ -330,7 +330,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (result) (rate(authz_cache_decisions_total[$__rate_interval]))",
+          "expr": "sum by (result) (rate(authz_cache_decisions_total[5m]))",
           "legendFormat": "cache {{result}}",
           "range": true,
           "refId": "A"
@@ -394,21 +394,21 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[5m])) by (le))",
           "legendFormat": "gRPC p50",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[5m])) by (le))",
           "legendFormat": "gRPC p95",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(grpc_authz_histogram_response_time_seconds_bucket[5m])) by (le))",
           "legendFormat": "gRPC p99",
           "range": true,
           "refId": "C"
@@ -464,21 +464,21 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[5m])))",
           "legendFormat": "{{query_type}} p50",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[5m])))",
           "legendFormat": "{{query_type}} p95",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(authz_neo4j_query_duration_seconds_bucket[5m])))",
           "legendFormat": "{{query_type}} p99",
           "range": true,
           "refId": "C"
@@ -532,14 +532,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(grpc_authz_requests_total[$__rate_interval]))",
+          "expr": "sum(rate(grpc_authz_requests_total[5m]))",
           "legendFormat": "Requests/s",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum(rate(grpc_authz_response_total[$__rate_interval]))",
+          "expr": "sum(rate(grpc_authz_response_total[5m]))",
           "legendFormat": "Responses/s",
           "range": true,
           "refId": "B"
@@ -585,14 +585,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (method) (rate(grpc_authz_response_total{status=\"success\"}[$__rate_interval]))",
+          "expr": "sum by (method) (rate(grpc_authz_response_total{status=\"success\"}[5m]))",
           "legendFormat": "ok  {{method}}",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum by (method) (rate(grpc_authz_response_total{status=\"error\"}[$__rate_interval]))",
+          "expr": "sum by (method) (rate(grpc_authz_response_total{status=\"error\"}[5m]))",
           "legendFormat": "err {{method}}",
           "range": true,
           "refId": "B"
