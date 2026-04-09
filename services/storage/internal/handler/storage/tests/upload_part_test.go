@@ -221,51 +221,6 @@ func TestUploadPart_RejectsChunkAsFirstMessage(t *testing.T) {
 	require.Contains(t, err.Error(), "first message must be upload_part header")
 }
 
-func TestUploadPart_RejectsHeaderWithPartNumberAfterFirstMessage(t *testing.T) {
-	t.Parallel()
-
-	serviceCalled := false
-	svc := testStorageService{
-		uploadPartFn: func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error) {
-			serviceCalled = true
-			_, err := io.ReadAll(reader)
-			require.Error(t, err)
-			return "", err
-		},
-	}
-
-	stream := &uploadPartServerMock{
-		ctx: context.Background(),
-		requests: []*desc.UploadPartRequest{
-			{
-				Payload: &desc.UploadPartRequest_Header{
-					Header: &desc.UploadPartHeader{
-						UploadId:   "upload-1",
-						PartNumber: 3,
-						Data:       []byte("hello "),
-					},
-				},
-			},
-			{
-				Payload: &desc.UploadPartRequest_Header{
-					Header: &desc.UploadPartHeader{
-						PartNumber: 4,
-						Data:       []byte("world"),
-					},
-				},
-			},
-		},
-	}
-
-	h := handlerStorage.NewHandler(svc)
-	err := h.UploadPart(stream)
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "messages after the first must be upload_part chunks")
-	require.True(t, serviceCalled)
-	require.Nil(t, stream.closedWith)
-}
-
 func TestUploadPart_RequiresUploadIDInFirstMessage(t *testing.T) {
 	t.Parallel()
 

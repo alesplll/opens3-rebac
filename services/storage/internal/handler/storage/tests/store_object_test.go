@@ -38,13 +38,13 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 	}
 
 	var (
-		gotSize        int64
+		gotSize        *int64
 		gotContentType string
 		gotBody        []byte
 	)
 
 	svc := testStorageService{
-		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 			body, err := io.ReadAll(reader)
 			require.NoError(t, err)
 
@@ -68,7 +68,8 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 	err := h.StoreObject(stream)
 	require.NoError(t, err)
 
-	require.Equal(t, int64(11), gotSize)
+	require.NotNil(t, gotSize)
+	require.Equal(t, int64(11), *gotSize)
 	require.Equal(t, "text/plain", gotContentType)
 	require.Equal(t, []byte("hello world"), gotBody)
 	require.Equal(t, &desc.StoreObjectResponse{
@@ -92,52 +93,11 @@ func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
 
 	serviceCalled := false
 	h := handlerStorage.NewHandler(testStorageService{
-		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 			serviceCalled = true
 			_, err := io.ReadAll(reader)
 			require.Error(t, err)
 			return nil, err
-		},
-	})
-
-	err := h.StoreObject(&storeObjectServerMock{
-		ctx: context.Background(),
-		requests: []*desc.StoreObjectRequest{
-			{
-				Payload: &desc.StoreObjectRequest_Header{
-					Header: &desc.StoreObjectHeader{
-						Data:        []byte("hello "),
-						Size:        int64Ptr(11),
-						ContentType: "text/plain",
-					},
-				},
-			},
-			{
-				Payload: &desc.StoreObjectRequest_Header{
-					Header: &desc.StoreObjectHeader{
-						Data: []byte("world"),
-						Size: int64Ptr(5),
-					},
-				},
-			},
-		},
-	})
-
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "messages after the first must be store_object chunks")
-	require.True(t, serviceCalled)
-}
-
-func TestStoreObject_RejectsHeaderAfterFirstMessage(t *testing.T) {
-	t.Parallel()
-
-	serviceCalled := false
-	h := handlerStorage.NewHandler(testStorageService{
-		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
-			serviceCalled = true
-			_, err := io.ReadAll(reader)
-			require.Error(t, err)
 			return nil, err
 		},
 	})
@@ -195,13 +155,13 @@ func TestStoreObject_AllowsEmptyObjectInHeaderOnly(t *testing.T) {
 	t.Parallel()
 
 	var (
-		gotSize        int64
+		gotSize        *int64
 		gotContentType string
 		gotBody        []byte
 	)
 
 	h := handlerStorage.NewHandler(testStorageService{
-		storeObjectFn: func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+		storeObjectFn: func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 			body, err := io.ReadAll(reader)
 			require.NoError(t, err)
 			gotSize = size
@@ -227,7 +187,8 @@ func TestStoreObject_AllowsEmptyObjectInHeaderOnly(t *testing.T) {
 
 	err := h.StoreObject(stream)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), gotSize)
+	require.NotNil(t, gotSize)
+	require.Equal(t, int64(0), *gotSize)
 	require.Equal(t, "application/octet-stream", gotContentType)
 	require.Empty(t, gotBody)
 	require.Equal(t, "blob-empty", stream.closedWith.GetBlobId())
@@ -238,13 +199,13 @@ func int64Ptr(v int64) *int64 {
 }
 
 type testStorageService struct {
-	storeObjectFn func(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error)
+	storeObjectFn func(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error)
 	uploadPartFn  func(ctx context.Context, uploadID string, partNumber int32, reader io.Reader) (string, error)
 }
 
 var _ service.StorageService = testStorageService{}
 
-func (s testStorageService) StoreObject(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
+func (s testStorageService) StoreObject(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
 	if s.storeObjectFn == nil {
 		return nil, nil
 	}

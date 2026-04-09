@@ -9,7 +9,7 @@ import (
 )
 
 type storeObjectStreamPayload struct {
-	size        int64
+	size        *int64
 	contentType string
 	reader      io.Reader
 }
@@ -36,13 +36,8 @@ func readStoreObjectStream(stream desc.DataStorageService_StoreObjectServer) (*s
 		return chunk.GetData(), nil
 	})
 
-	size := int64(0)
-	if firstHeader.Size != nil {
-		size = firstHeader.GetSize()
-	}
-
 	return &storeObjectStreamPayload{
-		size:        size,
+		size:        firstHeader.Size,
 		contentType: firstHeader.GetContentType(),
 		reader:      reader,
 	}, nil

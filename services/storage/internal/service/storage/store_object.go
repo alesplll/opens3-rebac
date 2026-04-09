@@ -14,8 +14,8 @@ import (
 
 const defaultContentType = "application/octet-stream"
 
-func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, size int64, contentType string) (*model.BlobMeta, error) {
-	if size < 0 {
+func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, size *int64, contentType string) (*model.BlobMeta, error) {
+	if size != nil && *size < 0 {
 		return nil, domainerrors.ErrInvalidBlobSize
 	}
 
@@ -36,7 +36,7 @@ func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, size
 		return nil, err
 	}
 
-	if size > 0 && meta.SizeBytes != size {
+	if size != nil && meta.SizeBytes != *size {
 		if deleteErr := s.repo.DeleteBlob(ctx, meta.BlobID); deleteErr != nil {
 			logger.Error(ctx, "failed to cleanup blob after size mismatch", zap.Error(deleteErr), zap.String("blob_id", meta.BlobID))
 		}
@@ -45,7 +45,7 @@ func (s *storageService) StoreObject(ctx context.Context, reader io.Reader, size
 			ctx,
 			"stored blob size mismatch",
 			zap.String("blob_id", meta.BlobID),
-			zap.Int64("expected_size", size),
+			zap.Int64("expected_size", *size),
 			zap.Int64("actual_size", meta.SizeBytes),
 		)
 		return nil, domainerrors.ErrInvalidBlobSize
