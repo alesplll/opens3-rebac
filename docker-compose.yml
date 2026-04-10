@@ -201,6 +201,12 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 50051), 2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   metadata:
     profiles: [services]
@@ -248,6 +254,8 @@ services:
     depends_on:
       authz:
         condition: service_healthy
+      metadata:
+        condition: service_healthy
       storage:
         condition: service_healthy
     restart: unless-stopped
@@ -256,7 +264,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 20s
 
   # ── Observability ──────────────────────────────────────────────────────────
   # docker compose --profile observability up
