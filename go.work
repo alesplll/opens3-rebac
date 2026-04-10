@@ -2,11 +2,8 @@ go 1.24.1
 
 use (
 	./services/auth
-<<<<<<< HEAD
 	./services/gateway
-=======
 	./services/metadata
->>>>>>> 64dfcd9 (feat(metadata): add grpc stub service)
 	./services/storage
 	./services/users
 	./shared
