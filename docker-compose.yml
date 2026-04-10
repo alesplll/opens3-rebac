@@ -201,23 +201,31 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 50051), 2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
-  # placeholder — раскомментировать когда сервис будет готов
-  # metadata:
-  #   profiles: [services]
-  #   build:
-  #     context: ./services/metadata
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "50052:50052"
-  #   environment:
-  #     DATABASE_URL: "postgresql://${METADATA_DB_USER:-metadata_user}:${METADATA_DB_PASSWORD:-metadata_password}@postgres-metadata:5432/${METADATA_DB_NAME:-metadata_db}"
-  #     KAFKA_BOOTSTRAP: kafka:29092
-  #   networks:
-  #     - opens3-network
-  #   depends_on:
-  #     - postgres-metadata
-  #     - kafka
+  metadata:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile.mock-metadata
+    ports:
+      - "50052:50052"
+    environment:
+      GRPC_PORT: 50052
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50052"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   storage:
     profiles: [services]
@@ -254,6 +262,8 @@ services:
     depends_on:
       authz:
         condition: service_healthy
+      metadata:
+        condition: service_healthy
       storage:
         condition: service_healthy
     restart: unless-stopped
@@ -262,7 +272,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 20s
 
   # ── Observability ──────────────────────────────────────────────────────────
   # docker compose --profile observability up
