@@ -1,7 +1,5 @@
 """
 Service config — читает env vars, реализует протоколы py_kit.
-
-Аналог services/storage/internal/config/env/{logger,metrics,tracing}.go
 """
 import os
 
@@ -17,11 +15,34 @@ def _get(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-class ObservabilityConfig:
+class Config:
     """
-    Единый конфиг для logger + metrics + tracing.
-    Все три протокола читают одни и те же OTEL_* переменные — как в Go.
+    Единый конфиг сервиса: инфраструктура + observability.
+    Все значения читаются из env vars при каждом обращении.
     """
+
+    # ── Infrastructure ─────────────────────────────────────────────────────
+
+    def neo4j_uri(self) -> str:
+        return _get("NEO4J_URI", "bolt://localhost:7687")
+
+    def neo4j_user(self) -> str:
+        return _get("NEO4J_USER", "neo4j")
+
+    def neo4j_password(self) -> str:
+        return _get("NEO4J_PASSWORD", "password123")
+
+    def redis_host(self) -> str:
+        return _get("REDIS_HOST", "localhost")
+
+    def redis_port(self) -> int:
+        return int(_get("REDIS_PORT", "6379"))
+
+    def kafka_bootstrap(self) -> str:
+        return _get("KAFKA_BOOTSTRAP", "localhost:9092")
+
+    def grpc_port(self) -> str:
+        return _get("GRPC_PORT", "50051")
 
     # ── LoggerConfig protocol ──────────────────────────────────────────────
 
@@ -63,4 +84,4 @@ class ObservabilityConfig:
 
 
 # Global singleton — создаётся один раз при импорте
-cfg = ObservabilityConfig()
+cfg = Config()
