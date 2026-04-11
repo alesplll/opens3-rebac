@@ -202,22 +202,16 @@ services:
       kafka:
         condition: service_healthy
 
-  # placeholder — раскомментировать когда сервис будет готов
-  # metadata:
-  #   profiles: [services]
-  #   build:
-  #     context: ./services/metadata
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "50052:50052"
-  #   environment:
-  #     DATABASE_URL: "postgresql://${METADATA_DB_USER:-metadata_user}:${METADATA_DB_PASSWORD:-metadata_password}@postgres-metadata:5432/${METADATA_DB_NAME:-metadata_db}"
-  #     KAFKA_BOOTSTRAP: kafka:29092
-  #   networks:
-  #     - opens3-network
-  #   depends_on:
-  #     - postgres-metadata
-  #     - kafka
+  metadata:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/metadata/Dockerfile
+    ports:
+      - "50052:50052"
+    networks:
+      - opens3-network
+    restart: unless-stopped
 
   storage:
     profiles: [services]
