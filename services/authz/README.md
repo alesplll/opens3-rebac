@@ -47,8 +47,6 @@ PermissionService
 |---|---|---|
 | `MEMBER_OF` | User/Group → Group | Group membership; transitive (`*0..`) |
 | `HAS_PERMISSION` | User/Group → Resource | Permission with `level`: `read`/`write`/`create`/`delete`/`admin` |
-| `OWNER_OF` | User/Group → Resource | Full access (legacy) |
-| `VIEWER` | User/Group → Resource | Read access (legacy) |
 | `PARENT_OF` | Resource → Resource | Resource hierarchy |
 
 **Level hierarchy:** `admin` ⊇ `delete` ⊇ `create` ⊇ `write` ⊇ `read`
@@ -202,27 +200,27 @@ grpcurl -plaintext localhost:50051 opens3.authz.v1.PermissionService/HealthCheck
 
 ```bash
 # alex is a member of devops
-grpcurl -plaintext -d '{"subject":"user:alex","relation":"MEMBER_OF","object":"group:devops"}' \
+grpcurl -plaintext -d '{"subject":"user:alex","relation":"RELATION_MEMBER_OF","object":"group:devops"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # devops has admin permission on server-1
-grpcurl -plaintext -d '{"subject":"group:devops","relation":"HAS_PERMISSION","object":"resource:server-1","level":"admin"}' \
+grpcurl -plaintext -d '{"subject":"group:devops","relation":"RELATION_HAS_PERMISSION","object":"resource:server-1","level":"PERMISSION_LEVEL_ADMIN"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # viewers group has read-only on doc1
-grpcurl -plaintext -d '{"subject":"group:viewers","relation":"HAS_PERMISSION","object":"resource:doc1","level":"read"}' \
+grpcurl -plaintext -d '{"subject":"group:viewers","relation":"RELATION_HAS_PERMISSION","object":"resource:doc1","level":"PERMISSION_LEVEL_READ"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # bob is a viewer
-grpcurl -plaintext -d '{"subject":"user:bob","relation":"MEMBER_OF","object":"group:viewers"}' \
+grpcurl -plaintext -d '{"subject":"user:bob","relation":"RELATION_MEMBER_OF","object":"group:viewers"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 
 # Transitive chain: alice → payments → finance → billing (read)
-grpcurl -plaintext -d '{"subject":"user:alice","relation":"MEMBER_OF","object":"group:payments"}' \
+grpcurl -plaintext -d '{"subject":"user:alice","relation":"RELATION_MEMBER_OF","object":"group:payments"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
-grpcurl -plaintext -d '{"subject":"group:payments","relation":"MEMBER_OF","object":"group:finance"}' \
+grpcurl -plaintext -d '{"subject":"group:payments","relation":"RELATION_MEMBER_OF","object":"group:finance"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
-grpcurl -plaintext -d '{"subject":"group:finance","relation":"HAS_PERMISSION","object":"resource:billing","level":"read"}' \
+grpcurl -plaintext -d '{"subject":"group:finance","relation":"RELATION_HAS_PERMISSION","object":"resource:billing","level":"PERMISSION_LEVEL_READ"}' \
   localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
 ```
 
@@ -230,26 +228,26 @@ grpcurl -plaintext -d '{"subject":"group:finance","relation":"HAS_PERMISSION","o
 
 ```bash
 # alex: admin implies read on server-1 → ALLOW
-grpcurl -plaintext -d '{"subject":"user:alex","action":"admin","object":"resource:server-1"}' \
+grpcurl -plaintext -d '{"subject":"user:alex","action":"ACTION_ADMIN","object":"resource:server-1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 
-grpcurl -plaintext -d '{"subject":"user:alex","action":"read","object":"resource:server-1"}' \
+grpcurl -plaintext -d '{"subject":"user:alex","action":"ACTION_READ","object":"resource:server-1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # eve has no rights → DENY
-grpcurl -plaintext -d '{"subject":"user:eve","action":"read","object":"resource:server-1"}' \
+grpcurl -plaintext -d '{"subject":"user:eve","action":"ACTION_READ","object":"resource:server-1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # bob: read allowed, write denied
-grpcurl -plaintext -d '{"subject":"user:bob","action":"read","object":"resource:doc1"}' \
+grpcurl -plaintext -d '{"subject":"user:bob","action":"ACTION_READ","object":"resource:doc1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
-grpcurl -plaintext -d '{"subject":"user:bob","action":"write","object":"resource:doc1"}' \
+grpcurl -plaintext -d '{"subject":"user:bob","action":"ACTION_WRITE","object":"resource:doc1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 
 # alice: transitive chain alice→payments→finance → read on billing, but not write
-grpcurl -plaintext -d '{"subject":"user:alice","action":"read","object":"resource:billing"}' \
+grpcurl -plaintext -d '{"subject":"user:alice","action":"ACTION_READ","object":"resource:billing"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
-grpcurl -plaintext -d '{"subject":"user:alice","action":"write","object":"resource:billing"}' \
+grpcurl -plaintext -d '{"subject":"user:alice","action":"ACTION_WRITE","object":"resource:billing"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 ```
 
@@ -257,17 +255,17 @@ grpcurl -plaintext -d '{"subject":"user:alice","action":"write","object":"resour
 
 ```bash
 # Remove alex from devops → loses access to server-1
-grpcurl -plaintext -d '{"subject":"user:alex","relation":"MEMBER_OF","object":"group:devops"}' \
+grpcurl -plaintext -d '{"subject":"user:alex","relation":"RELATION_MEMBER_OF","object":"group:devops"}' \
   localhost:50051 opens3.authz.v1.PermissionService/DeleteTuple
 # → {"success": true}
 
 # Verify access is gone
-grpcurl -plaintext -d '{"subject":"user:alex","action":"read","object":"resource:server-1"}' \
+grpcurl -plaintext -d '{"subject":"user:alex","action":"ACTION_READ","object":"resource:server-1"}' \
   localhost:50051 opens3.authz.v1.PermissionService/Check
 # → {"allowed": false}
 
 # Deleting a non-existent tuple returns false
-grpcurl -plaintext -d '{"subject":"user:nobody","relation":"MEMBER_OF","object":"group:nobody"}' \
+grpcurl -plaintext -d '{"subject":"user:nobody","relation":"RELATION_MEMBER_OF","object":"group:nobody"}' \
   localhost:50051 opens3.authz.v1.PermissionService/DeleteTuple
 # → {"success": false}
 ```
