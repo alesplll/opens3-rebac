@@ -17,9 +17,9 @@ class PermissionService:
 
     def __init__(
         self,
-        store: Optional[GraphStore] = None,
-        cache: Optional[DecisionCache] = None,
-        audit_producer: Optional[AuditProducer] = None,
+        store: GraphStore,
+        cache: DecisionCache,
+        audit_producer: AuditProducer,
     ):
         self._store = store
         self._cache = cache
@@ -32,7 +32,7 @@ class PermissionService:
             success = store_fn(tuple_)
             authz_metrics.record_neo4j_query(op, time.perf_counter() - t0)
 
-            if success and self._audit_producer:
+            if success:
                 with start_span("audit.emit", event=audit_event):
                     self._audit_producer.send_tuple_event(tuple_, audit_event)
 
@@ -41,10 +41,6 @@ class PermissionService:
     def write_tuple(self, tuple_: Tuple) -> bool:
         """Write relationship tuple to Neo4j."""
         logger.info({}, "Writing tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
-
-        if not self._store:
-            raise RuntimeError("No storage configured")
-
         success = self._mutate_tuple(tuple_, "write", "tuple_written")
         logger.debug({}, "Write tuple result", success=success)
         return success
@@ -52,10 +48,6 @@ class PermissionService:
     def delete_tuple(self, tuple_: Tuple) -> bool:
         """Delete relationship tuple from Neo4j."""
         logger.info({}, "Deleting tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
-
-        if not self._store:
-            raise RuntimeError("No storage configured")
-
         success = self._mutate_tuple(tuple_, "delete", "tuple_removed")
         logger.debug({}, "Delete tuple result", success=success)
         return success
@@ -63,9 +55,6 @@ class PermissionService:
     def read_tuples(self, subject: str) -> List[Tuple]:
         """Read all outgoing relationships for subject."""
         logger.debug({}, "Reading tuples", subject=subject)
-
-        if not self._store:
-            return []
 
         with start_span("rebac.read_tuples", subject=subject):
             t0 = time.perf_counter()
@@ -80,32 +69,27 @@ class PermissionService:
         Check if subject can perform action on object.
         Flow: Redis cache → Neo4j graph → cache write → audit emit.
         """
-        if not self._store:
-            logger.warn({}, "No storage configured — denying access", subject=subject, action=action, object=object)
-            return False
-
         with start_span("rebac.check", subject=subject, action=action, object=object) as root_span:
 
             # ── 1. Cache lookup ───────────────────────────────────────────
             allowed: Optional[bool] = None
             cache_hit = False
 
-            if self._cache:
-                with start_span("cache.lookup", subject=subject, action=action, object=object) as cache_span:
-                    cached = self._cache.get(subject, action, object)
-                    if cached is not None:
-                        allowed = cached
-                        cache_hit = True
-                        cache_span.set_attribute("result", "hit")
-                        authz_metrics.record_cache_hit()
-                        logger.debug(
-                            {}, "Cache hit",
-                            subject=subject, action=action, object=object,
-                            decision="allow" if cached else "deny",
-                        )
-                    else:
-                        cache_span.set_attribute("result", "miss")
-                        authz_metrics.record_cache_miss()
+            with start_span("cache.lookup", subject=subject, action=action, object=object) as cache_span:
+                cached = self._cache.get(subject, action, object)
+                if cached is not None:
+                    allowed = cached
+                    cache_hit = True
+                    cache_span.set_attribute("result", "hit")
+                    authz_metrics.record_cache_hit()
+                    logger.debug(
+                        {}, "Cache hit",
+                        subject=subject, action=action, object=object,
+                        decision="allow" if cached else "deny",
+                    )
+                else:
+                    cache_span.set_attribute("result", "miss")
+                    authz_metrics.record_cache_miss()
 
             # ── 2. Neo4j check on cache miss ──────────────────────────────
             if allowed is None:
@@ -117,8 +101,7 @@ class PermissionService:
                     neo_span.set_attribute("result", "allow" if allowed else "deny")
                     neo_span.set_attribute("duration_ms", round(elapsed * 1000, 2))
 
-                if self._cache:
-                    self._cache.set(subject, action, object, allowed, ttl_seconds=30)
+                self._cache.set(subject, action, object, allowed, ttl_seconds=30)
 
             # ── 3. Record decision metric ─────────────────────────────────
             result_str = "allow" if allowed else "deny"
@@ -133,13 +116,11 @@ class PermissionService:
             )
 
             # ── 4. Audit emit ─────────────────────────────────────────────
-            if self._audit_producer:
-                with start_span("audit.emit", result=result_str):
-                    self._audit_producer.send_decision_event(subject, action, object, allowed)
+            with start_span("audit.emit", result=result_str):
+                self._audit_producer.send_decision_event(subject, action, object, allowed)
 
         return allowed
 
     def close(self) -> None:
         """Close underlying storage."""
-        if self._store:
-            self._store.close()
+        self._store.close()

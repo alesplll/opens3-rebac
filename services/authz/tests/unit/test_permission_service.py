@@ -15,17 +15,13 @@ from shared.pkg.py.authz.v1 import authz_pb2
 
 
 class TestPermissionServiceCheck:
-    def test_no_store_denies(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        assert svc.check("user:alice", "read", "doc:1") is False
-
     def test_delegates_to_store_and_caches_result(self):
         store = MagicMock()
         store.check.return_value = True
         cache = MagicMock()
         cache.get.return_value = None
 
-        svc = PermissionService(store=store, cache=cache, audit_producer=None)
+        svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
         result = svc.check("user:alice", "read", "doc:1")
 
         assert result is True
@@ -77,7 +73,7 @@ class TestPermissionServiceCheck:
         cache = MagicMock()
         cache.get.return_value = False
 
-        svc = PermissionService(store=store, cache=cache, audit_producer=None)
+        svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
         result = svc.check("user:bob", "write", "doc:2")
 
         assert result is False
@@ -86,11 +82,6 @@ class TestPermissionServiceCheck:
 
 
 class TestPermissionServiceWriteTuple:
-    def test_no_store_raises(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        with pytest.raises(RuntimeError, match="No storage"):
-            svc.write_tuple(Tuple("user:a", "MEMBER_OF", "group:g", level=None))
-
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
         store.write_tuple.return_value = True
@@ -106,17 +97,12 @@ class TestPermissionServiceWriteTuple:
 
 
 class TestPermissionServiceDeleteTuple:
-    def test_no_store_raises(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        with pytest.raises(RuntimeError, match="No storage"):
-            svc.delete_tuple(Tuple("user:a", "MEMBER_OF", "group:g"))
-
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
         store.delete_tuple.return_value = True
         audit = MagicMock()
 
-        svc = PermissionService(store=store, cache=None, audit_producer=audit)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
         t = Tuple("user:alice", "MEMBER_OF", "group:dev")
         result = svc.delete_tuple(t)
 
@@ -129,7 +115,7 @@ class TestPermissionServiceDeleteTuple:
         store.delete_tuple.return_value = False
         audit = MagicMock()
 
-        svc = PermissionService(store=store, cache=None, audit_producer=audit)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
         result = svc.delete_tuple(Tuple("user:alice", "MEMBER_OF", "group:dev"))
 
         assert result is False
@@ -137,17 +123,13 @@ class TestPermissionServiceDeleteTuple:
 
 
 class TestPermissionServiceReadTuples:
-    def test_no_store_returns_empty(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        assert svc.read_tuples("user:alice") == []
-
     def test_delegates_to_store(self):
         store = MagicMock()
         store.read_tuples.return_value = [
             Tuple("user:alice", "MEMBER_OF", "group:dev", level=None),
         ]
 
-        svc = PermissionService(store=store, cache=None, audit_producer=None)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=MagicMock())
         result = svc.read_tuples("user:alice")
 
         assert len(result) == 1
