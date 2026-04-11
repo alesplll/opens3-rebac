@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61uthz.proto\x12\x0fopens3.authz.v1\"?\n\x0c\x43heckRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\"0\n\rCheckResponse\x12\x0f\n\x07\x61llowed\x18\x01 \x01(\x08\x12\x0e\n\x06reason\x18\x02 \x01(\t\"U\n\x11WriteTupleRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x10\n\x08relation\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\x12\r\n\x05level\x18\x04 \x01(\t\"%\n\x12WriteTupleResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"G\n\x12\x44\x65leteTupleRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x10\n\x08relation\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\"&\n\x13\x44\x65leteTupleResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"\x1e\n\x0bReadRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\">\n\x0cReadResponse\x12.\n\x06tuples\x18\x01 \x03(\x0b\x32\x1e.opens3.authz.v1.RelationTuple\"Q\n\rRelationTuple\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x10\n\x08relation\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\x12\r\n\x05level\x18\x04 \x01(\t\"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t\"\x95\x01\n\x13HealthCheckResponse\x12\x42\n\x06status\x18\x01 \x01(\x0e\x32\x32.opens3.authz.v1.HealthCheckResponse.ServingStatus\":\n\rServingStatus\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0b\n\x07SERVING\x10\x01\x12\x0f\n\x0bNOT_SERVING\x10\x02\x32\xab\x03\n\x11PermissionService\x12\x46\n\x05\x43heck\x12\x1d.opens3.authz.v1.CheckRequest\x1a\x1e.opens3.authz.v1.CheckResponse\x12U\n\nWriteTuple\x12\".opens3.authz.v1.WriteTupleRequest\x1a#.opens3.authz.v1.WriteTupleResponse\x12X\n\x0b\x44\x65leteTuple\x12#.opens3.authz.v1.DeleteTupleRequest\x1a$.opens3.authz.v1.DeleteTupleResponse\x12\x43\n\x04Read\x12\x1c.opens3.authz.v1.ReadRequest\x1a\x1d.opens3.authz.v1.ReadResponse\x12X\n\x0bHealthCheck\x12#.opens3.authz.v1.HealthCheckRequest\x1a$.opens3.authz.v1.HealthCheckResponseBAZ?github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1;authzv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61uthz.proto\x12\x0fopens3.authz.v1\"X\n\x0c\x43heckRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\'\n\x06\x61\x63tion\x18\x02 \x01(\x0e\x32\x17.opens3.authz.v1.Action\x12\x0e\n\x06object\x18\x03 \x01(\t\"0\n\rCheckResponse\x12\x0f\n\x07\x61llowed\x18\x01 \x01(\x08\x12\x0e\n\x06reason\x18\x02 \x01(\t\"\x92\x01\n\x11WriteTupleRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12+\n\x08relation\x18\x02 \x01(\x0e\x32\x19.opens3.authz.v1.Relation\x12\x0e\n\x06object\x18\x03 \x01(\t\x12/\n\x05level\x18\x04 \x01(\x0e\x32 .opens3.authz.v1.PermissionLevel\"%\n\x12WriteTupleResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"b\n\x12\x44\x65leteTupleRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12+\n\x08relation\x18\x02 \x01(\x0e\x32\x19.opens3.authz.v1.Relation\x12\x0e\n\x06object\x18\x03 \x01(\t\"&\n\x13\x44\x65leteTupleResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"\x1e\n\x0bReadRequest\x12\x0f\n\x07subject\x18\x01 \x01(\t\">\n\x0cReadResponse\x12.\n\x06tuples\x18\x01 \x03(\x0b\x32\x1e.opens3.authz.v1.RelationTuple\"\x8e\x01\n\rRelationTuple\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12+\n\x08relation\x18\x02 \x01(\x0e\x32\x19.opens3.authz.v1.Relation\x12\x0e\n\x06object\x18\x03 \x01(\t\x12/\n\x05level\x18\x04 \x01(\x0e\x32 .opens3.authz.v1.PermissionLevel\"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t\"\x95\x01\n\x13HealthCheckResponse\x12\x42\n\x06status\x18\x01 \x01(\x0e\x32\x32.opens3.authz.v1.HealthCheckResponse.ServingStatus\":\n\rServingStatus\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0b\n\x07SERVING\x10\x01\x12\x0f\n\x0bNOT_SERVING\x10\x02*{\n\x06\x41\x63tion\x12\x16\n\x12\x41\x43TION_UNSPECIFIED\x10\x00\x12\x0f\n\x0b\x41\x43TION_READ\x10\x01\x12\x10\n\x0c\x41\x43TION_WRITE\x10\x02\x12\x11\n\rACTION_CREATE\x10\x03\x12\x11\n\rACTION_DELETE\x10\x04\x12\x10\n\x0c\x41\x43TION_ADMIN\x10\x05*q\n\x08Relation\x12\x18\n\x14RELATION_UNSPECIFIED\x10\x00\x12\x16\n\x12RELATION_MEMBER_OF\x10\x01\x12\x1b\n\x17RELATION_HAS_PERMISSION\x10\x02\x12\x16\n\x12RELATION_PARENT_OF\x10\x03*\xc0\x01\n\x0fPermissionLevel\x12 \n\x1cPERMISSION_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n\x15PERMISSION_LEVEL_READ\x10\x01\x12\x1a\n\x16PERMISSION_LEVEL_WRITE\x10\x02\x12\x1b\n\x17PERMISSION_LEVEL_CREATE\x10\x03\x12\x1b\n\x17PERMISSION_LEVEL_DELETE\x10\x04\x12\x1a\n\x16PERMISSION_LEVEL_ADMIN\x10\x05\x32\xab\x03\n\x11PermissionService\x12\x46\n\x05\x43heck\x12\x1d.opens3.authz.v1.CheckRequest\x1a\x1e.opens3.authz.v1.CheckResponse\x12U\n\nWriteTuple\x12\".opens3.authz.v1.WriteTupleRequest\x1a#.opens3.authz.v1.WriteTupleResponse\x12X\n\x0b\x44\x65leteTuple\x12#.opens3.authz.v1.DeleteTupleRequest\x1a$.opens3.authz.v1.DeleteTupleResponse\x12\x43\n\x04Read\x12\x1c.opens3.authz.v1.ReadRequest\x1a\x1d.opens3.authz.v1.ReadResponse\x12X\n\x0bHealthCheck\x12#.opens3.authz.v1.HealthCheckRequest\x1a$.opens3.authz.v1.HealthCheckResponseBAZ?github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1;authzv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,30 +32,36 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'authz_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z?github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1;authzv1'
+  _globals['_ACTION']._serialized_start=932
+  _globals['_ACTION']._serialized_end=1055
+  _globals['_RELATION']._serialized_start=1057
+  _globals['_RELATION']._serialized_end=1170
+  _globals['_PERMISSIONLEVEL']._serialized_start=1173
+  _globals['_PERMISSIONLEVEL']._serialized_end=1365
   _globals['_CHECKREQUEST']._serialized_start=32
-  _globals['_CHECKREQUEST']._serialized_end=95
-  _globals['_CHECKRESPONSE']._serialized_start=97
-  _globals['_CHECKRESPONSE']._serialized_end=145
-  _globals['_WRITETUPLEREQUEST']._serialized_start=147
-  _globals['_WRITETUPLEREQUEST']._serialized_end=232
-  _globals['_WRITETUPLERESPONSE']._serialized_start=234
-  _globals['_WRITETUPLERESPONSE']._serialized_end=271
-  _globals['_DELETETUPLEREQUEST']._serialized_start=273
-  _globals['_DELETETUPLEREQUEST']._serialized_end=344
-  _globals['_DELETETUPLERESPONSE']._serialized_start=346
-  _globals['_DELETETUPLERESPONSE']._serialized_end=384
-  _globals['_READREQUEST']._serialized_start=386
-  _globals['_READREQUEST']._serialized_end=416
-  _globals['_READRESPONSE']._serialized_start=418
-  _globals['_READRESPONSE']._serialized_end=480
-  _globals['_RELATIONTUPLE']._serialized_start=482
-  _globals['_RELATIONTUPLE']._serialized_end=563
-  _globals['_HEALTHCHECKREQUEST']._serialized_start=565
-  _globals['_HEALTHCHECKREQUEST']._serialized_end=602
-  _globals['_HEALTHCHECKRESPONSE']._serialized_start=605
-  _globals['_HEALTHCHECKRESPONSE']._serialized_end=754
-  _globals['_HEALTHCHECKRESPONSE_SERVINGSTATUS']._serialized_start=696
-  _globals['_HEALTHCHECKRESPONSE_SERVINGSTATUS']._serialized_end=754
-  _globals['_PERMISSIONSERVICE']._serialized_start=757
-  _globals['_PERMISSIONSERVICE']._serialized_end=1184
+  _globals['_CHECKREQUEST']._serialized_end=120
+  _globals['_CHECKRESPONSE']._serialized_start=122
+  _globals['_CHECKRESPONSE']._serialized_end=170
+  _globals['_WRITETUPLEREQUEST']._serialized_start=173
+  _globals['_WRITETUPLEREQUEST']._serialized_end=319
+  _globals['_WRITETUPLERESPONSE']._serialized_start=321
+  _globals['_WRITETUPLERESPONSE']._serialized_end=358
+  _globals['_DELETETUPLEREQUEST']._serialized_start=360
+  _globals['_DELETETUPLEREQUEST']._serialized_end=458
+  _globals['_DELETETUPLERESPONSE']._serialized_start=460
+  _globals['_DELETETUPLERESPONSE']._serialized_end=498
+  _globals['_READREQUEST']._serialized_start=500
+  _globals['_READREQUEST']._serialized_end=530
+  _globals['_READRESPONSE']._serialized_start=532
+  _globals['_READRESPONSE']._serialized_end=594
+  _globals['_RELATIONTUPLE']._serialized_start=597
+  _globals['_RELATIONTUPLE']._serialized_end=739
+  _globals['_HEALTHCHECKREQUEST']._serialized_start=741
+  _globals['_HEALTHCHECKREQUEST']._serialized_end=778
+  _globals['_HEALTHCHECKRESPONSE']._serialized_start=781
+  _globals['_HEALTHCHECKRESPONSE']._serialized_end=930
+  _globals['_HEALTHCHECKRESPONSE_SERVINGSTATUS']._serialized_start=872
+  _globals['_HEALTHCHECKRESPONSE_SERVINGSTATUS']._serialized_end=930
+  _globals['_PERMISSIONSERVICE']._serialized_start=1368
+  _globals['_PERMISSIONSERVICE']._serialized_end=1795
 # @@protoc_insertion_point(module_scope)

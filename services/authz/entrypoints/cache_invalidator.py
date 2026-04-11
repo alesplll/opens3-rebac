@@ -1,7 +1,7 @@
 """Cache invalidation Kafka consumer."""
 import logging
-from internal.cache.redis_cache import RedisDecisionCache
-from internal.cache.invalidation_consumer import CacheInvalidationConsumer
+from internal.repositories.cache.redis_cache import RedisDecisionCache
+from internal.repositories.cache.invalidation_consumer import CacheInvalidationConsumer
 
 logging.basicConfig(level=logging.INFO)
 

@@ -1,5 +1,5 @@
 """Unit tests for PermissionService with mocked store and cache."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from pathlib import Path
 import sys
 
@@ -10,25 +10,22 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from internal.types import Tuple
-from internal.rebac.model import PermissionService
+from internal.permission.service import PermissionService
 from shared.pkg.py.authz.v1 import authz_pb2
 
 
 class TestPermissionServiceCheck:
-    def test_no_store_denies(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        assert svc.check("user:alice", "read", "doc:1") is False
-
     def test_delegates_to_store_and_caches_result(self):
         store = MagicMock()
         store.check.return_value = True
         cache = MagicMock()
         cache.get.return_value = None
 
-        svc = PermissionService(store=store, cache=cache, audit_producer=None)
-        result = svc.check("user:alice", "read", "doc:1")
+        svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
+        allowed, reason = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
+        assert reason == "graph lookup: path found"
         store.check.assert_called_once_with("user:alice", "read", "doc:1")
         cache.get.assert_called_once_with("user:alice", "read", "doc:1")
         cache.set.assert_called_once_with("user:alice", "read", "doc:1", True, ttl_seconds=30)
@@ -41,9 +38,9 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:alice", "read", "doc:1")
+        allowed, _ = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
         audit.send_decision_event.assert_called_once_with("user:alice", "read", "doc:1", True)
 
     def test_check_sends_audit_event_on_deny(self):
@@ -54,9 +51,9 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:bob", "write", "doc:2")
+        allowed, _ = svc.check("user:bob", "write", "doc:2")
 
-        assert result is False
+        assert allowed is False
         audit.send_decision_event.assert_called_once_with("user:bob", "write", "doc:2", False)
 
     def test_check_sends_audit_event_on_cache_hit(self):
@@ -66,9 +63,10 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:alice", "read", "doc:1")
+        allowed, reason = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
+        assert reason == "cache hit: granted"
         store.check.assert_not_called()
         audit.send_decision_event.assert_called_once_with("user:alice", "read", "doc:1", True)
 
@@ -77,20 +75,16 @@ class TestPermissionServiceCheck:
         cache = MagicMock()
         cache.get.return_value = False
 
-        svc = PermissionService(store=store, cache=cache, audit_producer=None)
-        result = svc.check("user:bob", "write", "doc:2")
+        svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
+        allowed, reason = svc.check("user:bob", "write", "doc:2")
 
-        assert result is False
+        assert allowed is False
+        assert reason == "cache hit: denied"
         store.check.assert_not_called()
         cache.set.assert_not_called()
 
 
 class TestPermissionServiceWriteTuple:
-    def test_no_store_raises(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        with pytest.raises(RuntimeError, match="No storage"):
-            svc.write_tuple(Tuple("user:a", "MEMBER_OF", "group:g", level=None))
-
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
         store.write_tuple.return_value = True
@@ -106,17 +100,12 @@ class TestPermissionServiceWriteTuple:
 
 
 class TestPermissionServiceDeleteTuple:
-    def test_no_store_raises(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        with pytest.raises(RuntimeError, match="No storage"):
-            svc.delete_tuple(Tuple("user:a", "MEMBER_OF", "group:g"))
-
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
         store.delete_tuple.return_value = True
         audit = MagicMock()
 
-        svc = PermissionService(store=store, cache=None, audit_producer=audit)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
         t = Tuple("user:alice", "MEMBER_OF", "group:dev")
         result = svc.delete_tuple(t)
 
@@ -129,7 +118,7 @@ class TestPermissionServiceDeleteTuple:
         store.delete_tuple.return_value = False
         audit = MagicMock()
 
-        svc = PermissionService(store=store, cache=None, audit_producer=audit)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
         result = svc.delete_tuple(Tuple("user:alice", "MEMBER_OF", "group:dev"))
 
         assert result is False
@@ -137,17 +126,13 @@ class TestPermissionServiceDeleteTuple:
 
 
 class TestPermissionServiceReadTuples:
-    def test_no_store_returns_empty(self):
-        svc = PermissionService(store=None, cache=None, audit_producer=None)
-        assert svc.read_tuples("user:alice") == []
-
     def test_delegates_to_store(self):
         store = MagicMock()
         store.read_tuples.return_value = [
             Tuple("user:alice", "MEMBER_OF", "group:dev", level=None),
         ]
 
-        svc = PermissionService(store=store, cache=None, audit_producer=None)
+        svc = PermissionService(store=store, cache=MagicMock(), audit_producer=MagicMock())
         result = svc.read_tuples("user:alice")
 
         assert len(result) == 1
@@ -159,12 +144,12 @@ class TestPermissionServiceServicerHealthCheck:
     """Unit tests for HealthCheck RPC handler in PermissionServiceServicer."""
 
     def _make_servicer(self, neo4j_mock, redis_mock):
-        """Create servicer with mocked dependencies."""
-        from entrypoints.server.main import PermissionServiceServicer
-        with patch("entrypoints.server.main.Neo4jStore", return_value=neo4j_mock), \
-             patch("entrypoints.server.main.RedisDecisionCache", return_value=redis_mock), \
-             patch("entrypoints.server.main.AuditProducer"):
-            return PermissionServiceServicer()
+        """Create servicer with mocked dependencies via a fake container."""
+        from entrypoints.server.servicer import PermissionServiceServicer
+        from internal.permission.service import PermissionService
+        container = MagicMock()
+        container.rebac = PermissionService(store=neo4j_mock, cache=redis_mock, audit_producer=MagicMock())
+        return PermissionServiceServicer(container)
 
     def test_returns_serving_when_all_healthy(self):
         neo4j = MagicMock()
@@ -177,7 +162,7 @@ class TestPermissionServiceServicerHealthCheck:
 
     def test_returns_not_serving_when_neo4j_down(self):
         neo4j = MagicMock()
-        neo4j.driver.verify_connectivity.side_effect = Exception("Neo4j unreachable")
+        neo4j.health.side_effect = Exception("Neo4j unreachable")
         redis = MagicMock()
 
         servicer = self._make_servicer(neo4j, redis)
@@ -188,7 +173,7 @@ class TestPermissionServiceServicerHealthCheck:
     def test_returns_not_serving_when_redis_down(self):
         neo4j = MagicMock()
         redis = MagicMock()
-        redis._client.ping.side_effect = Exception("Redis unreachable")
+        redis.health.side_effect = Exception("Redis unreachable")
 
         servicer = self._make_servicer(neo4j, redis)
         response = servicer.HealthCheck(MagicMock(), MagicMock())
@@ -197,9 +182,9 @@ class TestPermissionServiceServicerHealthCheck:
 
     def test_returns_not_serving_when_both_down(self):
         neo4j = MagicMock()
-        neo4j.driver.verify_connectivity.side_effect = Exception("Neo4j unreachable")
+        neo4j.health.side_effect = Exception("Neo4j unreachable")
         redis = MagicMock()
-        redis._client.ping.side_effect = Exception("Redis unreachable")
+        redis.health.side_effect = Exception("Redis unreachable")
 
         servicer = self._make_servicer(neo4j, redis)
         response = servicer.HealthCheck(MagicMock(), MagicMock())

@@ -4,8 +4,8 @@ import os
 import pytest
 
 from internal.types import Tuple
-from internal.neo4j.store import Neo4jStore
-from internal.neo4j.schema import RelationType
+from internal.repositories.neo4j.store import Neo4jStore
+from internal.repositories.neo4j.schema import RelationType
 
 
 pytestmark = pytest.mark.integration

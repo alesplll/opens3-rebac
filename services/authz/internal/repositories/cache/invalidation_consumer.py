@@ -2,16 +2,16 @@
 import json
 import logging
 from confluent_kafka import Consumer
-from ..cache.redis_cache import RedisDecisionCache
-from ..types import Tuple
+from internal.repositories.cache.redis_cache import RedisDecisionCache
 
 logger = logging.getLogger(__name__)
+
 
 class CacheInvalidationConsumer:
     """Consumes auth-change events and invalidates Redis cache."""
 
-    def __init__(self, bootstrap_servers: str = "localhost:9092", 
-                 topic: str = "auth-changes", 
+    def __init__(self, bootstrap_servers: str = "localhost:9092",
+                 topic: str = "auth-changes",
                  redis_cache: RedisDecisionCache = None):
         self.consumer = Consumer({
             'bootstrap.servers': bootstrap_servers,
@@ -53,4 +53,3 @@ class CacheInvalidationConsumer:
                     logger.info("Cache invalidated %d key(s) for pattern: %s", len(keys), pattern)
                 else:
                     logger.debug("No cache keys found for pattern: %s", pattern)
-
