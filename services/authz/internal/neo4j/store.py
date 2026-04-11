@@ -11,7 +11,6 @@ from internal.neo4j.schema import (
 )
 
 from shared.pkg.py_kit import logger
-from shared.pkg.py_kit.tracing import trace_id_from_context
 
 
 class Neo4jStore:
@@ -25,7 +24,7 @@ class Neo4jStore:
         """Create nodes and relationship in Neo4j. For HAS_PERMISSION, level is required."""
         if tuple_.relation == RelationType.HAS_PERMISSION.value:
             if not tuple_.level or not is_valid_permission_level(tuple_.level):
-                logger.warn({"trace_id": trace_id_from_context()}, "HAS_PERMISSION requires valid level", permission_level=tuple_.level)
+                logger.warn({}, "HAS_PERMISSION requires valid level", permission_level=tuple_.level)
                 return False
             return self._write_has_permission(tuple_)
         return self._write_plain_relation(tuple_)
@@ -60,7 +59,7 @@ class Neo4jStore:
         MERGE (subject)-[rel:`%s`]->(object)
         RETURN rel
         """ % (s_label, o_label, tuple_.relation)
-        logger.debug({"trace_id": trace_id_from_context()}, "Neo4j write plain relation", tuple=str(tuple_))
+        logger.debug({}, "Neo4j write plain relation", tuple=str(tuple_))
         with self.driver.session() as session:
             result = session.run(
                 query,
@@ -107,7 +106,7 @@ class Neo4jStore:
             )
             rec = result.single()
             deleted = bool(rec and rec["deleted"])
-            logger.debug({"trace_id": trace_id_from_context()}, "Neo4j delete_tuple", tuple=str(tuple_), deleted=deleted)
+            logger.debug({}, "Neo4j delete_tuple", tuple=str(tuple_), deleted=deleted)
             return deleted
 
     def check(self, subject: str, action: str, object: str) -> bool:
@@ -133,13 +132,13 @@ class Neo4jStore:
                 )
                 rec = r.single()
                 if rec and rec["authorized"]:
-                    logger.debug({"trace_id": trace_id_from_context()}, "Neo4j transitive check: authorized")
+                    logger.debug({}, "Neo4j transitive check: authorized")
                     return True
 
         # Fallback: direct relation (legacy OWNER_OF, VIEWER)
         allowed_rels = PERMISSION_RULES.get(action, [])
         if not allowed_rels:
-            logger.warn({"trace_id": trace_id_from_context()}, "Unknown action", action=action)
+            logger.warn({}, "Unknown action", action=action)
             return False
 
         query = """
@@ -156,7 +155,7 @@ class Neo4jStore:
             )
             rec = r.single()
             authorized = rec["authorized"] if rec else False
-            logger.debug({"trace_id": trace_id_from_context()}, "Neo4j direct check result", authorized=authorized)
+            logger.debug({}, "Neo4j direct check result", authorized=authorized)
             return authorized
 
     def close(self) -> None:
