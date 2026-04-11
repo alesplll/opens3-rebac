@@ -159,12 +159,14 @@ class TestPermissionServiceServicerHealthCheck:
     """Unit tests for HealthCheck RPC handler in PermissionServiceServicer."""
 
     def _make_servicer(self, neo4j_mock, redis_mock):
-        """Create servicer with mocked dependencies."""
-        from entrypoints.server.main import PermissionServiceServicer
-        with patch("entrypoints.server.main.Neo4jStore", return_value=neo4j_mock), \
-             patch("entrypoints.server.main.RedisDecisionCache", return_value=redis_mock), \
-             patch("entrypoints.server.main.AuditProducer"):
-            return PermissionServiceServicer()
+        """Create servicer with mocked dependencies via a fake container."""
+        from entrypoints.server.servicer import PermissionServiceServicer
+        from internal.rebac.model import PermissionService
+        container = MagicMock()
+        container.neo4j_store = neo4j_mock
+        container.cache = redis_mock
+        container.rebac = PermissionService(store=neo4j_mock, cache=redis_mock, audit_producer=MagicMock())
+        return PermissionServiceServicer(container)
 
     def test_returns_serving_when_all_healthy(self):
         neo4j = MagicMock()
