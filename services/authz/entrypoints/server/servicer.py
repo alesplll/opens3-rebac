@@ -36,8 +36,6 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
 
     def __init__(self, container: Container):
         self._rebac = container.rebac
-        self._neo4j_store = container.neo4j_store
-        self._cache = container.cache
 
     def Check(self, request, context):
         action = _ACTION_TO_STR.get(request.action)
@@ -91,15 +89,9 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
         return response
 
     def HealthCheck(self, request, context):
-        status = authz_pb2.HealthCheckResponse.SERVING
         try:
-            self._neo4j_store.driver.verify_connectivity()
+            self._rebac.health_check()
+            return authz_pb2.HealthCheckResponse(status=authz_pb2.HealthCheckResponse.SERVING)
         except Exception as e:
-            logger.warn({}, "Neo4j health check failed", error=str(e))
-            status = authz_pb2.HealthCheckResponse.NOT_SERVING
-        try:
-            self._cache._client.ping()
-        except Exception as e:
-            logger.warn({}, "Redis health check failed", error=str(e))
-            status = authz_pb2.HealthCheckResponse.NOT_SERVING
-        return authz_pb2.HealthCheckResponse(status=status)
+            logger.warn({}, "Health check failed", error=str(e))
+            return authz_pb2.HealthCheckResponse(status=authz_pb2.HealthCheckResponse.NOT_SERVING)

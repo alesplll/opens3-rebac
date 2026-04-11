@@ -1,5 +1,5 @@
 """Unit tests for PermissionService with mocked store and cache."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from pathlib import Path
 import sys
 
@@ -10,7 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from internal.types import Tuple
-from internal.rebac.model import PermissionService
+from internal.permission.service import PermissionService
 from shared.pkg.py.authz.v1 import authz_pb2
 
 
@@ -146,10 +146,8 @@ class TestPermissionServiceServicerHealthCheck:
     def _make_servicer(self, neo4j_mock, redis_mock):
         """Create servicer with mocked dependencies via a fake container."""
         from entrypoints.server.servicer import PermissionServiceServicer
-        from internal.rebac.model import PermissionService
+        from internal.permission.service import PermissionService
         container = MagicMock()
-        container.neo4j_store = neo4j_mock
-        container.cache = redis_mock
         container.rebac = PermissionService(store=neo4j_mock, cache=redis_mock, audit_producer=MagicMock())
         return PermissionServiceServicer(container)
 
@@ -164,7 +162,7 @@ class TestPermissionServiceServicerHealthCheck:
 
     def test_returns_not_serving_when_neo4j_down(self):
         neo4j = MagicMock()
-        neo4j.driver.verify_connectivity.side_effect = Exception("Neo4j unreachable")
+        neo4j.health.side_effect = Exception("Neo4j unreachable")
         redis = MagicMock()
 
         servicer = self._make_servicer(neo4j, redis)
@@ -175,7 +173,7 @@ class TestPermissionServiceServicerHealthCheck:
     def test_returns_not_serving_when_redis_down(self):
         neo4j = MagicMock()
         redis = MagicMock()
-        redis._client.ping.side_effect = Exception("Redis unreachable")
+        redis.health.side_effect = Exception("Redis unreachable")
 
         servicer = self._make_servicer(neo4j, redis)
         response = servicer.HealthCheck(MagicMock(), MagicMock())
@@ -184,9 +182,9 @@ class TestPermissionServiceServicerHealthCheck:
 
     def test_returns_not_serving_when_both_down(self):
         neo4j = MagicMock()
-        neo4j.driver.verify_connectivity.side_effect = Exception("Neo4j unreachable")
+        neo4j.health.side_effect = Exception("Neo4j unreachable")
         redis = MagicMock()
-        redis._client.ping.side_effect = Exception("Redis unreachable")
+        redis.health.side_effect = Exception("Redis unreachable")
 
         servicer = self._make_servicer(neo4j, redis)
         response = servicer.HealthCheck(MagicMock(), MagicMock())

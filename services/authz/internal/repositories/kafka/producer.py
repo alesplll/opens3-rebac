@@ -2,23 +2,16 @@
 import json
 import logging
 import time
-from typing import Dict, Any
 from confluent_kafka import Producer
-from ..types import Tuple
+from internal.types import Tuple
 
 logger = logging.getLogger(__name__)
+
 
 class AuditProducer:
     """Produces audit events to Kafka."""
 
     def __init__(self, bootstrap_servers: str = "localhost:9092", topic: str = "auth-changes"):
-        """
-        Initialize Kafka producer.
-
-        Args:
-            bootstrap_servers: Kafka broker address.
-            topic: Audit topic name.
-        """
         self.producer = Producer({
             'bootstrap.servers': bootstrap_servers,
         })
@@ -41,7 +34,6 @@ class AuditProducer:
                 f"auth_decision:*:*:{tuple_.object}",
             ],
         }
-
         self.producer.produce(
             topic=self.topic,
             value=json.dumps(event).encode('utf-8'),
@@ -71,4 +63,3 @@ class AuditProducer:
             logger.error(f"Message delivery failed: {err}")
         else:
             logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
-

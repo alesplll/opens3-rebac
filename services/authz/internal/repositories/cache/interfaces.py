@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
+
 class DecisionCache(ABC):
     """Contract for decision cache implementations."""
 
@@ -14,3 +15,7 @@ class DecisionCache(ABC):
         """Store decision with expiration."""
         raise NotImplementedError
 
+    @abstractmethod
+    def health(self) -> None:
+        """Raise if cache is unavailable."""
+        raise NotImplementedError

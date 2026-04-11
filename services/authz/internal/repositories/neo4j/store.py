@@ -1,8 +1,8 @@
 """Neo4j GraphStore implementation with transitive ReBAC and HAS_PERMISSION levels."""
 from neo4j import GraphDatabase
-from typing import List, Optional
+from typing import List
 from internal.types import Tuple
-from internal.neo4j.schema import (
+from internal.repositories.neo4j.schema import (
     infer_node_label,
     RelationType,
     ALLOWED_LEVELS_PER_ACTION,
@@ -117,7 +117,6 @@ class Neo4jStore:
         """
         allowed_levels = ALLOWED_LEVELS_PER_ACTION.get(action)
         if allowed_levels:
-            # Transitive check with HAS_PERMISSION level
             query = """
             MATCH (subj {id: $subject})-[:MEMBER_OF*0..]->(x)-[p:HAS_PERMISSION]->(res {id: $object})
             WHERE p.level IN $allowed_levels
@@ -157,6 +156,10 @@ class Neo4jStore:
             authorized = rec["authorized"] if rec else False
             logger.debug({}, "Neo4j direct check result", authorized=authorized)
             return authorized
+
+    def health(self) -> None:
+        """Raise if Neo4j is unreachable."""
+        self.driver.verify_connectivity()
 
     def close(self) -> None:
         self.driver.close()

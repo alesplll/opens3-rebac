@@ -1,11 +1,11 @@
-"""ReBAC core model and service"""
+"""ReBAC core service."""
 import time
 from typing import List, Optional
 
-from internal.rebac.interfaces import GraphStore
+from internal.permission.interfaces import GraphStore
+from internal.repositories.cache.interfaces import DecisionCache
+from internal.repositories.kafka.producer import AuditProducer
 from internal.types import Tuple
-from internal.cache.interfaces import DecisionCache
-from internal.kafka.producer import AuditProducer
 from internal import metric as authz_metrics
 
 from shared.pkg.py_kit import logger
@@ -13,7 +13,7 @@ from shared.pkg.py_kit.tracing import start_span
 
 
 class PermissionService:
-    """ReBAC authorization service"""
+    """ReBAC authorization service."""
 
     def __init__(
         self,
@@ -125,6 +125,22 @@ class PermissionService:
                 self._audit_producer.send_decision_event(subject, action, object, allowed)
 
         return allowed, reason
+
+    def health_check(self) -> None:
+        """Check all dependencies. Raises if any is unavailable."""
+        errors = []
+        try:
+            self._store.health()
+        except Exception as e:
+            logger.warn({}, "Neo4j health check failed", error=str(e))
+            errors.append(str(e))
+        try:
+            self._cache.health()
+        except Exception as e:
+            logger.warn({}, "Redis health check failed", error=str(e))
+            errors.append(str(e))
+        if errors:
+            raise RuntimeError(f"Health check failed: {'; '.join(errors)}")
 
     def close(self) -> None:
         """Close underlying storage."""
