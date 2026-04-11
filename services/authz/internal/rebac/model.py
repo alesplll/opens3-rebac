@@ -9,7 +9,7 @@ from internal.kafka.producer import AuditProducer
 from internal import metric as authz_metrics
 
 from shared.pkg.py_kit import logger
-from shared.pkg.py_kit.tracing import start_span, trace_id_from_context
+from shared.pkg.py_kit.tracing import start_span
 
 
 class PermissionService:
@@ -27,8 +27,7 @@ class PermissionService:
 
     def write_tuple(self, tuple_: Tuple) -> bool:
         """Write relationship tuple to Neo4j."""
-        ctx = {"trace_id": trace_id_from_context()}
-        logger.info(ctx, "Writing tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
+        logger.info({}, "Writing tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
 
         if not self._store:
             raise RuntimeError("No storage configured")
@@ -42,13 +41,12 @@ class PermissionService:
                 with start_span("audit.emit", event="tuple_written"):
                     self._audit_producer.send_tuple_event(tuple_, "tuple_written")
 
-        logger.debug(ctx, "Write tuple result", success=success)
+        logger.debug({}, "Write tuple result", success=success)
         return success
 
     def delete_tuple(self, tuple_: Tuple) -> bool:
         """Delete relationship tuple from Neo4j."""
-        ctx = {"trace_id": trace_id_from_context()}
-        logger.info(ctx, "Deleting tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
+        logger.info({}, "Deleting tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
 
         if not self._store:
             raise RuntimeError("No storage configured")
@@ -62,13 +60,12 @@ class PermissionService:
                 with start_span("audit.emit", event="tuple_removed"):
                     self._audit_producer.send_tuple_event(tuple_, "tuple_removed")
 
-        logger.debug(ctx, "Delete tuple result", success=success)
+        logger.debug({}, "Delete tuple result", success=success)
         return success
 
     def read_tuples(self, subject: str) -> List[Tuple]:
         """Read all outgoing relationships for subject."""
-        ctx = {"trace_id": trace_id_from_context()}
-        logger.debug(ctx, "Reading tuples", subject=subject)
+        logger.debug({}, "Reading tuples", subject=subject)
 
         if not self._store:
             return []
@@ -78,7 +75,7 @@ class PermissionService:
             tuples = self._store.read_tuples(subject)
             authz_metrics.record_neo4j_query("read", time.perf_counter() - t0)
 
-        logger.debug(ctx, "Read tuples result", subject=subject, count=len(tuples))
+        logger.debug({}, "Read tuples result", subject=subject, count=len(tuples))
         return tuples
 
     def check(self, subject: str, action: str, object: str) -> bool:
@@ -86,10 +83,8 @@ class PermissionService:
         Check if subject can perform action on object.
         Flow: Redis cache → Neo4j graph → cache write → audit emit.
         """
-        ctx = {"trace_id": trace_id_from_context()}
-
         if not self._store:
-            logger.warn(ctx, "No storage configured — denying access", subject=subject, action=action, object=object)
+            logger.warn({}, "No storage configured — denying access", subject=subject, action=action, object=object)
             return False
 
         with start_span("rebac.check", subject=subject, action=action, object=object) as root_span:
@@ -107,7 +102,7 @@ class PermissionService:
                         cache_span.set_attribute("result", "hit")
                         authz_metrics.record_cache_hit()
                         logger.debug(
-                            ctx, "Cache hit",
+                            {}, "Cache hit",
                             subject=subject, action=action, object=object,
                             decision="allow" if cached else "deny",
                         )
@@ -135,7 +130,7 @@ class PermissionService:
             root_span.set_attribute("cache_hit", cache_hit)
 
             logger.info(
-                ctx, "Authorization decision",
+                {}, "Authorization decision",
                 subject=subject, action=action, object=object,
                 result=result_str, cache_hit=cache_hit,
             )
