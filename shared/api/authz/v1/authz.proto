@@ -70,6 +70,33 @@ service PermissionService {
 //   Топик bucket-deleted (Producer: Metadata) → AuthZ-консьюмер удаляет узел бакета + все его рёбра из Neo4j
 // Операции идемпотентны: повторное удаление несуществующего узла — не ошибка (at-least-once delivery).
 
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  ACTION_READ        = 1;
+  ACTION_WRITE       = 2;
+  ACTION_CREATE      = 3;
+  ACTION_DELETE      = 4;
+  ACTION_ADMIN       = 5;
+}
+
+enum Relation {
+  RELATION_UNSPECIFIED    = 0;
+  RELATION_MEMBER_OF      = 1;
+  RELATION_HAS_PERMISSION = 2;
+  RELATION_PARENT_OF      = 3;
+}
+
+enum PermissionLevel {
+  PERMISSION_LEVEL_UNSPECIFIED = 0;
+  PERMISSION_LEVEL_READ        = 1;
+  PERMISSION_LEVEL_WRITE       = 2;
+  PERMISSION_LEVEL_CREATE      = 3;
+  PERMISSION_LEVEL_DELETE      = 4;
+  PERMISSION_LEVEL_ADMIN       = 5;
+}
+
 // ─── Check ────────────────────────────────────────────────────────────────────
 
 message CheckRequest {
@@ -78,9 +105,9 @@ message CheckRequest {
   // Пример: "user:550e8400-e29b-41d4-a716-446655440000"
   string subject = 1;
 
-  // Выполняемое действие. Одно из: read, write, delete, create, admin.
+  // Выполняемое действие.
   // См. таблицу маппинга S3 операций в комментарии к сервису.
-  string action = 2;
+  Action action = 2;
 
   // Объект, над которым выполняется действие.
   // Формат: "bucket:<name>" или "object:<bucket>/<key>".
@@ -104,20 +131,15 @@ message WriteTupleRequest {
   // Subject отношения. Формат: "user:<uuid>" или "group:<name>".
   string subject = 1;
 
-  // Тип ребра в графе. Допустимые значения:
-  //   MEMBER_OF      — user/group является членом group
-  //   HAS_PERMISSION — subject имеет явные права на ресурс (нужен level)
-  //   OWNER_OF       — subject является владельцем ресурса (подразумевает admin)
-  //   PARENT_OF      — ресурс является родителем другого (bucket→object для наследования прав)
-  string relation = 2;
+  // Тип ребра в графе.
+  Relation relation = 2;
 
   // Object отношения. Формат: "group:<name>", "bucket:<name>", "object:<bucket>/<key>".
   string object = 3;
 
   // Уровень прав. Обязателен при relation = HAS_PERMISSION.
-  // Допустимые значения: "read" | "write" | "create" | "delete" | "admin"
   // Иерархия (каждый уровень включает нижестоящие): admin > delete > create > write > read
-  string level = 4;
+  PermissionLevel level = 4;
 }
 
 message WriteTupleResponse {
@@ -127,9 +149,9 @@ message WriteTupleResponse {
 // ─── DeleteTuple ──────────────────────────────────────────────────────────────
 
 message DeleteTupleRequest {
-  string subject  = 1;
-  string relation = 2;
-  string object   = 3;
+  string   subject  = 1;
+  Relation relation = 2;
+  string   object   = 3;
 }
 
 message DeleteTupleResponse {
@@ -149,11 +171,11 @@ message ReadResponse {
 
 // RelationTuple — единица хранения прав в графе.
 message RelationTuple {
-  string subject  = 1;
-  string relation = 2;
-  string object   = 3;
+  string          subject  = 1;
+  Relation        relation = 2;
+  string          object   = 3;
   // Заполняется только при relation = HAS_PERMISSION.
-  string level    = 4;
+  PermissionLevel level    = 4;
 }
 
 // ─── HealthCheck ──────────────────────────────────────────────────────────────
