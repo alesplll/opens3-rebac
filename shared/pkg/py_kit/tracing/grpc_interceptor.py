@@ -52,9 +52,9 @@ class _MetadataCarrier:
                 key = k.lower()
                 self._data.setdefault(key, []).append(v)
 
-    def get(self, key: str) -> str:
+    def get(self, key: str, default: str = "") -> str:
         values = self._data.get(key.lower(), [])
-        return values[0] if values else ""
+        return values[0] if values else default
 
     def set(self, key: str, value: str) -> None:
         self._data[key.lower()] = [value]
@@ -111,13 +111,34 @@ class TracingServerInterceptor(grpc.ServerInterceptor):
 
         def wrap(behavior: Callable):
             def new_behavior(request: Any, context: grpc.ServicerContext) -> Any:
-                self._start_server_span(method, context)
                 try:
-                    result = behavior(request, context)
-                    return result
-                except Exception as exc:
-                    self._record_error(exc)
-                    raise
+                    from opentelemetry import trace
+                    from opentelemetry.propagate import get_global_textmap
+
+                    carrier = _MetadataCarrier(context.invocation_metadata())
+                    parent_ctx = get_global_textmap().extract(carrier)
+                    tracer = trace.get_tracer(self._service_name)
+
+                    with tracer.start_as_current_span(
+                        method,
+                        context=parent_ctx,
+                        kind=trace.SpanKind.SERVER,
+                    ) as span:
+                        span_ctx = span.get_span_context()
+                        if span_ctx and span_ctx.is_valid:
+                            try:
+                                context.send_initial_metadata([
+                                    (TRACE_ID_HEADER, format(span_ctx.trace_id, "032x"))
+                                ])
+                            except Exception:
+                                pass
+                        try:
+                            return behavior(request, context)
+                        except Exception as exc:
+                            span.record_exception(exc)
+                            raise
+                except ImportError:
+                    return behavior(request, context)
 
             return new_behavior
 
@@ -125,46 +146,6 @@ class TracingServerInterceptor(grpc.ServerInterceptor):
         if handler.unary_unary:
             return handler._replace(unary_unary=wrap(handler.unary_unary))
         return handler
-
-    def _start_server_span(self, method: str, context: grpc.ServicerContext) -> None:
-        try:
-            from opentelemetry import trace
-            from opentelemetry.propagate import get_global_textmap
-
-            # Extract trace context from incoming gRPC metadata
-            carrier = _MetadataCarrier(context.invocation_metadata())
-            ctx = get_global_textmap().extract(carrier)
-
-            tracer = trace.get_tracer(self._service_name)
-            span = tracer.start_span(
-                method,
-                context=ctx,
-                kind=trace.SpanKind.SERVER,
-            )
-
-            # Attach span to current context (OTel contextvars)
-            token = trace.use_span(span, end_on_exit=True)  # type: ignore[attr-defined]
-
-            # Inject trace_id into response metadata
-            span_ctx = span.get_span_context()
-            if span_ctx and span_ctx.is_valid:
-                trace_id_hex = format(span_ctx.trace_id, "032x")
-                try:
-                    context.send_initial_metadata([(TRACE_ID_HEADER, trace_id_hex)])
-                except Exception:
-                    pass  # metadata already sent or not supported
-
-        except Exception as exc:
-            log.debug("TracingServerInterceptor: failed to start span: %s", exc)
-
-    def _record_error(self, exc: Exception) -> None:
-        try:
-            from opentelemetry import trace
-            span = trace.get_current_span()
-            if span:
-                span.record_exception(exc)
-        except Exception:
-            pass
 
 
 # ---------------------------------------------------------------------------

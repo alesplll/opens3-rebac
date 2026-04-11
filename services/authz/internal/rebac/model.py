@@ -1,95 +1,145 @@
 """ReBAC core model and service"""
-from dataclasses import dataclass
+import time
 from typing import List, Optional
-import logging
+
 from internal.rebac.interfaces import GraphStore
 from internal.types import Tuple
 from internal.cache.interfaces import DecisionCache
 from internal.kafka.producer import AuditProducer
+from internal import metric as authz_metrics
 
-logger = logging.getLogger(__name__)
+from shared.pkg.py_kit import logger
+from shared.pkg.py_kit.tracing import start_span
+
 
 class PermissionService:
     """ReBAC authorization service"""
-    
-    def __init__(self, store: Optional[GraphStore] = None, 
-                 cache: Optional[DecisionCache] = None,
-                 audit_producer: Optional[AuditProducer] = None):
-        """
-        Initialize with graph store and optional decision cache.
 
-        Args:
-            store: GraphStore implementation (Neo4jStore, etc.).
-            cache: DecisionCache implementation (RedisDecisionCache, etc.).
-        """
+    def __init__(
+        self,
+        store: Optional[GraphStore] = None,
+        cache: Optional[DecisionCache] = None,
+        audit_producer: Optional[AuditProducer] = None,
+    ):
         self._store = store
         self._cache = cache
         self._audit_producer = audit_producer
 
+    def _mutate_tuple(self, tuple_: Tuple, op: str, audit_event: str) -> bool:
+        store_fn = getattr(self._store, f"{op}_tuple")
+        with start_span(f"rebac.{op}_tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object):
+            t0 = time.perf_counter()
+            success = store_fn(tuple_)
+            authz_metrics.record_neo4j_query(op, time.perf_counter() - t0)
+
+            if success and self._audit_producer:
+                with start_span("audit.emit", event=audit_event):
+                    self._audit_producer.send_tuple_event(tuple_, audit_event)
+
+        return success
+
     def write_tuple(self, tuple_: Tuple) -> bool:
-        """Write relationship tuple"""
+        """Write relationship tuple to Neo4j."""
+        logger.info({}, "Writing tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
+
         if not self._store:
             raise RuntimeError("No storage configured")
-        logger.info(f"Write tuple: {tuple_}")
-        success = self._store.write_tuple(tuple_)
 
-        if self._audit_producer and success:
-            self._audit_producer.send_tuple_event(tuple_, "tuple_written")
-
+        success = self._mutate_tuple(tuple_, "write", "tuple_written")
+        logger.debug({}, "Write tuple result", success=success)
         return success
 
     def delete_tuple(self, tuple_: Tuple) -> bool:
-        """Delete relationship tuple"""
+        """Delete relationship tuple from Neo4j."""
+        logger.info({}, "Deleting tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
+
         if not self._store:
             raise RuntimeError("No storage configured")
-        logger.info(f"Delete tuple: {tuple_}")
-        success = self._store.delete_tuple(tuple_)
 
-        if self._audit_producer and success:
-            self._audit_producer.send_tuple_event(tuple_, "tuple_removed")
-
+        success = self._mutate_tuple(tuple_, "delete", "tuple_removed")
+        logger.debug({}, "Delete tuple result", success=success)
         return success
 
     def read_tuples(self, subject: str) -> List[Tuple]:
-        """Read all outgoing relationships for subject"""
+        """Read all outgoing relationships for subject."""
+        logger.debug({}, "Reading tuples", subject=subject)
+
         if not self._store:
             return []
-        logger.debug(f"Read tuples for: {subject}")
-        return self._store.read_tuples(subject)
+
+        with start_span("rebac.read_tuples", subject=subject):
+            t0 = time.perf_counter()
+            tuples = self._store.read_tuples(subject)
+            authz_metrics.record_neo4j_query("read", time.perf_counter() - t0)
+
+        logger.debug({}, "Read tuples result", subject=subject, count=len(tuples))
+        return tuples
 
     def check(self, subject: str, action: str, object: str) -> bool:
-        """Check if subject can perform action on object with caching and audit."""
+        """
+        Check if subject can perform action on object.
+        Flow: Redis cache → Neo4j graph → cache write → audit emit.
+        """
         if not self._store:
-            logger.warning("No storage - denying access")
+            logger.warn({}, "No storage configured — denying access", subject=subject, action=action, object=object)
             return False
 
-        # 1) cache lookup
-        allowed = None
-        if self._cache:
-            cached = self._cache.get(subject, action, object)
-            if cached is not None:
-                logger.info(
-                    "Authorization (cached): %s %s %s -> %s",
-                    subject, action, object, "ALLOW" if cached else "DENY",
-                )
-                allowed = cached
+        with start_span("rebac.check", subject=subject, action=action, object=object) as root_span:
 
-        # 2) storage check on cache miss
-        if allowed is None:
-            logger.info("Authorization (store): %s %s %s", subject, action, object)
-            allowed = self._store.check(subject, action, object)
+            # ── 1. Cache lookup ───────────────────────────────────────────
+            allowed: Optional[bool] = None
+            cache_hit = False
+
             if self._cache:
-                self._cache.set(subject, action, object, allowed, ttl_seconds=30)
+                with start_span("cache.lookup", subject=subject, action=action, object=object) as cache_span:
+                    cached = self._cache.get(subject, action, object)
+                    if cached is not None:
+                        allowed = cached
+                        cache_hit = True
+                        cache_span.set_attribute("result", "hit")
+                        authz_metrics.record_cache_hit()
+                        logger.debug(
+                            {}, "Cache hit",
+                            subject=subject, action=action, object=object,
+                            decision="allow" if cached else "deny",
+                        )
+                    else:
+                        cache_span.set_attribute("result", "miss")
+                        authz_metrics.record_cache_miss()
 
-        # 3) audit every decision
-        if self._audit_producer:
-            self._audit_producer.send_decision_event(subject, action, object, allowed)
+            # ── 2. Neo4j check on cache miss ──────────────────────────────
+            if allowed is None:
+                with start_span("neo4j.check", subject=subject, action=action, object=object) as neo_span:
+                    t0 = time.perf_counter()
+                    allowed = self._store.check(subject, action, object)
+                    elapsed = time.perf_counter() - t0
+                    authz_metrics.record_neo4j_query("check", elapsed)
+                    neo_span.set_attribute("result", "allow" if allowed else "deny")
+                    neo_span.set_attribute("duration_ms", round(elapsed * 1000, 2))
 
-        logger.info("Authorization result: %s", "ALLOW" if allowed else "DENY")
+                if self._cache:
+                    self._cache.set(subject, action, object, allowed, ttl_seconds=30)
+
+            # ── 3. Record decision metric ─────────────────────────────────
+            result_str = "allow" if allowed else "deny"
+            authz_metrics.record_decision(action, result_str)
+            root_span.set_attribute("result", result_str)
+            root_span.set_attribute("cache_hit", cache_hit)
+
+            logger.info(
+                {}, "Authorization decision",
+                subject=subject, action=action, object=object,
+                result=result_str, cache_hit=cache_hit,
+            )
+
+            # ── 4. Audit emit ─────────────────────────────────────────────
+            if self._audit_producer:
+                with start_span("audit.emit", result=result_str):
+                    self._audit_producer.send_decision_event(subject, action, object, allowed)
+
         return allowed
 
     def close(self) -> None:
-        """Close underlying storage"""
+        """Close underlying storage."""
         if self._store:
             self._store.close()
-
