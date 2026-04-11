@@ -1,4 +1,5 @@
 """gRPC handler — translates protobuf requests into PermissionService calls."""
+import grpc
 from shared.pkg.py.authz.v1 import authz_pb2, authz_pb2_grpc
 from shared.pkg.py_kit import logger
 from internal.container import Container
@@ -39,17 +40,24 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
         self._cache = container.cache
 
     def Check(self, request, context):
-        action = _ACTION_TO_STR.get(request.action, "")
+        action = _ACTION_TO_STR.get(request.action)
+        if not action:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "action is required")
+
         logger.debug({}, "Check RPC", subject=request.subject, action=action, object=request.object)
-        allowed = self._rebac.check(request.subject, action, request.object)
+        allowed, reason = self._rebac.check(request.subject, action, request.object)
         logger.info({}, "Check RPC done", subject=request.subject, action=action, object=request.object, allowed=allowed)
-        return authz_pb2.CheckResponse(
-            allowed=allowed, reason="Neo4j ReBAC (transitive + HAS_PERMISSION)"
-        )
+        return authz_pb2.CheckResponse(allowed=allowed, reason=reason)
 
     def WriteTuple(self, request, context):
-        relation = _RELATION_TO_STR.get(request.relation, "")
+        relation = _RELATION_TO_STR.get(request.relation)
+        if not relation:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "relation is required")
+
         level = _LEVEL_TO_STR.get(request.level) if request.level else None
+        if relation == "HAS_PERMISSION" and not level:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "level is required for HAS_PERMISSION")
+
         logger.debug({}, "WriteTuple RPC", subject=request.subject, relation=relation, object=request.object)
         tuple_ = Tuple(request.subject, relation, request.object, level=level)
         success = self._rebac.write_tuple(tuple_)
@@ -57,7 +65,10 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
         return authz_pb2.WriteTupleResponse(success=success)
 
     def DeleteTuple(self, request, context):
-        relation = _RELATION_TO_STR.get(request.relation, "")
+        relation = _RELATION_TO_STR.get(request.relation)
+        if not relation:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "relation is required")
+
         logger.debug({}, "DeleteTuple RPC", subject=request.subject, relation=relation, object=request.object)
         tuple_ = Tuple(request.subject, relation, request.object)
         success = self._rebac.delete_tuple(tuple_)

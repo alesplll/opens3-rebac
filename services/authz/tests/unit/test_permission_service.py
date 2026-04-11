@@ -22,9 +22,10 @@ class TestPermissionServiceCheck:
         cache.get.return_value = None
 
         svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
-        result = svc.check("user:alice", "read", "doc:1")
+        allowed, reason = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
+        assert reason == "graph lookup"
         store.check.assert_called_once_with("user:alice", "read", "doc:1")
         cache.get.assert_called_once_with("user:alice", "read", "doc:1")
         cache.set.assert_called_once_with("user:alice", "read", "doc:1", True, ttl_seconds=30)
@@ -37,9 +38,9 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:alice", "read", "doc:1")
+        allowed, _ = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
         audit.send_decision_event.assert_called_once_with("user:alice", "read", "doc:1", True)
 
     def test_check_sends_audit_event_on_deny(self):
@@ -50,9 +51,9 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:bob", "write", "doc:2")
+        allowed, _ = svc.check("user:bob", "write", "doc:2")
 
-        assert result is False
+        assert allowed is False
         audit.send_decision_event.assert_called_once_with("user:bob", "write", "doc:2", False)
 
     def test_check_sends_audit_event_on_cache_hit(self):
@@ -62,9 +63,10 @@ class TestPermissionServiceCheck:
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=cache, audit_producer=audit)
-        result = svc.check("user:alice", "read", "doc:1")
+        allowed, reason = svc.check("user:alice", "read", "doc:1")
 
-        assert result is True
+        assert allowed is True
+        assert reason == "cache hit"
         store.check.assert_not_called()
         audit.send_decision_event.assert_called_once_with("user:alice", "read", "doc:1", True)
 
@@ -74,9 +76,10 @@ class TestPermissionServiceCheck:
         cache.get.return_value = False
 
         svc = PermissionService(store=store, cache=cache, audit_producer=MagicMock())
-        result = svc.check("user:bob", "write", "doc:2")
+        allowed, reason = svc.check("user:bob", "write", "doc:2")
 
-        assert result is False
+        assert allowed is False
+        assert reason == "cache hit"
         store.check.assert_not_called()
         cache.set.assert_not_called()
 

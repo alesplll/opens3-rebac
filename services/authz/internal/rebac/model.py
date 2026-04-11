@@ -64,9 +64,10 @@ class PermissionService:
         logger.debug({}, "Read tuples result", subject=subject, count=len(tuples))
         return tuples
 
-    def check(self, subject: str, action: str, object: str) -> bool:
+    def check(self, subject: str, action: str, object: str) -> tuple[bool, str]:
         """
         Check if subject can perform action on object.
+        Returns (allowed, reason) where reason is "cache hit" or "graph lookup".
         Flow: Redis cache → Neo4j graph → cache write → audit emit.
         """
         with start_span("rebac.check", subject=subject, action=action, object=object) as root_span:
@@ -105,6 +106,7 @@ class PermissionService:
 
             # ── 3. Record decision metric ─────────────────────────────────
             result_str = "allow" if allowed else "deny"
+            reason = "cache hit" if cache_hit else "graph lookup"
             authz_metrics.record_decision(action, result_str)
             root_span.set_attribute("result", result_str)
             root_span.set_attribute("cache_hit", cache_hit)
@@ -119,7 +121,7 @@ class PermissionService:
             with start_span("audit.emit", result=result_str):
                 self._audit_producer.send_decision_event(subject, action, object, allowed)
 
-        return allowed
+        return allowed, reason
 
     def close(self) -> None:
         """Close underlying storage."""
