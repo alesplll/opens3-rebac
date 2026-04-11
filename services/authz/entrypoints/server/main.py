@@ -31,24 +31,15 @@ from shared.pkg.py_kit.middleware import MetricsServerInterceptor
 from shared.pkg.py_kit.closer import configure_default, add_named
 from internal import metric as authz_metrics
 
-import os
-
-NEO4J_URI     = os.environ.get("NEO4J_URI",      "bolt://localhost:7687")
-NEO4J_USER    = os.environ.get("NEO4J_USER",     "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password123")
-REDIS_HOST    = os.environ.get("REDIS_HOST",     "localhost")
-REDIS_PORT    = int(os.environ.get("REDIS_PORT", "6379"))
-KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
-GRPC_PORT     = os.environ.get("GRPC_PORT",      "50051")
 
 
 class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
     """gRPC service implementation"""
 
     def __init__(self):
-        self._neo4j_store = Neo4jStore(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD)
-        self._cache = RedisDecisionCache(host=REDIS_HOST, port=REDIS_PORT)
-        audit_producer = AuditProducer(KAFKA_BOOTSTRAP)
+        self._neo4j_store = Neo4jStore(uri=cfg.neo4j_uri(), user=cfg.neo4j_user(), password=cfg.neo4j_password())
+        self._cache = RedisDecisionCache(host=cfg.redis_host(), port=cfg.redis_port())
+        audit_producer = AuditProducer(cfg.kafka_bootstrap())
         self.rebac = PermissionService(
             store=self._neo4j_store, cache=self._cache, audit_producer=audit_producer
         )
@@ -153,10 +144,10 @@ def serve():
     )
     reflection.enable_server_reflection(SERVICE_NAMES, server)
 
-    server.add_insecure_port(f"[::]:{GRPC_PORT}")
+    server.add_insecure_port(f"[::]:{cfg.grpc_port()}")
     server.start()
 
-    logger.info({}, "ReBAC Auth Service started", port=GRPC_PORT)
+    logger.info({}, "ReBAC Auth Service started", port=cfg.grpc_port())
 
     try:
         server.wait_for_termination()
