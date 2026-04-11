@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	grpcclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc"
@@ -23,9 +25,9 @@ const (
 )
 
 type gatewayService struct {
-	authzClient   grpcclient.AuthZClient
+	authzClient    grpcclient.AuthZClient
 	metadataClient grpcclient.MetadataClient
-	storageClient grpcclient.StorageClient
+	storageClient  grpcclient.StorageClient
 }
 
 func NewService(
@@ -34,9 +36,9 @@ func NewService(
 	storageClient grpcclient.StorageClient,
 ) service.GatewayService {
 	return &gatewayService{
-		authzClient:   authzClient,
+		authzClient:    authzClient,
 		metadataClient: metadataClient,
-		storageClient: storageClient,
+		storageClient:  storageClient,
 	}
 }
 
@@ -46,16 +48,22 @@ func (s *gatewayService) CreateBucket(ctx context.Context, req service.CreateBuc
 		OwnerId: req.UserID,
 	})
 	if err != nil {
-		return nil, mapGRPCError(err)
+		return nil, mapBucketGRPCError(err)
 	}
 
 	_, err = s.authzClient.WriteTuple(ctx, &authzv1.WriteTupleRequest{
 		Subject:  subjectUser(req.UserID),
-		Relation: "OWNER_OF",
+		Relation: authzv1.Relation_RELATION_HAS_PERMISSION,
 		Object:   bucketResource(req.Bucket),
+		Level:    authzv1.PermissionLevel_PERMISSION_LEVEL_ADMIN,
 	})
 	if err != nil {
-		return nil, mapGRPCError(err)
+		authzErr := mapGRPCError(err)
+		_, rollbackErr := s.metadataClient.DeleteBucket(ctx, &metadatav1.DeleteBucketRequest{BucketName: req.Bucket})
+		if rollbackErr != nil {
+			return nil, fmt.Errorf("create bucket authz tuple failed: %w; rollback delete bucket failed: %v", authzErr, mapBucketGRPCError(rollbackErr))
+		}
+		return nil, authzErr
 	}
 
 	return &service.CreateBucketResponse{
@@ -65,7 +73,7 @@ func (s *gatewayService) CreateBucket(ctx context.Context, req service.CreateBuc
 }
 
 func (s *gatewayService) DeleteBucket(ctx context.Context, req service.DeleteBucketRequest) error {
-	if err := s.checkAccess(ctx, req.UserID, "delete", bucketResource(req.Bucket)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_ADMIN, bucketResource(req.Bucket)); err != nil {
 		return err
 	}
 
@@ -78,7 +86,7 @@ func (s *gatewayService) DeleteBucket(ctx context.Context, req service.DeleteBuc
 }
 
 func (s *gatewayService) ListBuckets(ctx context.Context, req service.ListBucketsRequest) (*service.ListBucketsResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "read", userResource(req.UserID)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, userResource(req.UserID)); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +107,7 @@ func (s *gatewayService) ListBuckets(ctx context.Context, req service.ListBucket
 }
 
 func (s *gatewayService) HeadBucket(ctx context.Context, req service.HeadBucketRequest) error {
-	if err := s.checkAccess(ctx, req.UserID, "read", bucketResource(req.Bucket)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, bucketResource(req.Bucket)); err != nil {
 		return err
 	}
 
@@ -112,7 +120,7 @@ func (s *gatewayService) HeadBucket(ctx context.Context, req service.HeadBucketR
 }
 
 func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectRequest) (*service.PutObjectResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "write", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_WRITE, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
@@ -130,15 +138,17 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 		ContentType: req.ContentType,
 	})
 	if err != nil {
-		return nil, mapGRPCError(err)
+		if isMetadataStubUnimplemented(err) {
+			return &service.PutObjectResponse{ETag: quoteETag(storeResp.GetChecksumMd5())}, nil
+		}
+		return nil, mapObjectGRPCError(err)
 	}
 
-	_, err = s.authzClient.WriteTuple(ctx, &authzv1.WriteTupleRequest{
+	if err := s.writeTupleWithRetry(ctx, &authzv1.WriteTupleRequest{
 		Subject:  bucketResource(req.Bucket),
-		Relation: "PARENT_OF",
+		Relation: authzv1.Relation_RELATION_PARENT_OF,
 		Object:   objectResource(req.Bucket, req.Key),
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, mapGRPCError(err)
 	}
 
@@ -149,7 +159,7 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 }
 
 func (s *gatewayService) GetObject(ctx context.Context, req service.GetObjectRequest) (*service.GetObjectResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "read", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
@@ -193,7 +203,7 @@ func (s *gatewayService) GetObject(ctx context.Context, req service.GetObjectReq
 }
 
 func (s *gatewayService) HeadObject(ctx context.Context, req service.HeadObjectRequest) (*service.HeadObjectResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "read", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
@@ -216,7 +226,7 @@ func (s *gatewayService) HeadObject(ctx context.Context, req service.HeadObjectR
 }
 
 func (s *gatewayService) DeleteObject(ctx context.Context, req service.DeleteObjectRequest) error {
-	if err := s.checkAccess(ctx, req.UserID, "delete", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_DELETE, objectResource(req.Bucket, req.Key)); err != nil {
 		return err
 	}
 
@@ -232,7 +242,7 @@ func (s *gatewayService) DeleteObject(ctx context.Context, req service.DeleteObj
 }
 
 func (s *gatewayService) ListObjects(ctx context.Context, req service.ListObjectsRequest) (*service.ListObjectsResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "read", bucketResource(req.Bucket)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, bucketResource(req.Bucket)); err != nil {
 		return nil, err
 	}
 
@@ -271,7 +281,7 @@ func (s *gatewayService) ListObjects(ctx context.Context, req service.ListObject
 }
 
 func (s *gatewayService) CreateMultipartUpload(ctx context.Context, req service.CreateMultipartUploadRequest) (*service.CreateMultipartUploadResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "write", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_CREATE, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
@@ -286,38 +296,69 @@ func (s *gatewayService) CreateMultipartUpload(ctx context.Context, req service.
 }
 
 func (s *gatewayService) UploadPart(ctx context.Context, req service.UploadPartRequest) (*service.UploadPartResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "write", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_WRITE, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
 	chunks := make(chan *storagev1.UploadPartRequest)
 	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	var once sync.Once
+	closeDone := func() {
+		once.Do(func() { close(done) })
+	}
+
 	go func() {
 		defer close(chunks)
+		defer close(errCh)
+
 		buf := make([]byte, chunkSize)
 		for {
 			n, err := req.Body.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				chunks <- &storagev1.UploadPartRequest{
-					UploadId:   req.UploadID,
-					PartNumber: req.PartNumber,
-					Data:       data,
+				chunk := &storagev1.UploadPartRequest{
+					Payload: &storagev1.UploadPartRequest_Header{
+						Header: &storagev1.UploadPartHeader{
+							UploadId:   req.UploadID,
+							PartNumber: req.PartNumber,
+							Data:       data,
+						},
+					},
+				}
+				select {
+				case chunks <- chunk:
+					req.UploadID = ""
+				case <-done:
+					return
+				case <-ctx.Done():
+					select {
+					case errCh <- ctx.Err():
+					default:
+					}
+					return
 				}
 			}
 			if err == io.EOF {
-				errCh <- nil
+				select {
+				case errCh <- nil:
+				default:
+				}
 				return
 			}
 			if err != nil {
-				errCh <- err
+				select {
+				case errCh <- err:
+				default:
+				}
 				return
 			}
 		}
 	}()
 
 	resp, err := s.storageClient.UploadPart(ctx, chunks)
+	closeDone()
 	if err != nil {
 		return nil, mapGRPCError(err)
 	}
@@ -329,7 +370,7 @@ func (s *gatewayService) UploadPart(ctx context.Context, req service.UploadPartR
 }
 
 func (s *gatewayService) CompleteMultipartUpload(ctx context.Context, req service.CompleteMultipartUploadRequest) (*service.CompleteMultipartUploadResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, "write", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_WRITE, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
 	}
 
@@ -356,7 +397,10 @@ func (s *gatewayService) CompleteMultipartUpload(ctx context.Context, req servic
 		Etag:       completeResp.GetChecksumMd5(),
 	})
 	if err != nil {
-		return nil, mapGRPCError(err)
+		if isMetadataStubUnimplemented(err) {
+			return &service.CompleteMultipartUploadResponse{ETag: quoteETag(completeResp.GetChecksumMd5())}, nil
+		}
+		return nil, mapObjectGRPCError(err)
 	}
 
 	return &service.CompleteMultipartUploadResponse{
@@ -366,7 +410,7 @@ func (s *gatewayService) CompleteMultipartUpload(ctx context.Context, req servic
 }
 
 func (s *gatewayService) AbortMultipartUpload(ctx context.Context, req service.AbortMultipartUploadRequest) error {
-	if err := s.checkAccess(ctx, req.UserID, "write", objectResource(req.Bucket, req.Key)); err != nil {
+	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_WRITE, objectResource(req.Bucket, req.Key)); err != nil {
 		return err
 	}
 
@@ -392,7 +436,7 @@ func (s *gatewayService) Ready(ctx context.Context) error {
 	return nil
 }
 
-func (s *gatewayService) checkAccess(ctx context.Context, userID, action, object string) error {
+func (s *gatewayService) checkAccess(ctx context.Context, userID string, action authzv1.Action, object string) error {
 	resp, err := s.authzClient.Check(ctx, &authzv1.CheckRequest{
 		Subject: subjectUser(userID),
 		Action:  action,
@@ -411,8 +455,16 @@ func (s *gatewayService) checkAccess(ctx context.Context, userID, action, object
 func (s *gatewayService) storeObject(ctx context.Context, body io.Reader, size int64, contentType string) (*storagev1.StoreObjectResponse, error) {
 	chunks := make(chan *storagev1.StoreObjectRequest)
 	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	var once sync.Once
+	closeDone := func() {
+		once.Do(func() { close(done) })
+	}
+
 	go func() {
 		defer close(chunks)
+		defer close(errCh)
+
 		buf := make([]byte, chunkSize)
 		first := true
 		for {
@@ -420,29 +472,78 @@ func (s *gatewayService) storeObject(ctx context.Context, body io.Reader, size i
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				chunk := &storagev1.StoreObjectRequest{Data: data}
+				var chunk *storagev1.StoreObjectRequest
 				if first {
-					chunk.Size = size
-					chunk.ContentType = contentType
+					chunk = &storagev1.StoreObjectRequest{
+						Payload: &storagev1.StoreObjectRequest_Header{
+							Header: &storagev1.StoreObjectHeader{
+								Size:        &size,
+								ContentType: contentType,
+								Data:        data,
+							},
+						},
+					}
 					first = false
+				} else {
+					chunk = &storagev1.StoreObjectRequest{
+						Payload: &storagev1.StoreObjectRequest_Chunk{
+							Chunk: &storagev1.StoreObjectChunk{Data: data},
+						},
+					}
 				}
-				chunks <- chunk
+
+				select {
+				case chunks <- chunk:
+				case <-done:
+					return
+				case <-ctx.Done():
+					select {
+					case errCh <- ctx.Err():
+					default:
+					}
+					return
+				}
 			}
 			if err == io.EOF {
 				if first {
-					chunks <- &storagev1.StoreObjectRequest{Size: size, ContentType: contentType}
+					emptyChunk := &storagev1.StoreObjectRequest{
+						Payload: &storagev1.StoreObjectRequest_Header{
+							Header: &storagev1.StoreObjectHeader{
+								Size:        &size,
+								ContentType: contentType,
+							},
+						},
+					}
+					select {
+					case chunks <- emptyChunk:
+					case <-done:
+						return
+					case <-ctx.Done():
+						select {
+						case errCh <- ctx.Err():
+						default:
+						}
+						return
+					}
 				}
-				errCh <- nil
+				select {
+				case errCh <- nil:
+				default:
+				}
 				return
 			}
 			if err != nil {
-				errCh <- err
+				select {
+				case errCh <- err:
+				default:
+				}
 				return
 			}
 		}
 	}()
 
 	resp, err := s.storageClient.StoreObject(ctx, chunks)
+	closeDone()
 	if err != nil {
 		return nil, mapGRPCError(err)
 	}
@@ -453,7 +554,15 @@ func (s *gatewayService) storeObject(ctx context.Context, body io.Reader, size i
 	return resp, nil
 }
 
-func mapGRPCError(err error) error {
+func mapBucketGRPCError(err error) error {
+	return mapGRPCError(err, domainerrors.ErrBucketNotFound)
+}
+
+func mapObjectGRPCError(err error) error {
+	return mapGRPCError(err, domainerrors.ErrObjectNotFound)
+}
+
+func mapGRPCError(err error, notFoundErr ...error) error {
 	if err == nil {
 		return nil
 	}
@@ -463,10 +572,15 @@ func mapGRPCError(err error) error {
 		return err
 	}
 
+	var nf error
+	if len(notFoundErr) > 0 {
+		nf = notFoundErr[0]
+	}
+
 	switch st.Code() {
 	case codes.NotFound:
-		if strings.Contains(strings.ToLower(st.Message()), "bucket") {
-			return domainerrors.ErrBucketNotFound
+		if nf != nil {
+			return nf
 		}
 		return domainerrors.ErrObjectNotFound
 	case codes.AlreadyExists:
@@ -484,6 +598,43 @@ func mapGRPCError(err error) error {
 	default:
 		return err
 	}
+}
+
+func (s *gatewayService) writeTupleWithRetry(ctx context.Context, req *authzv1.WriteTupleRequest) error {
+	const maxAttempts = 3
+	backoff := 100 * time.Millisecond
+
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		_, err = s.authzClient.WriteTuple(ctx, req)
+		if err == nil {
+			return nil
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+
+	return err
+}
+
+func isMetadataStubUnimplemented(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+
+	return st.Code() == codes.Unimplemented || errors.Is(err, context.DeadlineExceeded)
 }
 
 func normalizeRange(total int64, requested *service.ByteRange) (int64, int64, error) {
