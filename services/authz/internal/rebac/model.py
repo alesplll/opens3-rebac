@@ -25,6 +25,19 @@ class PermissionService:
         self._cache = cache
         self._audit_producer = audit_producer
 
+    def _mutate_tuple(self, tuple_: Tuple, op: str, audit_event: str) -> bool:
+        store_fn = getattr(self._store, f"{op}_tuple")
+        with start_span(f"rebac.{op}_tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object):
+            t0 = time.perf_counter()
+            success = store_fn(tuple_)
+            authz_metrics.record_neo4j_query(op, time.perf_counter() - t0)
+
+            if success and self._audit_producer:
+                with start_span("audit.emit", event=audit_event):
+                    self._audit_producer.send_tuple_event(tuple_, audit_event)
+
+        return success
+
     def write_tuple(self, tuple_: Tuple) -> bool:
         """Write relationship tuple to Neo4j."""
         logger.info({}, "Writing tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object)
@@ -32,15 +45,7 @@ class PermissionService:
         if not self._store:
             raise RuntimeError("No storage configured")
 
-        with start_span("rebac.write_tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object):
-            t0 = time.perf_counter()
-            success = self._store.write_tuple(tuple_)
-            authz_metrics.record_neo4j_query("write", time.perf_counter() - t0)
-
-            if success and self._audit_producer:
-                with start_span("audit.emit", event="tuple_written"):
-                    self._audit_producer.send_tuple_event(tuple_, "tuple_written")
-
+        success = self._mutate_tuple(tuple_, "write", "tuple_written")
         logger.debug({}, "Write tuple result", success=success)
         return success
 
@@ -51,15 +56,7 @@ class PermissionService:
         if not self._store:
             raise RuntimeError("No storage configured")
 
-        with start_span("rebac.delete_tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object):
-            t0 = time.perf_counter()
-            success = self._store.delete_tuple(tuple_)
-            authz_metrics.record_neo4j_query("delete", time.perf_counter() - t0)
-
-            if success and self._audit_producer:
-                with start_span("audit.emit", event="tuple_removed"):
-                    self._audit_producer.send_tuple_event(tuple_, "tuple_removed")
-
+        success = self._mutate_tuple(tuple_, "delete", "tuple_removed")
         logger.debug({}, "Delete tuple result", success=success)
         return success
 
