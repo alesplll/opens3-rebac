@@ -25,7 +25,7 @@ class TestPermissionServiceCheck:
         allowed, reason = svc.check("user:alice", "read", "doc:1")
 
         assert allowed is True
-        assert reason == "graph lookup"
+        assert reason == "graph lookup: path found"
         store.check.assert_called_once_with("user:alice", "read", "doc:1")
         cache.get.assert_called_once_with("user:alice", "read", "doc:1")
         cache.set.assert_called_once_with("user:alice", "read", "doc:1", True, ttl_seconds=30)
@@ -66,7 +66,7 @@ class TestPermissionServiceCheck:
         allowed, reason = svc.check("user:alice", "read", "doc:1")
 
         assert allowed is True
-        assert reason == "cache hit"
+        assert reason == "cache hit: granted"
         store.check.assert_not_called()
         audit.send_decision_event.assert_called_once_with("user:alice", "read", "doc:1", True)
 
@@ -79,7 +79,7 @@ class TestPermissionServiceCheck:
         allowed, reason = svc.check("user:bob", "write", "doc:2")
 
         assert allowed is False
-        assert reason == "cache hit"
+        assert reason == "cache hit: denied"
         store.check.assert_not_called()
         cache.set.assert_not_called()
 

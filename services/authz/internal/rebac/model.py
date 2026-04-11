@@ -106,7 +106,10 @@ class PermissionService:
 
             # ── 3. Record decision metric ─────────────────────────────────
             result_str = "allow" if allowed else "deny"
-            reason = "cache hit" if cache_hit else "graph lookup"
+            if cache_hit:
+                reason = "cache hit: granted" if allowed else "cache hit: denied"
+            else:
+                reason = "graph lookup: path found" if allowed else "graph lookup: no path found"
             authz_metrics.record_decision(action, result_str)
             root_span.set_attribute("result", result_str)
             root_span.set_attribute("cache_hit", cache_hit)
