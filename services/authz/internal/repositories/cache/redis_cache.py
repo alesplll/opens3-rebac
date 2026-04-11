@@ -1,27 +1,18 @@
 from typing import Optional
 import logging
 import redis
-from internal.cache.interfaces import DecisionCache
+from internal.repositories.cache.interfaces import DecisionCache
 
 logger = logging.getLogger(__name__)
+
 
 class RedisDecisionCache(DecisionCache):
     """Decision cache backed by Redis."""
 
     def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0, prefix: str = "auth_decision"):
-        """
-        Initialize Redis client.
-
-        Args:
-            host: Redis host.
-            port: Redis port.
-            db: Redis logical database index.
-            prefix: Key prefix for namespacing.
-        """
         self._client = redis.Redis(host=host, port=port, db=db, decode_responses=True)
         self._prefix = prefix
         logger.info(f"Connected to Redis: {host}:{port}, db {db}")
-
 
     def _make_key(self, subject: str, action: str, object_: str) -> str:
         """Build cache key for decision."""
@@ -44,3 +35,6 @@ class RedisDecisionCache(DecisionCache):
         self._client.set(name=key, value=value, ex=ttl_seconds)
         logger.debug(f"Decision cached key={key} value={value} ttl={ttl_seconds}s")
 
+    def health(self) -> None:
+        """Raise if Redis is unreachable."""
+        self._client.ping()

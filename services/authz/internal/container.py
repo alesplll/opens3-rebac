@@ -1,9 +1,9 @@
 """Dependency container — wires all service objects from config."""
 from internal.config import Config
-from internal.neo4j.store import Neo4jStore
-from internal.cache.redis_cache import RedisDecisionCache
-from internal.kafka.producer import AuditProducer
-from internal.rebac.model import PermissionService
+from internal.repositories.neo4j.store import Neo4jStore
+from internal.repositories.cache.redis_cache import RedisDecisionCache
+from internal.repositories.kafka.producer import AuditProducer
+from internal.permission.service import PermissionService
 
 
 class Container:
