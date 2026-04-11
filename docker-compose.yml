@@ -201,31 +201,17 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 50051), 2); s.close()"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
 
   metadata:
     profiles: [services]
     build:
       context: .
-      dockerfile: services/gateway/Dockerfile.mock-metadata
+      dockerfile: services/metadata/Dockerfile
     ports:
       - "50052:50052"
-    environment:
-      GRPC_PORT: 50052
     networks:
       - opens3-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "50052"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
 
   storage:
     profiles: [services]
@@ -248,31 +234,9 @@ services:
       retries: 10
       start_period: 5s
 
-  gateway:
-    profiles: [services]
-    build:
-      context: .
-      dockerfile: services/gateway/Dockerfile
-    ports:
-      - "8080:8080"
-    env_file:
-      - services/gateway/.env
-    networks:
-      - opens3-network
-    depends_on:
-      authz:
-        condition: service_healthy
-      metadata:
-        condition: service_healthy
-      storage:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 20s
+  # gateway:
+  #   profiles: [services]
+  #   ...
 
   # ── Observability ──────────────────────────────────────────────────────────
   # docker compose --profile observability up
@@ -416,11 +380,11 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - XPACK_SECURITY_ENABLED=false
       - xpack.encryptedSavedObjects.encryptionKey=REPLACE_WITH_32+_CHAR_STRING
-
+    
     depends_on:
       elasticsearch:
         condition: service_healthy
-
+    
     env_file:
       - infra/otel/.env
 
@@ -433,7 +397,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
-
+    
     restart: unless-stopped
     networks:
       - opens3-network
@@ -448,32 +412,32 @@ services:
     env_file:
       - infra/otel/.env
 
-    command:
+    command: 
       - sh
       - -c
       - |
         set -e # stop scipt after first error
-
+        
         echo "Installing curl and jq..."
         apk add --no-cache curl jq >/dev/null 2>&1
-
+        
         echo "Waiting for Kibana..."
         # max 60 attempts with delay 2 seconds
         for i in $$(seq 1 60); do
           if curl -sSf http://kibana:5601/api/status >/dev/null; then break; fi
           sleep 2
         done
-
+        
         echo "Creating Data View logs* ..."
         RESPONSE=$$(curl -sS -X POST http://kibana:5601/api/data_views/data_view \
           -H "kbn-xsrf: true" \
           -H "Content-Type: application/json" \
           --data '{"data_view":{"title":"logs*","name":"Logs","timeFieldName":"@timestamp","allowNoIndex":true},"override":true}' || echo "{}")
-
+        
         echo "Response: $$RESPONSE"
         DATA_VIEW_ID=$$(echo "$$RESPONSE" | jq -r ".data_view.id // empty")
         echo "Data View ID: $$DATA_VIEW_ID"
-
+        
         # Making Data View default in Kibana
         if [ -n "$$DATA_VIEW_ID" ]; then
           echo "Setting as default data view..."
@@ -486,8 +450,8 @@ services:
           echo "Failed to get data view ID"
         fi
         echo "Done."
-
+    
     networks:
       - opens3-network
-
+    
     restart: "no"
