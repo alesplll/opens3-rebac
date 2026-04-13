@@ -15,7 +15,9 @@ type config struct {
 	Tracing     TracingConfig
 	Metrics     MetricsConfig
 	RateLimiter RateLimiterConfig
+	Auth        AuthClientConfig
 	AuthZClient GRPCClientConfig
+	Users       UsersClientConfig
 	Metadata    GRPCClientConfig
 	Storage     GRPCClientConfig
 	JWT         JWTConfig
@@ -52,7 +54,17 @@ func Load(path ...string) error {
 		return err
 	}
 
+	authCfg, err := env.NewAuthClientConfig()
+	if err != nil {
+		return err
+	}
+
 	authzCfg, err := env.NewAuthZClientConfig()
+	if err != nil {
+		return err
+	}
+
+	usersCfg, err := env.NewUsersClientConfig()
 	if err != nil {
 		return err
 	}
@@ -78,7 +90,9 @@ func Load(path ...string) error {
 		Tracing:     tracingCfg,
 		Metrics:     metricsCfg,
 		RateLimiter: rateLimiterCfg,
+		Auth:        authCfg,
 		AuthZClient: authzCfg,
+		Users:       usersCfg,
 		Metadata:    metadataCfg,
 		Storage:     storageCfg,
 		JWT:         jwtCfg,

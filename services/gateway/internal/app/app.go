@@ -78,9 +78,9 @@ func (a *App) initMetrics(ctx context.Context) error {
 	meterProvider, err := metric.InitOTELMetrics(config.AppConfig().Metrics)
 	if err != nil {
 		logger.Error(ctx, "failed to create meter provider", zap.Error(err))
+	} else if meterProvider != nil {
+		closer.AddNamed("OTEL Metrics", meterProvider.Shutdown)
 	}
-
-	closer.AddNamed("OTEL Metrics", meterProvider.Shutdown)
 
 	if err := metric.Init(ctx, config.AppConfig().Metrics); err != nil {
 		logger.Error(ctx, "failed to init metrics", zap.Error(err))

@@ -3,33 +3,41 @@ package app
 import (
 	"context"
 
-	authzclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/authz"
 	grpcclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc"
+	authclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/auth"
+	authzclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/authz"
 	metadataclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/metadata"
 	storageclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/storage"
+	usersclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/users"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 	httpgateway "github.com/alesplll/opens3-rebac/services/gateway/internal/handler/http/gateway"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
 	gatewayservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/gateway"
-	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
-	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
-	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tokens"
 	jwtkit "github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tokens/jwt"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
+	authv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
+	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
+	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
+	userv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type serviceProvider struct {
+	authConn     *grpc.ClientConn
 	authzConn    *grpc.ClientConn
+	usersConn    *grpc.ClientConn
 	metadataConn *grpc.ClientConn
 	storageConn  *grpc.ClientConn
 
+	authClient     grpcclient.AuthClient
 	authzClient    grpcclient.AuthZClient
+	usersClient    grpcclient.UsersClient
 	metadataClient grpcclient.MetadataClient
 	storageClient  grpcclient.StorageClient
 	tokenVerifier  tokens.TokenVerifier
@@ -42,6 +50,17 @@ func newServiceProvider() *serviceProvider {
 	return &serviceProvider{}
 }
 
+func (s *serviceProvider) AuthClient(ctx context.Context) grpcclient.AuthClient {
+	if s.authClient == nil {
+		conn := s.authConnOrPanic(ctx)
+		s.authClient = authclient.NewClient(
+			authv1.NewAuthV1Client(conn),
+		)
+	}
+
+	return s.authClient
+}
+
 func (s *serviceProvider) AuthZClient(ctx context.Context) grpcclient.AuthZClient {
 	if s.authzClient == nil {
 		conn := s.authzConnOrPanic(ctx)
@@ -52,6 +71,17 @@ func (s *serviceProvider) AuthZClient(ctx context.Context) grpcclient.AuthZClien
 	}
 
 	return s.authzClient
+}
+
+func (s *serviceProvider) UsersClient(ctx context.Context) grpcclient.UsersClient {
+	if s.usersClient == nil {
+		conn := s.usersConnOrPanic(ctx)
+		s.usersClient = usersclient.NewClient(
+			userv1.NewUserV1Client(conn),
+		)
+	}
+
+	return s.usersClient
 }
 
 func (s *serviceProvider) MetadataClient(ctx context.Context) grpcclient.MetadataClient {
@@ -77,6 +107,12 @@ func (s *serviceProvider) StorageClient(ctx context.Context) grpcclient.StorageC
 	}
 
 	return s.storageClient
+}
+
+func (s *serviceProvider) AuthService(ctx context.Context) service.AuthService {
+	_ = s.AuthClient(ctx)
+	_ = s.UsersClient(ctx)
+	return nil
 }
 
 func (s *serviceProvider) GatewayService(ctx context.Context) service.GatewayService {
@@ -105,10 +141,18 @@ func (s *serviceProvider) HTTPHandler(ctx context.Context) *httpgateway.Handler 
 
 func (s *serviceProvider) TokenVerifier() tokens.TokenVerifier {
 	if s.tokenVerifier == nil {
-		s.tokenVerifier = jwtkit.NewJWTVerifier(config.NewJWTVerifierConfig(config.AppConfig().JWT))
+		s.tokenVerifier = jwtkit.NewJWTVerifier(config.AppConfig().JWT)
 	}
 
 	return s.tokenVerifier
+}
+
+func (s *serviceProvider) authConnOrPanic(ctx context.Context) *grpc.ClientConn {
+	if s.authConn == nil {
+		s.authConn = s.mustDial(ctx, "auth", config.AppConfig().Auth.Address())
+	}
+
+	return s.authConn
 }
 
 func (s *serviceProvider) authzConnOrPanic(ctx context.Context) *grpc.ClientConn {
@@ -117,6 +161,14 @@ func (s *serviceProvider) authzConnOrPanic(ctx context.Context) *grpc.ClientConn
 	}
 
 	return s.authzConn
+}
+
+func (s *serviceProvider) usersConnOrPanic(ctx context.Context) *grpc.ClientConn {
+	if s.usersConn == nil {
+		s.usersConn = s.mustDial(ctx, "users", config.AppConfig().Users.Address())
+	}
+
+	return s.usersConn
 }
 
 func (s *serviceProvider) metadataConnOrPanic(ctx context.Context) *grpc.ClientConn {

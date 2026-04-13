@@ -4,15 +4,29 @@ import (
 	"context"
 	"io"
 
+	authv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
+	userv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+type AuthClient interface {
+	Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.LoginResponse, error)
+	GetRefreshToken(ctx context.Context, req *authv1.GetRefreshTokenRequest) (*authv1.GetRefreshTokenResponse, error)
+	GetAccessToken(ctx context.Context, req *authv1.GetAccessTokenRequest) (*authv1.GetAccessTokenResponse, error)
+	ValidateToken(ctx context.Context, req *emptypb.Empty) (*emptypb.Empty, error)
+}
 
 type AuthZClient interface {
 	Check(ctx context.Context, req *authzv1.CheckRequest) (*authzv1.CheckResponse, error)
 	WriteTuple(ctx context.Context, req *authzv1.WriteTupleRequest) (*authzv1.WriteTupleResponse, error)
 	HealthCheck(ctx context.Context, req *authzv1.HealthCheckRequest) (*authzv1.HealthCheckResponse, error)
+}
+
+type UsersClient interface {
+	ValidateCredentials(ctx context.Context, req *userv1.ValidateCredentialsRequest) (*userv1.ValidateCredentialsResponse, error)
 }
 
 type MetadataClient interface {

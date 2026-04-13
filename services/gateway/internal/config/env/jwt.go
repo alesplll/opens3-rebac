@@ -3,7 +3,8 @@ package env
 import "github.com/caarlos0/env/v11"
 
 type jwtEnvConfig struct {
-	AccessSecret string `env:"JWT_SECRET,required"`
+	AccessSecret  string `env:"JWT_SECRET,required"`
+	RefreshSecret string `env:"JWT_REFRESH_SECRET" envDefault:""`
 }
 
 type jwtConfig struct {
@@ -20,5 +21,13 @@ func NewJWTConfig() (*jwtConfig, error) {
 }
 
 func (c *jwtConfig) AccessTokenSecretKey() string {
+	return c.raw.AccessSecret
+}
+
+func (c *jwtConfig) RefreshTokenSecretKey() string {
+	if c.raw.RefreshSecret != "" {
+		return c.raw.RefreshSecret
+	}
+
 	return c.raw.AccessSecret
 }

@@ -5,6 +5,31 @@ import (
 	"time"
 )
 
+type LoginRequest struct {
+	Email    string
+	Password string
+}
+
+type LoginResponse struct {
+	RefreshToken string
+}
+
+type RefreshAccessTokenRequest struct {
+	RefreshToken string
+}
+
+type RefreshAccessTokenResponse struct {
+	AccessToken string
+}
+
+type RefreshRefreshTokenRequest struct {
+	RefreshToken string
+}
+
+type RefreshRefreshTokenResponse struct {
+	RefreshToken string
+}
+
 type CreateBucketRequest struct {
 	UserID string
 	Bucket string
@@ -98,11 +123,11 @@ type DeleteObjectRequest struct {
 }
 
 type ListObjectsRequest struct {
-	UserID             string
-	Bucket             string
-	Prefix             string
-	ContinuationToken  string
-	MaxKeys            int32
+	UserID            string
+	Bucket            string
+	Prefix            string
+	ContinuationToken string
+	MaxKeys           int32
 }
 
 type ObjectInfo struct {

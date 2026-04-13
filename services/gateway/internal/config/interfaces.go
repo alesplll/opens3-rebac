@@ -47,6 +47,15 @@ type GRPCClientConfig interface {
 	StreamTimeout() time.Duration
 }
 
+type AuthClientConfig interface {
+	GRPCClientConfig
+}
+
+type UsersClientConfig interface {
+	GRPCClientConfig
+}
+
 type JWTConfig interface {
 	AccessTokenSecretKey() string
+	RefreshTokenSecretKey() string
 }

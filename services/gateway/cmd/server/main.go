@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/app"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
@@ -14,7 +13,7 @@ func main() {
 
 	a, err := app.NewApp(appCtx)
 	if err != nil {
-		panic(fmt.Sprintf("failed to init app with error: %v", err))
+		logger.Fatal(appCtx, "failed to init app", zap.Error(err))
 	}
 
 	if err := a.Run(); err != nil {

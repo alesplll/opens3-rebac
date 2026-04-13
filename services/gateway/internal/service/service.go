@@ -2,6 +2,12 @@ package service
 
 import "context"
 
+type AuthService interface {
+	Login(ctx context.Context, req LoginRequest) (*LoginResponse, error)
+	RefreshAccessToken(ctx context.Context, req RefreshAccessTokenRequest) (*RefreshAccessTokenResponse, error)
+	RefreshRefreshToken(ctx context.Context, req RefreshRefreshTokenRequest) (*RefreshRefreshTokenResponse, error)
+}
+
 type GatewayService interface {
 	CreateBucket(ctx context.Context, req CreateBucketRequest) (*CreateBucketResponse, error)
 	DeleteBucket(ctx context.Context, req DeleteBucketRequest) error

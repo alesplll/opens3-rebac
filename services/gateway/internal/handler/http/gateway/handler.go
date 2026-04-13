@@ -1,39 +1,45 @@
 package gateway
 
 import (
-	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	domainerrors "github.com/alesplll/opens3-rebac/services/gateway/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
+	domainerrors "github.com/alesplll/opens3-rebac/services/gateway/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tokens"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
 )
 
 type Handler struct {
-	service       service.GatewayService
-	maxUploadSize int64
-	verifier      tokens.TokenVerifier
-	router        chi.Router
+	service        service.GatewayService
+	maxUploadSize  int64
+	maxPartSize    int64
+	throttleLimit  int64
+	throttlePeriod time.Duration
+	verifier       tokens.TokenVerifier
+	router         chi.Router
 }
 
 func NewHandler(service service.GatewayService, maxUploadSize int64, verifier tokens.TokenVerifier) *Handler {
+	rateLimiterCfg := config.AppConfig().RateLimiter
 	h := &Handler{
-		service:       service,
-		maxUploadSize: maxUploadSize,
-		verifier:      verifier,
+		service:        service,
+		maxUploadSize:  maxUploadSize,
+		maxPartSize:    maxUploadSize,
+		throttleLimit:  rateLimiterCfg.Limit(),
+		throttlePeriod: rateLimiterCfg.Period(),
+		verifier:       verifier,
 	}
 	h.router = h.newRouter()
 	return h
@@ -48,7 +54,7 @@ func (h *Handler) newRouter() chi.Router {
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Throttle(int(config.AppConfig().RateLimiter.Limit())))
+	r.Use(h.rateLimitMiddleware)
 	r.Use(h.requestLoggerMiddleware)
 	r.Get("/health", h.health)
 	r.Get("/ready", h.ready)
@@ -180,6 +186,11 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.ContentLength < 0 {
+		h.writeError(w, r, fmt.Errorf("%w: content length is required", domainerrors.ErrInvalidRequest))
+		return
+	}
+
 	body := http.MaxBytesReader(w, r.Body, h.maxUploadSize)
 	defer body.Close()
 
@@ -223,14 +234,13 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request) {
 		objectRange = parsedRange
 	}
 
-	buffer := bytes.NewBuffer(nil)
 	resp, err := h.service.GetObject(r.Context(), service.GetObjectRequest{
 		UserID:    userID,
 		Bucket:    chi.URLParam(r, "bucket"),
 		Key:       objectKey(r),
 		VersionID: r.URL.Query().Get("versionId"),
 		Range:     objectRange,
-		Writer:    buffer,
+		Writer:    w,
 	})
 	if err != nil {
 		h.writeError(w, r, err)
@@ -250,7 +260,6 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusPartialContent
 	}
 	w.WriteHeader(statusCode)
-	_, _ = io.Copy(w, buffer)
 }
 
 func (h *Handler) headObject(w http.ResponseWriter, r *http.Request) {
@@ -400,10 +409,13 @@ func (h *Handler) uploadPart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	partNumber, err := strconv.Atoi(r.URL.Query().Get("partNumber"))
-	if err != nil {
+	if err != nil || partNumber < 1 {
 		h.writeError(w, r, fmt.Errorf("%w: invalid partNumber", domainerrors.ErrInvalidRequest))
 		return
 	}
+
+	body := http.MaxBytesReader(w, r.Body, h.maxPartSize)
+	defer body.Close()
 
 	resp, err := h.service.UploadPart(r.Context(), service.UploadPartRequest{
 		UserID:     userID,
@@ -411,7 +423,7 @@ func (h *Handler) uploadPart(w http.ResponseWriter, r *http.Request) {
 		Key:        objectKey(r),
 		UploadID:   r.URL.Query().Get("uploadId"),
 		PartNumber: int32(partNumber),
-		Body:       r.Body,
+		Body:       body,
 	})
 	if err != nil {
 		h.writeError(w, r, err)
@@ -568,6 +580,40 @@ func (h *Handler) requestLoggerMiddleware(next http.Handler) http.Handler {
 			zap.Duration("duration", time.Since(startedAt)),
 			zap.String("request_id", requestIDFromRequest(r)),
 		)
+	})
+}
+
+func (h *Handler) rateLimitMiddleware(next http.Handler) http.Handler {
+	if h.throttleLimit < 1 || h.throttlePeriod <= 0 {
+		return next
+	}
+
+	sem := make(chan struct{}, h.throttleLimit)
+	var once sync.Once
+	startRefill := func() {
+		go func() {
+			ticker := time.NewTicker(h.throttlePeriod)
+			defer ticker.Stop()
+			for range ticker.C {
+				for {
+					select {
+					case <-sem:
+					default:
+						break
+					}
+				}
+			}
+		}()
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(startRefill)
+		select {
+		case sem <- struct{}{}:
+			next.ServeHTTP(w, r)
+		default:
+			h.writeError(w, r, fmt.Errorf("%w: rate limit exceeded", domainerrors.ErrServiceUnavailable))
+		}
 	})
 }
 
