@@ -24,6 +24,12 @@ type stubGatewayService struct {
 	readyFn      func(ctx context.Context) error
 }
 
+type stubAuthService struct {
+	loginFn               func(ctx context.Context, req service.LoginRequest) (*service.LoginResponse, error)
+	refreshAccessTokenFn  func(ctx context.Context, req service.RefreshAccessTokenRequest) (*service.RefreshAccessTokenResponse, error)
+	refreshRefreshTokenFn func(ctx context.Context, req service.RefreshRefreshTokenRequest) (*service.RefreshRefreshTokenResponse, error)
+}
+
 func (s *stubGatewayService) CreateBucket(context.Context, service.CreateBucketRequest) (*service.CreateBucketResponse, error) {
 	panic("unexpected call")
 }
@@ -92,6 +98,27 @@ func (s *stubGatewayService) Ready(ctx context.Context) error {
 	return s.readyFn(ctx)
 }
 
+func (s *stubAuthService) Login(ctx context.Context, req service.LoginRequest) (*service.LoginResponse, error) {
+	if s.loginFn == nil {
+		panic("unexpected call")
+	}
+	return s.loginFn(ctx, req)
+}
+
+func (s *stubAuthService) RefreshAccessToken(ctx context.Context, req service.RefreshAccessTokenRequest) (*service.RefreshAccessTokenResponse, error) {
+	if s.refreshAccessTokenFn == nil {
+		panic("unexpected call")
+	}
+	return s.refreshAccessTokenFn(ctx, req)
+}
+
+func (s *stubAuthService) RefreshRefreshToken(ctx context.Context, req service.RefreshRefreshTokenRequest) (*service.RefreshRefreshTokenResponse, error) {
+	if s.refreshRefreshTokenFn == nil {
+		panic("unexpected call")
+	}
+	return s.refreshRefreshTokenFn(ctx, req)
+}
+
 type stubTokenVerifier struct {
 	claims *tokens.UserClaims
 	err    error
@@ -107,7 +134,7 @@ func (s *stubTokenVerifier) VerifyRefreshToken(context.Context, string) (*tokens
 
 func TestPutObjectRejectsMissingContentLength(t *testing.T) {
 	loadTestConfig(t)
-	h := NewHandler(&stubGatewayService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
+	h := NewHandler(&stubGatewayService{}, &stubAuthService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
 
 	req := httptest.NewRequest(http.MethodPut, "/bucket/key", strings.NewReader("payload"))
 	req.Header.Set("Authorization", "Bearer token")
@@ -123,7 +150,7 @@ func TestPutObjectRejectsMissingContentLength(t *testing.T) {
 
 func TestUploadPartRejectsInvalidPartNumber(t *testing.T) {
 	loadTestConfig(t)
-	h := NewHandler(&stubGatewayService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
+	h := NewHandler(&stubGatewayService{}, &stubAuthService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
 
 	req := httptest.NewRequest(http.MethodPut, "/bucket/key?uploadId=u1&partNumber=0", strings.NewReader("payload"))
 	req.Header.Set("Authorization", "Bearer token")
@@ -152,7 +179,7 @@ func TestGetObjectStreamsDirectlyToResponseWriter(t *testing.T) {
 	}
 
 	loadTestConfig(t)
-	h := NewHandler(serviceStub, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
+	h := NewHandler(serviceStub, &stubAuthService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
 
 	req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -170,7 +197,7 @@ func TestReadyReturnsMappedError(t *testing.T) {
 	loadTestConfig(t)
 	h := NewHandler(&stubGatewayService{readyFn: func(context.Context) error {
 		return domainerrors.ErrServiceUnavailable
-	}}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
+	}}, &stubAuthService{}, 1024, &stubTokenVerifier{claims: &tokens.UserClaims{UserId: "user-1"}})
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rr := httptest.NewRecorder()
@@ -179,6 +206,58 @@ func TestReadyReturnsMappedError(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, rr.Code)
 	require.Contains(t, rr.Body.String(), "ServiceUnavailable")
+}
+
+func TestLoginEndpoint(t *testing.T) {
+	loadTestConfig(t)
+	h := NewHandler(&stubGatewayService{}, &stubAuthService{loginFn: func(ctx context.Context, req service.LoginRequest) (*service.LoginResponse, error) {
+		require.Equal(t, "user@example.com", req.Email)
+		require.Equal(t, "secret", req.Password)
+		return &service.LoginResponse{RefreshToken: "refresh-token"}, nil
+	}}, 1024, &stubTokenVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"user@example.com","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.login(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"refresh_token":"refresh-token"}`, rr.Body.String())
+}
+
+func TestRefreshAccessTokenEndpoint(t *testing.T) {
+	loadTestConfig(t)
+	h := NewHandler(&stubGatewayService{}, &stubAuthService{refreshAccessTokenFn: func(ctx context.Context, req service.RefreshAccessTokenRequest) (*service.RefreshAccessTokenResponse, error) {
+		require.Equal(t, "refresh-token", req.RefreshToken)
+		return &service.RefreshAccessTokenResponse{AccessToken: "access-token"}, nil
+	}}, 1024, &stubTokenVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh/access", strings.NewReader(`{"refresh_token":"refresh-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.refreshAccessToken(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"access_token":"access-token"}`, rr.Body.String())
+}
+
+func TestRefreshRefreshTokenEndpoint(t *testing.T) {
+	loadTestConfig(t)
+	h := NewHandler(&stubGatewayService{}, &stubAuthService{refreshRefreshTokenFn: func(ctx context.Context, req service.RefreshRefreshTokenRequest) (*service.RefreshRefreshTokenResponse, error) {
+		require.Equal(t, "refresh-token", req.RefreshToken)
+		return &service.RefreshRefreshTokenResponse{RefreshToken: "new-refresh-token"}, nil
+	}}, 1024, &stubTokenVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh/refresh", strings.NewReader(`{"refresh_token":"refresh-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.refreshRefreshToken(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"refresh_token":"new-refresh-token"}`, rr.Body.String())
 }
 
 func loadTestConfig(t *testing.T) {

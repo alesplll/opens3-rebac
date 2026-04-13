@@ -2,6 +2,27 @@ package gateway
 
 import "encoding/xml"
 
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type refreshAccessTokenResponse struct {
+	AccessToken string `json:"access_token"`
+}
+
+type refreshRefreshTokenResponse struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 type listAllMyBucketsResult struct {
 	XMLName xml.Name         `xml:"ListAllMyBucketsResult"`
 	Buckets []bucketListItem `xml:"Buckets>Bucket"`
@@ -38,7 +59,7 @@ type initiateMultipartUploadResult struct {
 }
 
 type completeMultipartUploadXML struct {
-	XMLName xml.Name                  `xml:"CompleteMultipartUpload"`
+	XMLName xml.Name                   `xml:"CompleteMultipartUpload"`
 	Parts   []completeMultipartPartXML `xml:"Part"`
 }
 

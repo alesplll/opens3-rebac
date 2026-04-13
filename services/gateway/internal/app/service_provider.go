@@ -12,6 +12,7 @@ import (
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 	httpgateway "github.com/alesplll/opens3-rebac/services/gateway/internal/handler/http/gateway"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
+	authservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/auth"
 	gatewayservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/gateway"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/closer"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
@@ -110,9 +111,10 @@ func (s *serviceProvider) StorageClient(ctx context.Context) grpcclient.StorageC
 }
 
 func (s *serviceProvider) AuthService(ctx context.Context) service.AuthService {
-	_ = s.AuthClient(ctx)
-	_ = s.UsersClient(ctx)
-	return nil
+	return authservice.NewService(
+		s.AuthClient(ctx),
+		s.UsersClient(ctx),
+	)
 }
 
 func (s *serviceProvider) GatewayService(ctx context.Context) service.GatewayService {
@@ -131,6 +133,7 @@ func (s *serviceProvider) HTTPHandler(ctx context.Context) *httpgateway.Handler 
 	if s.httpHandler == nil {
 		s.httpHandler = httpgateway.NewHandler(
 			s.GatewayService(ctx),
+			s.AuthService(ctx),
 			config.AppConfig().HTTP.MaxUploadSizeBytes(),
 			s.TokenVerifier(),
 		)

@@ -23,6 +23,7 @@ import (
 
 type Handler struct {
 	service        service.GatewayService
+	authService    service.AuthService
 	maxUploadSize  int64
 	maxPartSize    int64
 	throttleLimit  int64
@@ -31,10 +32,11 @@ type Handler struct {
 	router         chi.Router
 }
 
-func NewHandler(service service.GatewayService, maxUploadSize int64, verifier tokens.TokenVerifier) *Handler {
+func NewHandler(service service.GatewayService, authService service.AuthService, maxUploadSize int64, verifier tokens.TokenVerifier) *Handler {
 	rateLimiterCfg := config.AppConfig().RateLimiter
 	h := &Handler{
 		service:        service,
+		authService:    authService,
 		maxUploadSize:  maxUploadSize,
 		maxPartSize:    maxUploadSize,
 		throttleLimit:  rateLimiterCfg.Limit(),
@@ -58,6 +60,9 @@ func (h *Handler) newRouter() chi.Router {
 	r.Use(h.requestLoggerMiddleware)
 	r.Get("/health", h.health)
 	r.Get("/ready", h.ready)
+	r.Post("/auth/login", h.login)
+	r.Post("/auth/refresh/access", h.refreshAccessToken)
+	r.Post("/auth/refresh/refresh", h.refreshRefreshToken)
 	r.Route("/", func(r chi.Router) {
 		r.Get("/", h.listBuckets)
 		r.Route("/{bucket}", func(r chi.Router) {
@@ -491,6 +496,57 @@ func (h *Handler) abortMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	var payload loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		h.writeError(w, r, fmt.Errorf("%w: invalid login payload", domainerrors.ErrInvalidRequest))
+		return
+	}
+
+	resp, err := h.authService.Login(r.Context(), service.LoginRequest{
+		Email:    payload.Email,
+		Password: payload.Password,
+	})
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, loginResponse{RefreshToken: resp.RefreshToken})
+}
+
+func (h *Handler) refreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	var payload refreshTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		h.writeError(w, r, fmt.Errorf("%w: invalid refresh payload", domainerrors.ErrInvalidRequest))
+		return
+	}
+
+	resp, err := h.authService.RefreshAccessToken(r.Context(), service.RefreshAccessTokenRequest{RefreshToken: payload.RefreshToken})
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, refreshAccessTokenResponse{AccessToken: resp.AccessToken})
+}
+
+func (h *Handler) refreshRefreshToken(w http.ResponseWriter, r *http.Request) {
+	var payload refreshTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		h.writeError(w, r, fmt.Errorf("%w: invalid refresh payload", domainerrors.ErrInvalidRequest))
+		return
+	}
+
+	resp, err := h.authService.RefreshRefreshToken(r.Context(), service.RefreshRefreshTokenRequest{RefreshToken: payload.RefreshToken})
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, refreshRefreshTokenResponse{RefreshToken: resp.RefreshToken})
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
