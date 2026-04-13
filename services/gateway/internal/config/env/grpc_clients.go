@@ -1,7 +1,9 @@
 package env
 
 import (
+	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -13,7 +15,8 @@ type grpcClientsEnvConfig struct {
 	UsersAddr            string        `env:"USERS_GRPC_ADDR" envDefault:"users:50051"`
 	MetadataAddr         string        `env:"METADATA_GRPC_ADDR" envDefault:"metadata:50052"`
 	StorageAddr          string        `env:"STORAGE_GRPC_ADDR" envDefault:"storage:50053"`
-	GRPCTimeout          time.Duration `env:"GRPC_TIMEOUT_MS" envDefault:"5s"`
+	GRPCTimeout          time.Duration `env:"GRPC_TIMEOUT" envDefault:"5s"`
+	LegacyGRPCTimeoutMS  string        `env:"GRPC_TIMEOUT_MS"`
 	StorageStreamTimeout time.Duration `env:"STORAGE_STREAM_TIMEOUT" envDefault:"30m"`
 }
 
@@ -86,6 +89,14 @@ func newGRPCClientsEnvConfig() (grpcClientsEnvConfig, error) {
 	var raw grpcClientsEnvConfig
 	if err := env.Parse(&raw); err != nil {
 		return grpcClientsEnvConfig{}, err
+	}
+
+	if raw.LegacyGRPCTimeoutMS != "" {
+		timeoutMS, err := strconv.Atoi(raw.LegacyGRPCTimeoutMS)
+		if err != nil {
+			return grpcClientsEnvConfig{}, fmt.Errorf("parse GRPC_TIMEOUT_MS as milliseconds: %w", err)
+		}
+		raw.GRPCTimeout = time.Duration(timeoutMS) * time.Millisecond
 	}
 
 	return raw, nil
