@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use fred::{interfaces::ScanInterface, prelude::*};
+use fred::prelude::*;
 use tracing::{debug, instrument, warn};
 
 use crate::domain::{QuotaEntry, QuotaError, UsageEntry};
@@ -154,16 +154,15 @@ impl QuotaRepository for RedisRepository {
 
 async fn scan_keys(pool: &RedisPool, pattern: &str) -> Result<Vec<String>, QuotaError> {
     use futures::StreamExt;
-    // Use UFCS to avoid ambiguity with StreamExt::scan combinator
-    let mut scanner = ScanInterface::scan(pool, pattern, Some(100_u32), None);
+    // scan is on RedisClient, not RedisPool — get one client via round-robin next()
+    let client = pool.next();
+    let mut stream = client.scan(pattern, Some(100_u32), None);
     let mut keys = Vec::new();
-    while let Some(result) = scanner.next().await {
+    while let Some(result) = stream.next().await {
         let page: fred::types::ScanResult = result.map_err(QuotaError::Redis)?;
         if let Some(page_keys) = page.results() {
             for key in page_keys {
-                if let Some(s) = key.as_str() {
-                    keys.push(s.to_string());
-                }
+                keys.push(key.as_str_lossy().into_owned());
             }
         }
     }
