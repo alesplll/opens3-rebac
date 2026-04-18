@@ -11,9 +11,6 @@ pub enum QuotaError {
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
 
-    #[error("kafka error: {0}")]
-    Kafka(String),
-
     #[error("internal error: {0}")]
     Internal(String),
 }

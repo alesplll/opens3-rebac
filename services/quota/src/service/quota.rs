@@ -159,7 +159,7 @@ impl<R: QuotaRepository> QuotaService<R> {
         Ok(limit)
     }
 
-    // ── Kafka event handlers ──────────────────────────────────────────────────
+    // ── External event handlers (called by Gateway or admin tooling) ─────────
 
     pub fn on_user_deleted(&self, subject_id: &str) {
         self.cache.delete_subject(subject_id);
