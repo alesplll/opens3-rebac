@@ -2,7 +2,7 @@
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 # rust:alpine → musl target → 100% static binary, no libc dependency
-FROM rust:1.82-alpine AS builder
+FROM rust:1.95-alpine AS builder
 
 RUN apk add --no-cache musl-dev protobuf-dev
 
