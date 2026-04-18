@@ -128,6 +128,7 @@ impl MemoryCache {
         self.limits.insert(subject_id.to_string(), quota);
     }
 
+    #[allow(dead_code)] // Phase 2: wired up when user-deletion events arrive
     pub fn delete_subject(&self, subject_id: &str) {
         self.usage.remove(subject_id);
         self.limits.remove(subject_id);
@@ -140,10 +141,6 @@ impl MemoryCache {
         self.usage.iter().map(|e| (e.key().clone(), *e.value())).collect()
     }
 
-    /// Collect all limit entries for the periodic Redis flush.
-    pub fn snapshot_limits(&self) -> Vec<(String, QuotaEntry)> {
-        self.limits.iter().map(|e| (e.key().clone(), *e.value())).collect()
-    }
 }
 
 impl Default for MemoryCache {

@@ -159,14 +159,11 @@ impl<R: QuotaRepository> QuotaService<R> {
         Ok(limit)
     }
 
-    // ── External event handlers (called by Gateway or admin tooling) ─────────
+    // ── External event handlers (Phase 2) ────────────────────────────────────
 
+    #[allow(dead_code)] // Phase 2: called when user-deletion event arrives
     pub fn on_user_deleted(&self, subject_id: &str) {
         self.cache.delete_subject(subject_id);
-    }
-
-    pub fn on_limits_changed(&self, subject_id: &str, quota: QuotaEntry) {
-        self.cache.set_limit(subject_id, quota);
     }
 
     // ── Health ────────────────────────────────────────────────────────────────

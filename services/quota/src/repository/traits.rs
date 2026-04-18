@@ -22,7 +22,8 @@ pub trait QuotaRepository: Send + Sync + 'static {
     /// Get a single quota limit (fallback when memory cache misses after restart).
     async fn get_limit(&self, subject_id: &str) -> Result<Option<QuotaEntry>, QuotaError>;
 
-    /// Delete all data for a subject (e.g. when a user is removed).
+    /// Delete all data for a subject (e.g. when a user is removed). Phase 2.
+    #[allow(dead_code)]
     async fn delete_subject(&self, subject_id: &str) -> Result<(), QuotaError>;
 
     /// Check Redis connectivity (for HealthCheck RPC).
