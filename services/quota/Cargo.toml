@@ -31,9 +31,6 @@ dashmap = "6"
 # Redis async client with connection pooling
 fred = { version = "9", features = ["pool", "reconnect-on-auth-error"] }
 
-# Kafka consumer
-rdkafka = { version = "0.36", features = ["cmake-build", "sasl"] }
-
 # Observability
 tracing = "0.1"
 opentelemetry = "0.27"
