@@ -44,28 +44,32 @@ impl<R: QuotaRepository> GrpcHandler<R> {
 
 #[tonic::async_trait]
 impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
-    #[instrument(skip(self), name = "grpc.check_quota")]
+    #[instrument(
+        skip(self, request), name = "grpc.check_quota",
+        fields(subject_id = tracing::field::Empty, allowed = tracing::field::Empty)
+    )]
     async fn check_quota(
         &self,
         request: Request<CheckQuotaRequest>,
     ) -> Result<Response<CheckQuotaResponse>, Status> {
         let req = request.into_inner();
-        let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
+        let span = tracing::Span::current();
+        span.record("subject_id", req.subject_id.as_str());
 
-        let bucket_id = if req.bucket_id.is_empty() {
-            None
-        } else {
-            Some(req.bucket_id.as_str())
-        };
+        let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
+        let bucket_id = if req.bucket_id.is_empty() { None } else { Some(req.bucket_id.as_str()) };
 
         match self.service.check_quota(&req.subject_id, bucket_id, &delta) {
-            Ok(CheckResult::Allowed) => Ok(Response::new(CheckQuotaResponse {
-                allowed: true,
-                code: DenyCode::Unspecified.into(),
-                reason: String::new(),
-            })),
-
+            Ok(CheckResult::Allowed) => {
+                span.record("allowed", true);
+                Ok(Response::new(CheckQuotaResponse {
+                    allowed: true,
+                    code: DenyCode::Unspecified.into(),
+                    reason: String::new(),
+                }))
+            }
             Ok(CheckResult::Denied(reason)) => {
+                span.record("allowed", false);
                 let (code, reason_str) = deny_reason_to_proto(&reason);
                 Ok(Response::new(CheckQuotaResponse {
                     allowed: false,
@@ -73,27 +77,24 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
                     reason: reason_str,
                 }))
             }
-
-            Err(QuotaError::InvalidArgument(msg)) => {
-                Err(Status::invalid_argument(msg))
-            }
+            Err(QuotaError::InvalidArgument(msg)) => Err(Status::invalid_argument(msg)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
 
-    #[instrument(skip(self), name = "grpc.update_usage")]
+    #[instrument(
+        skip(self, request), name = "grpc.update_usage",
+        fields(subject_id = tracing::field::Empty)
+    )]
     async fn update_usage(
         &self,
         request: Request<UpdateUsageRequest>,
     ) -> Result<Response<UpdateUsageResponse>, Status> {
         let req = request.into_inner();
-        let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
+        tracing::Span::current().record("subject_id", req.subject_id.as_str());
 
-        let bucket_id = if req.bucket_id.is_empty() {
-            None
-        } else {
-            Some(req.bucket_id.as_str())
-        };
+        let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
+        let bucket_id = if req.bucket_id.is_empty() { None } else { Some(req.bucket_id.as_str()) };
 
         self.service
             .update_usage(&req.subject_id, bucket_id, &delta)
@@ -105,12 +106,16 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         Ok(Response::new(UpdateUsageResponse {}))
     }
 
-    #[instrument(skip(self), name = "grpc.get_usage")]
+    #[instrument(
+        skip(self, request), name = "grpc.get_usage",
+        fields(subject_id = tracing::field::Empty)
+    )]
     async fn get_usage(
         &self,
         request: Request<GetUsageRequest>,
     ) -> Result<Response<GetUsageResponse>, Status> {
         let req = request.into_inner();
+        tracing::Span::current().record("subject_id", req.subject_id.as_str());
 
         let usage = self
             .service
@@ -126,12 +131,16 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         }))
     }
 
-    #[instrument(skip(self), name = "grpc.set_quota")]
+    #[instrument(
+        skip(self, request), name = "grpc.set_quota",
+        fields(subject_id = tracing::field::Empty)
+    )]
     async fn set_quota(
         &self,
         request: Request<SetQuotaRequest>,
     ) -> Result<Response<SetQuotaResponse>, Status> {
         let req = request.into_inner();
+        tracing::Span::current().record("subject_id", req.subject_id.as_str());
 
         let quota = QuotaEntry {
             bytes_limit: req.bytes_limit,
@@ -150,12 +159,16 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         Ok(Response::new(SetQuotaResponse { success: true }))
     }
 
-    #[instrument(skip(self), name = "grpc.get_quota")]
+    #[instrument(
+        skip(self, request), name = "grpc.get_quota",
+        fields(subject_id = tracing::field::Empty)
+    )]
     async fn get_quota(
         &self,
         request: Request<GetQuotaRequest>,
     ) -> Result<Response<GetQuotaResponse>, Status> {
         let req = request.into_inner();
+        tracing::Span::current().record("subject_id", req.subject_id.as_str());
 
         match self.service.get_quota(&req.subject_id).await {
             Ok(Some(quota)) => Ok(Response::new(GetQuotaResponse {

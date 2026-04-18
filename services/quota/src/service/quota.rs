@@ -36,7 +36,7 @@ impl<R: QuotaRepository> QuotaService<R> {
     ///   1. Reserve user quota
     ///   2. Reserve bucket quota (if bucket_id provided)
     ///   3. On bucket denial → rollback user reservation
-    #[instrument(skip(self), name = "service.check_quota")]
+    #[instrument(skip(self, delta), name = "service.check_quota", fields(subject = %subject_id, bucket = ?bucket_id))]
     pub fn check_quota(
         &self,
         subject_id: &str,
@@ -97,7 +97,7 @@ impl<R: QuotaRepository> QuotaService<R> {
 
     /// Fire-and-forget usage update. Called after a successful S3 operation.
     /// Delta can be negative (object/bucket deletion).
-    #[instrument(skip(self), name = "service.update_usage")]
+    #[instrument(skip(self, delta), name = "service.update_usage", fields(subject = %subject_id, bucket = ?bucket_id))]
     pub fn update_usage(
         &self,
         subject_id: &str,
@@ -129,7 +129,7 @@ impl<R: QuotaRepository> QuotaService<R> {
 
     /// Set quota limits for a subject. Writes to cache immediately;
     /// Redis flush happens in the background via the periodic flush task.
-    #[instrument(skip(self), name = "service.set_quota")]
+    #[instrument(skip(self, quota), name = "service.set_quota", fields(subject = %subject_id))]
     pub async fn set_quota(
         &self,
         subject_id: &str,
