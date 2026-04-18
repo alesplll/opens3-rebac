@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -86,10 +85,6 @@ func (s *gatewayService) DeleteBucket(ctx context.Context, req service.DeleteBuc
 }
 
 func (s *gatewayService) ListBuckets(ctx context.Context, req service.ListBucketsRequest) (*service.ListBucketsResponse, error) {
-	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_READ, userResource(req.UserID)); err != nil {
-		return nil, err
-	}
-
 	resp, err := s.metadataClient.ListBuckets(ctx, &metadatav1.ListBucketsRequest{OwnerId: req.UserID})
 	if err != nil {
 		return nil, mapGRPCError(err)
@@ -138,9 +133,6 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 		ContentType: req.ContentType,
 	})
 	if err != nil {
-		if isMetadataStubUnimplemented(err) {
-			return &service.PutObjectResponse{ETag: quoteETag(storeResp.GetChecksumMd5())}, nil
-		}
 		return nil, mapObjectGRPCError(err)
 	}
 
@@ -230,11 +222,18 @@ func (s *gatewayService) DeleteObject(ctx context.Context, req service.DeleteObj
 		return err
 	}
 
-	_, err := s.metadataClient.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
+	resp, err := s.metadataClient.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
 		BucketName: req.Bucket,
 		Key:        req.Key,
 	})
 	if err != nil {
+		return mapGRPCError(err)
+	}
+	if strings.TrimSpace(resp.GetBlobId()) == "" {
+		return nil
+	}
+
+	if _, err := s.storageClient.DeleteObject(ctx, &storagev1.DeleteObjectRequest{BlobId: resp.GetBlobId()}); err != nil {
 		return mapGRPCError(err)
 	}
 
@@ -283,6 +282,9 @@ func (s *gatewayService) ListObjects(ctx context.Context, req service.ListObject
 func (s *gatewayService) CreateMultipartUpload(ctx context.Context, req service.CreateMultipartUploadRequest) (*service.CreateMultipartUploadResponse, error) {
 	if err := s.checkAccess(ctx, req.UserID, authzv1.Action_ACTION_CREATE, objectResource(req.Bucket, req.Key)); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(req.ContentType) == "" {
+		req.ContentType = "application/octet-stream"
 	}
 
 	resp, err := s.storageClient.InitiateMultipartUpload(ctx, &storagev1.InitiateMultipartUploadRequest{
@@ -397,9 +399,6 @@ func (s *gatewayService) CompleteMultipartUpload(ctx context.Context, req servic
 		Etag:       completeResp.GetChecksumMd5(),
 	})
 	if err != nil {
-		if isMetadataStubUnimplemented(err) {
-			return &service.CompleteMultipartUploadResponse{ETag: quoteETag(completeResp.GetChecksumMd5())}, nil
-		}
 		return nil, mapObjectGRPCError(err)
 	}
 
@@ -423,14 +422,28 @@ func (s *gatewayService) AbortMultipartUpload(ctx context.Context, req service.A
 }
 
 func (s *gatewayService) Ready(ctx context.Context) error {
-	if _, err := s.authzClient.HealthCheck(ctx, &authzv1.HealthCheckRequest{}); err != nil {
+	authzResp, err := s.authzClient.HealthCheck(ctx, &authzv1.HealthCheckRequest{})
+	if err != nil {
 		return mapGRPCError(err)
 	}
-	if _, err := s.metadataClient.HealthCheck(ctx, &metadatav1.HealthCheckRequest{}); err != nil {
+	if authzResp.GetStatus() != authzv1.HealthCheckResponse_SERVING {
+		return domainerrors.ErrServiceUnavailable
+	}
+
+	metadataResp, err := s.metadataClient.HealthCheck(ctx, &metadatav1.HealthCheckRequest{})
+	if err != nil {
 		return mapGRPCError(err)
 	}
-	if _, err := s.storageClient.HealthCheck(ctx, &storagev1.HealthCheckRequest{}); err != nil {
+	if metadataResp.GetStatus() != metadatav1.HealthCheckResponse_SERVING {
+		return domainerrors.ErrServiceUnavailable
+	}
+
+	storageResp, err := s.storageClient.HealthCheck(ctx, &storagev1.HealthCheckRequest{})
+	if err != nil {
 		return mapGRPCError(err)
+	}
+	if storageResp.GetStatus() != storagev1.HealthCheckResponse_SERVING {
+		return domainerrors.ErrServiceUnavailable
 	}
 
 	return nil
@@ -593,7 +606,7 @@ func mapGRPCError(err error, notFoundErr ...error) error {
 		return fmt.Errorf("%w: %s", domainerrors.ErrInvalidRequest, st.Message())
 	case codes.ResourceExhausted:
 		return domainerrors.ErrInsufficientSpace
-	case codes.Unavailable:
+	case codes.Unavailable, codes.Unimplemented:
 		return domainerrors.ErrServiceUnavailable
 	default:
 		return err
@@ -622,19 +635,6 @@ func (s *gatewayService) writeTupleWithRetry(ctx context.Context, req *authzv1.W
 	}
 
 	return err
-}
-
-func isMetadataStubUnimplemented(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	st, ok := status.FromError(err)
-	if !ok {
-		return false
-	}
-
-	return st.Code() == codes.Unimplemented || errors.Is(err, context.DeadlineExceeded)
 }
 
 func normalizeRange(total int64, requested *service.ByteRange) (int64, int64, error) {
@@ -668,10 +668,6 @@ func millisToTime(v int64) time.Time {
 }
 
 func subjectUser(userID string) string {
-	return "user:" + userID
-}
-
-func userResource(userID string) string {
 	return "user:" + userID
 }
 

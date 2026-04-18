@@ -252,12 +252,16 @@ services:
     networks:
       - opens3-network
     depends_on:
+      auth:
+        condition: service_started
       authz:
         condition: service_healthy
       metadata:
-        condition: service_healthy
+        condition: service_started
       storage:
         condition: service_healthy
+      users:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]

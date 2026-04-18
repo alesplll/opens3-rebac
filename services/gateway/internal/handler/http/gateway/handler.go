@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alesplll/opens3-rebac/services/gateway/internal/authentication"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 	domainerrors "github.com/alesplll/opens3-rebac/services/gateway/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
-	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tokens"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
@@ -28,11 +28,11 @@ type Handler struct {
 	maxPartSize    int64
 	throttleLimit  int64
 	throttlePeriod time.Duration
-	verifier       tokens.TokenVerifier
+	authenticator  authentication.Service
 	router         chi.Router
 }
 
-func NewHandler(service service.GatewayService, authService service.AuthService, maxUploadSize int64, verifier tokens.TokenVerifier) *Handler {
+func NewHandler(service service.GatewayService, authService service.AuthService, maxUploadSize int64, authenticator authentication.Service) *Handler {
 	rateLimiterCfg := config.AppConfig().RateLimiter
 	h := &Handler{
 		service:        service,
@@ -41,7 +41,7 @@ func NewHandler(service service.GatewayService, authService service.AuthService,
 		maxPartSize:    maxUploadSize,
 		throttleLimit:  rateLimiterCfg.Limit(),
 		throttlePeriod: rateLimiterCfg.Period(),
-		verifier:       verifier,
+		authenticator:  authenticator,
 	}
 	h.router = h.newRouter()
 	return h
@@ -569,7 +569,7 @@ func (h *Handler) extractBearerUserID(r *http.Request) (string, error) {
 		return "", domainerrors.ErrUnauthorized
 	}
 
-	claims, err := h.verifier.VerifyAccessToken(r.Context(), strings.TrimSpace(parts[1]))
+	claims, err := h.authenticator.ClaimsFromAccessToken(r.Context(), strings.TrimSpace(parts[1]))
 	if err != nil || claims == nil || strings.TrimSpace(claims.UserId) == "" {
 		return "", domainerrors.ErrUnauthorized
 	}

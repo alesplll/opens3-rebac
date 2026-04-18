@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/alesplll/opens3-rebac/services/gateway/internal/authentication"
 	grpcclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc"
 	authclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/auth"
 	authzclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/authz"
@@ -42,7 +43,9 @@ type serviceProvider struct {
 	metadataClient grpcclient.MetadataClient
 	storageClient  grpcclient.StorageClient
 	tokenVerifier  tokens.TokenVerifier
+	authenticator  authentication.Service
 
+	authService    service.AuthService
 	gatewayService service.GatewayService
 	httpHandler    *httpgateway.Handler
 }
@@ -53,7 +56,7 @@ func newServiceProvider() *serviceProvider {
 
 func (s *serviceProvider) AuthClient(ctx context.Context) grpcclient.AuthClient {
 	if s.authClient == nil {
-		conn := s.authConnOrPanic(ctx)
+		conn := s.authConnOrFatal(ctx)
 		s.authClient = authclient.NewClient(
 			authv1.NewAuthV1Client(conn),
 		)
@@ -64,10 +67,11 @@ func (s *serviceProvider) AuthClient(ctx context.Context) grpcclient.AuthClient 
 
 func (s *serviceProvider) AuthZClient(ctx context.Context) grpcclient.AuthZClient {
 	if s.authzClient == nil {
-		conn := s.authzConnOrPanic(ctx)
+		cfg := config.AppConfig()
+		conn := s.authzConnOrFatal(ctx)
 		s.authzClient = authzclient.NewClient(
 			authzv1.NewPermissionServiceClient(conn),
-			config.AppConfig().AuthZClient.Timeout(),
+			cfg.AuthZClient.Timeout(),
 		)
 	}
 
@@ -76,7 +80,7 @@ func (s *serviceProvider) AuthZClient(ctx context.Context) grpcclient.AuthZClien
 
 func (s *serviceProvider) UsersClient(ctx context.Context) grpcclient.UsersClient {
 	if s.usersClient == nil {
-		conn := s.usersConnOrPanic(ctx)
+		conn := s.usersConnOrFatal(ctx)
 		s.usersClient = usersclient.NewClient(
 			userv1.NewUserV1Client(conn),
 		)
@@ -87,10 +91,11 @@ func (s *serviceProvider) UsersClient(ctx context.Context) grpcclient.UsersClien
 
 func (s *serviceProvider) MetadataClient(ctx context.Context) grpcclient.MetadataClient {
 	if s.metadataClient == nil {
-		conn := s.metadataConnOrPanic(ctx)
+		cfg := config.AppConfig()
+		conn := s.metadataConnOrFatal(ctx)
 		s.metadataClient = metadataclient.NewClient(
 			metadatav1.NewMetadataServiceClient(conn),
-			config.AppConfig().Metadata.Timeout(),
+			cfg.Metadata.Timeout(),
 		)
 	}
 
@@ -99,11 +104,12 @@ func (s *serviceProvider) MetadataClient(ctx context.Context) grpcclient.Metadat
 
 func (s *serviceProvider) StorageClient(ctx context.Context) grpcclient.StorageClient {
 	if s.storageClient == nil {
-		conn := s.storageConnOrPanic(ctx)
+		cfg := config.AppConfig()
+		conn := s.storageConnOrFatal(ctx)
 		s.storageClient = storageclient.NewClient(
 			storagev1.NewDataStorageServiceClient(conn),
-			config.AppConfig().Storage.Timeout(),
-			config.AppConfig().Storage.StreamTimeout(),
+			cfg.Storage.Timeout(),
+			cfg.Storage.StreamTimeout(),
 		)
 	}
 
@@ -111,10 +117,14 @@ func (s *serviceProvider) StorageClient(ctx context.Context) grpcclient.StorageC
 }
 
 func (s *serviceProvider) AuthService(ctx context.Context) service.AuthService {
-	return authservice.NewService(
-		s.AuthClient(ctx),
-		s.UsersClient(ctx),
-	)
+	if s.authService == nil {
+		s.authService = authservice.NewService(
+			s.AuthClient(ctx),
+			s.UsersClient(ctx),
+		)
+	}
+
+	return s.authService
 }
 
 func (s *serviceProvider) GatewayService(ctx context.Context) service.GatewayService {
@@ -131,11 +141,12 @@ func (s *serviceProvider) GatewayService(ctx context.Context) service.GatewaySer
 
 func (s *serviceProvider) HTTPHandler(ctx context.Context) *httpgateway.Handler {
 	if s.httpHandler == nil {
+		cfg := config.AppConfig()
 		s.httpHandler = httpgateway.NewHandler(
 			s.GatewayService(ctx),
 			s.AuthService(ctx),
-			config.AppConfig().HTTP.MaxUploadSizeBytes(),
-			s.TokenVerifier(),
+			cfg.HTTP.MaxUploadSizeBytes(),
+			s.Authenticator(),
 		)
 	}
 
@@ -150,41 +161,54 @@ func (s *serviceProvider) TokenVerifier() tokens.TokenVerifier {
 	return s.tokenVerifier
 }
 
-func (s *serviceProvider) authConnOrPanic(ctx context.Context) *grpc.ClientConn {
+func (s *serviceProvider) Authenticator() authentication.Service {
+	if s.authenticator == nil {
+		s.authenticator = authentication.NewService(s.TokenVerifier())
+	}
+
+	return s.authenticator
+}
+
+func (s *serviceProvider) authConnOrFatal(ctx context.Context) *grpc.ClientConn {
 	if s.authConn == nil {
-		s.authConn = s.mustDial(ctx, "auth", config.AppConfig().Auth.Address())
+		cfg := config.AppConfig()
+		s.authConn = s.mustDial(ctx, "auth", cfg.Auth.Address())
 	}
 
 	return s.authConn
 }
 
-func (s *serviceProvider) authzConnOrPanic(ctx context.Context) *grpc.ClientConn {
+func (s *serviceProvider) authzConnOrFatal(ctx context.Context) *grpc.ClientConn {
 	if s.authzConn == nil {
-		s.authzConn = s.mustDial(ctx, "authz", config.AppConfig().AuthZClient.Address())
+		cfg := config.AppConfig()
+		s.authzConn = s.mustDial(ctx, "authz", cfg.AuthZClient.Address())
 	}
 
 	return s.authzConn
 }
 
-func (s *serviceProvider) usersConnOrPanic(ctx context.Context) *grpc.ClientConn {
+func (s *serviceProvider) usersConnOrFatal(ctx context.Context) *grpc.ClientConn {
 	if s.usersConn == nil {
-		s.usersConn = s.mustDial(ctx, "users", config.AppConfig().Users.Address())
+		cfg := config.AppConfig()
+		s.usersConn = s.mustDial(ctx, "users", cfg.Users.Address())
 	}
 
 	return s.usersConn
 }
 
-func (s *serviceProvider) metadataConnOrPanic(ctx context.Context) *grpc.ClientConn {
+func (s *serviceProvider) metadataConnOrFatal(ctx context.Context) *grpc.ClientConn {
 	if s.metadataConn == nil {
-		s.metadataConn = s.mustDial(ctx, "metadata", config.AppConfig().Metadata.Address())
+		cfg := config.AppConfig()
+		s.metadataConn = s.mustDial(ctx, "metadata", cfg.Metadata.Address())
 	}
 
 	return s.metadataConn
 }
 
-func (s *serviceProvider) storageConnOrPanic(ctx context.Context) *grpc.ClientConn {
+func (s *serviceProvider) storageConnOrFatal(ctx context.Context) *grpc.ClientConn {
 	if s.storageConn == nil {
-		s.storageConn = s.mustDial(ctx, "storage", config.AppConfig().Storage.Address())
+		cfg := config.AppConfig()
+		s.storageConn = s.mustDial(ctx, "storage", cfg.Storage.Address())
 	}
 
 	return s.storageConn
