@@ -36,9 +36,10 @@ tracing = "0.1"
 opentelemetry = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 
-# Errors
+# Errors + async traits
 thiserror = "2"
 anyhow = "1"
+async-trait = "0.1"
 
 # Serialization (Kafka event payloads)
 serde = { version = "1", features = ["derive"] }
