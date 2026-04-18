@@ -16,6 +16,12 @@ pub struct QuotaMetrics {
     pub redis_flush_duration_seconds: Histogram<f64>,
 }
 
+impl Default for QuotaMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QuotaMetrics {
     pub fn new() -> Self {
         let meter = global::meter("quota");

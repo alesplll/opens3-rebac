@@ -1,0 +1,90 @@
+name: Quota CI
+
+on:
+  push:
+    paths:
+      - "services/quota/**"
+      - "shared/pkg/rust-kit/**"
+      - "shared/api/quota/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    paths:
+      - "services/quota/**"
+      - "shared/pkg/rust-kit/**"
+      - "shared/api/quota/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Check formatting
+        run: cargo fmt -p quota-service -- --check
+
+      - name: Clippy
+        run: cargo clippy -p quota-service -- -D warnings
+
+  test:
+    name: Unit & gRPC Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Run tests
+        run: cargo test -p quota-service
+
+  integration:
+    name: Redis Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 1s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Run Redis integration tests
+        env:
+          TEST_REDIS_URL: redis://localhost:6379/15
+        run: cargo test -p quota-service --test redis -- --include-ignored
