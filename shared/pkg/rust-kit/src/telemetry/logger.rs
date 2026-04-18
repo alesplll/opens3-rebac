@@ -57,7 +57,6 @@ pub fn init(cfg: Config) {
             .with_resource(resource)
             .build();
 
-        opentelemetry::global::set_logger_provider(log_provider.clone());
         let _ = LOG_PROVIDER.set(log_provider.clone());
         let log_bridge = OpenTelemetryTracingBridge::new(&log_provider);
 

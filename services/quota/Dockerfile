@@ -1,25 +1,42 @@
 # syntax=docker/dockerfile:1
 
-# ── Stage 1: build ────────────────────────────────────────────────────────────
-# rust:alpine → musl target → 100% static binary, no libc dependency
-FROM rust:1.95-alpine AS builder
+# ── Stage 1: chef ─────────────────────────────────────────────────────────────
+FROM rust:1.95-alpine AS chef
 
-RUN apk add --no-cache musl-dev protobuf-dev
+RUN apk add --no-cache musl-dev protobuf-dev && \
+    cargo install cargo-chef --locked
 
 WORKDIR /workspace
 
-# Copy workspace manifest first — layer is cached until Cargo.toml changes
-COPY Cargo.toml Cargo.lock* ./
+# ── Stage 2: planner ──────────────────────────────────────────────────────────
+# Analyses the workspace and produces a recipe.json with the dependency list.
+# Re-runs only when Cargo.toml / Cargo.lock change.
+FROM chef AS planner
 
-# Copy only what the quota crate needs
+COPY Cargo.toml Cargo.lock* ./
+COPY shared/pkg/rust-kit ./shared/pkg/rust-kit/
+COPY services/quota      ./services/quota/
+COPY shared/api/quota    ./shared/api/quota/
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ── Stage 3: builder ──────────────────────────────────────────────────────────
+# cook = compile only dependencies (cached layer).
+# Then build the actual crate on top.
+FROM chef AS builder
+
+COPY --from=planner /workspace/recipe.json recipe.json
+
+RUN cargo chef cook --release --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock* ./
 COPY shared/pkg/rust-kit ./shared/pkg/rust-kit/
 COPY services/quota      ./services/quota/
 COPY shared/api/quota    ./shared/api/quota/
 
 RUN cargo build --release -p quota-service
 
-# ── Stage 2: runtime ──────────────────────────────────────────────────────────
-# Minimal alpine — static binary needs only the OS for DNS/certs
+# ── Stage 4: runtime ──────────────────────────────────────────────────────────
 FROM alpine:3.21
 
 RUN addgroup -S quota && adduser -S quota -G quota
