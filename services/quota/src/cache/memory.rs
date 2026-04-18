@@ -77,7 +77,7 @@ impl MemoryCache {
     ) -> CheckResult {
         // Snapshot the limit outside the usage entry lock to avoid deadlock
         // between the two DashMaps. A stale limit snapshot is acceptable here:
-        // SetQuota is rare; the 500ms flush window is our consistency boundary.
+        // SetQuota is rare; the 5s flush window is our consistency boundary.
         let limit = self
             .limits
             .get(subject_id)
