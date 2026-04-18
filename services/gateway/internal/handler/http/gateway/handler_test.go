@@ -268,6 +268,6 @@ func loadTestConfig(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
 	t.Setenv("OTEL_ENVIRONMENT", "test")
 	t.Setenv("OTEL_METRICS_PUSH_TIMEOUT", "1s")
-	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("ACCESS_TOKEN_SECRET", "test-secret")
 	require.NoError(t, config.Load())
 }

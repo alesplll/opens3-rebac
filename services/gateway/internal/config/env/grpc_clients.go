@@ -10,9 +10,9 @@ import (
 )
 
 type grpcClientsEnvConfig struct {
-	AuthAddr             string        `env:"AUTH_GRPC_ADDR" envDefault:"auth:50051"`
+	AuthAddr             string        `env:"AUTH_GRPC_ADDR" envDefault:"auth:50050"`
 	AuthZAddr            string        `env:"AUTHZ_GRPC_ADDR" envDefault:"authz:50051"`
-	UsersAddr            string        `env:"USERS_GRPC_ADDR" envDefault:"users:50051"`
+	UsersAddr            string        `env:"USERS_GRPC_ADDR" envDefault:"users:50054"`
 	MetadataAddr         string        `env:"METADATA_GRPC_ADDR" envDefault:"metadata:50052"`
 	StorageAddr          string        `env:"STORAGE_GRPC_ADDR" envDefault:"storage:50053"`
 	GRPCTimeout          time.Duration `env:"GRPC_TIMEOUT" envDefault:"5s"`
