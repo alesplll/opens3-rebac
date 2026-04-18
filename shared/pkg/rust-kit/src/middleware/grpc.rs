@@ -1,23 +1,3 @@
-//! Tower middleware Layer для gRPC-серверов.
-//!
-//! `MetricsLayer` оборачивает каждый унарный вызов и записывает:
-//!   - grpc_{service}_requests_total  (счётчик входящих запросов)
-//!   - grpc_{service}_response_total  (счётчик ответов с labels: status, method)
-//!   - grpc_{service}_histogram_response_time_seconds (гистограмма латентности)
-//!
-//! Использование (в app.rs):
-//! ```rust
-//! use rust_kit::middleware::grpc::MetricsLayer;
-//! use rust_kit::telemetry::metrics::GrpcMetrics;
-//!
-//! let metrics = Arc::new(GrpcMetrics::new("quota"));
-//! Server::builder()
-//!     .layer(MetricsLayer::new(metrics))
-//!     .add_service(...)
-//!     .serve(addr)
-//!     .await?;
-//! ```
-
 use std::{
     future::Future,
     pin::Pin,
@@ -26,6 +6,7 @@ use std::{
     time::Instant,
 };
 
+use http::{HeaderMap, Request, Response};
 use opentelemetry::KeyValue;
 use pin_project_lite::pin_project;
 use tonic::body::BoxBody;
@@ -62,12 +43,9 @@ pub struct MetricsService<S> {
     metrics: Arc<GrpcMetrics>,
 }
 
-type Req = http::Request<BoxBody>;
-type Resp = http::Response<BoxBody>;
-
-impl<S> Service<Req> for MetricsService<S>
+impl<S> Service<Request<BoxBody>> for MetricsService<S>
 where
-    S: Service<Req, Response = Resp> + Clone + Send + 'static,
+    S: Service<Request<BoxBody>, Response = Response<BoxBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: std::fmt::Display,
 {
@@ -79,7 +57,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
+    fn call(&mut self, req: Request<BoxBody>) -> Self::Future {
         let method = req.uri().path().to_string();
         self.metrics.requests_total.add(1, &[KeyValue::new("method", method.clone())]);
         let start = Instant::now();
@@ -88,7 +66,7 @@ where
     }
 }
 
-// ── Future that records response metrics ─────────────────────────────────────
+// ── Future ────────────────────────────────────────────────────────────────────
 
 pin_project! {
     pub struct MetricsFuture<F> {
@@ -102,7 +80,7 @@ pin_project! {
 
 impl<F, E> Future for MetricsFuture<F>
 where
-    F: Future<Output = Result<Resp, E>>,
+    F: Future<Output = Result<Response<BoxBody>, E>>,
     E: std::fmt::Display,
 {
     type Output = F::Output;
@@ -113,14 +91,15 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(result) => {
                 let elapsed = this.start.elapsed().as_secs_f64();
+
                 let status = match &result {
                     Ok(resp) => {
-                        let grpc_status = resp
-                            .headers()
+                        let headers: &HeaderMap = resp.headers();
+                        headers
                             .get("grpc-status")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("0");
-                        grpc_status.to_string()
+                            .and_then(|v: &http::HeaderValue| v.to_str().ok())
+                            .unwrap_or("0")
+                            .to_string()
                     }
                     Err(_) => "error".to_string(),
                 };

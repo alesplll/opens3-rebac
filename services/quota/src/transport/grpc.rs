@@ -61,7 +61,7 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         match self.service.check_quota(&req.subject_id, bucket_id, &delta) {
             Ok(CheckResult::Allowed) => Ok(Response::new(CheckQuotaResponse {
                 allowed: true,
-                code: DenyCode::DenyCodeUnspecified.into(),
+                code: DenyCode::Unspecified.into(),
                 reason: String::new(),
             })),
 
@@ -194,19 +194,19 @@ fn proto_delta_to_domain(d: proto::ResourceDelta) -> ResourceDelta {
 fn deny_reason_to_proto(reason: &DenyReason) -> (DenyCode, String) {
     match reason {
         DenyReason::UserStorageExceeded { .. } => (
-            DenyCode::DenyCodeUserStorageExceeded,
+            DenyCode::UserStorageExceeded,
             reason.human_readable(),
         ),
         DenyReason::BucketStorageExceeded { .. } => (
-            DenyCode::DenyCodeBucketStorageExceeded,
+            DenyCode::BucketStorageExceeded,
             reason.human_readable(),
         ),
         DenyReason::UserBucketLimitReached { .. } => (
-            DenyCode::DenyCodeUserBucketLimitReached,
+            DenyCode::UserBucketLimitReached,
             reason.human_readable(),
         ),
         DenyReason::UserObjectLimitReached { .. } => (
-            DenyCode::DenyCodeUserObjectLimitReached,
+            DenyCode::UserObjectLimitReached,
             reason.human_readable(),
         ),
     }

@@ -29,7 +29,7 @@ tower = { version = "0.5", features = ["util"] }
 dashmap = "6"
 
 # Redis async client with connection pooling
-fred = { version = "9", features = ["pool", "reconnect-on-auth-error"] }
+fred = "9"
 
 # Observability
 tracing = "0.1"

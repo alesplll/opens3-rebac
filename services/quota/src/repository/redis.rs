@@ -5,15 +5,11 @@
 //!   quota:limit:{subject_id}  → HASH { bytes_limit, objects_limit, buckets_limit }
 //!
 //! All writes use pipelining (fred Pool) to minimise round trips.
+//! SCAN is used instead of KEYS to safely iterate all quota entries at startup.
 
 use std::sync::Arc;
 
-use fred::{
-    clients::Pool,
-    interfaces::{HashesInterface, KeysInterface, ServerInterface},
-    prelude::Builder,
-    types::config::Config as FredConfig,
-};
+use fred::{interfaces::ScanInterface, prelude::*};
 use tracing::{debug, instrument, warn};
 
 use crate::domain::{QuotaEntry, QuotaError, UsageEntry};
@@ -23,12 +19,12 @@ const USAGE_PREFIX: &str = "quota:usage:";
 const LIMIT_PREFIX: &str = "quota:limit:";
 
 pub struct RedisRepository {
-    pool: Arc<Pool>,
+    pool: Arc<RedisPool>,
 }
 
 impl RedisRepository {
     pub async fn connect(url: &str, pool_size: usize) -> Result<Self, QuotaError> {
-        let config = FredConfig::from_url(url)
+        let config = RedisConfig::from_url(url)
             .map_err(|e| QuotaError::Internal(format!("invalid Redis URL: {e}")))?;
 
         let pool = Builder::from_config(config)
@@ -48,10 +44,7 @@ impl RedisRepository {
 impl QuotaRepository for RedisRepository {
     #[instrument(skip(self), name = "redis.load_all_usage")]
     async fn load_all_usage(&self) -> Result<Vec<(String, UsageEntry)>, QuotaError> {
-        let keys: Vec<String> = self.pool
-            .keys(format!("{USAGE_PREFIX}*"))
-            .await
-            .map_err(QuotaError::Redis)?;
+        let keys = scan_keys(&self.pool, &format!("{USAGE_PREFIX}*")).await?;
 
         if keys.is_empty() {
             return Ok(vec![]);
@@ -75,10 +68,7 @@ impl QuotaRepository for RedisRepository {
 
     #[instrument(skip(self), name = "redis.load_all_limits")]
     async fn load_all_limits(&self) -> Result<Vec<(String, QuotaEntry)>, QuotaError> {
-        let keys: Vec<String> = self.pool
-            .keys(format!("{LIMIT_PREFIX}*"))
-            .await
-            .map_err(QuotaError::Redis)?;
+        let keys = scan_keys(&self.pool, &format!("{LIMIT_PREFIX}*")).await?;
 
         if keys.is_empty() {
             return Ok(vec![]);
@@ -156,13 +146,31 @@ impl QuotaRepository for RedisRepository {
     }
 
     async fn health(&self) -> Result<(), QuotaError> {
-        self.pool.ping::<()>(None).await.map_err(QuotaError::Redis)
+        self.pool.ping::<()>().await.map_err(QuotaError::Redis)
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn load_usage_entry(pool: &Pool, key: &str) -> Result<Option<UsageEntry>, QuotaError> {
+async fn scan_keys(pool: &RedisPool, pattern: &str) -> Result<Vec<String>, QuotaError> {
+    use futures::StreamExt;
+    // Use UFCS to avoid ambiguity with StreamExt::scan combinator
+    let mut scanner = ScanInterface::scan(pool, pattern, Some(100_u32), None);
+    let mut keys = Vec::new();
+    while let Some(result) = scanner.next().await {
+        let page: fred::types::ScanResult = result.map_err(QuotaError::Redis)?;
+        if let Some(page_keys) = page.results() {
+            for key in page_keys {
+                if let Some(s) = key.as_str() {
+                    keys.push(s.to_string());
+                }
+            }
+        }
+    }
+    Ok(keys)
+}
+
+async fn load_usage_entry(pool: &RedisPool, key: &str) -> Result<Option<UsageEntry>, QuotaError> {
     let fields: Vec<Option<i64>> = pool
         .hmget(key, vec!["bytes", "objects", "buckets"])
         .await
@@ -179,7 +187,7 @@ async fn load_usage_entry(pool: &Pool, key: &str) -> Result<Option<UsageEntry>, 
     }))
 }
 
-async fn load_limit_entry(pool: &Pool, key: &str) -> Result<Option<QuotaEntry>, QuotaError> {
+async fn load_limit_entry(pool: &RedisPool, key: &str) -> Result<Option<QuotaEntry>, QuotaError> {
     let fields: Vec<Option<i64>> = pool
         .hmget(key, vec!["bytes_limit", "objects_limit", "buckets_limit"])
         .await
