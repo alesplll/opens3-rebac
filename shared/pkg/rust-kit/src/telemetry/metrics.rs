@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
-    metrics::{PeriodicReader, SdkMeterProvider},
+    metrics::{PeriodicReader, SdkMeterProvider, Temporality},
     runtime::Tokio,
     Resource,
 };
@@ -21,9 +23,12 @@ pub fn init(cfg: Config) -> Result<SdkMeterProvider, Box<dyn std::error::Error +
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(cfg.otlp_endpoint)
+        .with_temporality(Temporality::Cumulative)
         .build()?;
 
-    let reader = PeriodicReader::builder(exporter, Tokio).build();
+    let reader = PeriodicReader::builder(exporter, Tokio)
+        .with_interval(Duration::from_secs(10))
+        .build();
 
     let provider = SdkMeterProvider::builder()
         .with_resource(resource)
