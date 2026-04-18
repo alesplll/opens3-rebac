@@ -37,20 +37,24 @@ pub async fn run() -> anyhow::Result<()> {
     let cfg = config::get();
 
     // 2. Telemetry
-    let otlp_endpoint = if cfg.enable_otlp { Some(cfg.otlp_endpoint.clone()) } else { None };
+    let otlp_endpoint = if cfg.enable_otlp {
+        Some(cfg.otlp_endpoint.clone())
+    } else {
+        None
+    };
 
     logger::init(logger::Config {
-        service_name:  cfg.service_name.clone(),
-        environment:   cfg.environment.clone(),
-        log_level:     cfg.log_level.clone(),
-        json_format:   cfg.log_json,
+        service_name: cfg.service_name.clone(),
+        environment: cfg.environment.clone(),
+        log_level: cfg.log_level.clone(),
+        json_format: cfg.log_json,
         otlp_endpoint: otlp_endpoint.clone(),
     });
 
     let _metrics_provider = if let Some(ref endpoint) = otlp_endpoint {
         match metrics::init(metrics::Config {
-            service_name:  cfg.service_name.clone(),
-            environment:   cfg.environment.clone(),
+            service_name: cfg.service_name.clone(),
+            environment: cfg.environment.clone(),
             otlp_endpoint: endpoint.clone(),
         }) {
             Ok(p) => Some(p),
@@ -82,15 +86,19 @@ pub async fn run() -> anyhow::Result<()> {
     info!(url = %cfg.redis_url(), "connected to Redis");
 
     // 4. Memory cache + load from Redis
-    let cache          = Arc::new(MemoryCache::new());
-    let quota_metrics  = Arc::new(QuotaMetrics::new());
-    let service        = Arc::new(QuotaService::new(Arc::clone(&cache), Arc::clone(&repo), Arc::clone(&quota_metrics)));
+    let cache = Arc::new(MemoryCache::new());
+    let quota_metrics = Arc::new(QuotaMetrics::new());
+    let service = Arc::new(QuotaService::new(
+        Arc::clone(&cache),
+        Arc::clone(&repo),
+        Arc::clone(&quota_metrics),
+    ));
 
     service.load_from_storage().await?;
 
     // 5. Background flush task (Redis persistence every 500ms)
     {
-        let flush_service  = Arc::clone(&service);
+        let flush_service = Arc::clone(&service);
         let flush_interval = Duration::from_millis(cfg.redis_flush_interval_ms);
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(flush_interval);
@@ -105,7 +113,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // 6. gRPC server
     let handler = GrpcHandler::new(Arc::clone(&service));
-    let svc     = QuotaServiceServer::new(handler);
+    let svc = QuotaServiceServer::new(handler);
 
     let (mut health_reporter, health_svc) = health_reporter();
     health_reporter
@@ -122,17 +130,21 @@ pub async fn run() -> anyhow::Result<()> {
 
     // 7. Graceful shutdown
     let closer = Closer::new();
-    closer.add("telemetry", || async {
-        opentelemetry::global::shutdown_tracer_provider();
-        logger::shutdown();
-    }).await;
+    closer
+        .add("telemetry", || async {
+            opentelemetry::global::shutdown_tracer_provider();
+            logger::shutdown();
+        })
+        .await;
 
     Server::builder()
         .layer(MetricsLayer::new(Arc::clone(&grpc_metrics)))
         .add_service(health_svc)
         .add_service(reflection_svc)
         .add_service(svc)
-        .serve_with_shutdown(addr, async { closer.wait_and_shutdown(Duration::from_secs(10)).await })
+        .serve_with_shutdown(addr, async {
+            closer.wait_and_shutdown(Duration::from_secs(10)).await
+        })
         .await
         .map_err(|e| anyhow::anyhow!("gRPC server error: {e}"))?;
 

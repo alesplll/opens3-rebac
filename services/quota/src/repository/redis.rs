@@ -12,8 +12,8 @@ use std::sync::Arc;
 use fred::prelude::*;
 use tracing::{debug, instrument, warn};
 
-use crate::domain::{QuotaEntry, QuotaError, UsageEntry};
 use super::traits::QuotaRepository;
+use crate::domain::{QuotaEntry, QuotaError, UsageEntry};
 
 const USAGE_PREFIX: &str = "quota:usage:";
 const LIMIT_PREFIX: &str = "quota:limit:";
@@ -32,11 +32,11 @@ impl RedisRepository {
             .map_err(|e| QuotaError::Internal(format!("failed to build Redis pool: {e}")))?;
 
         pool.connect();
-        pool.wait_for_connect()
-            .await
-            .map_err(QuotaError::Redis)?;
+        pool.wait_for_connect().await.map_err(QuotaError::Redis)?;
 
-        Ok(Self { pool: Arc::new(pool) })
+        Ok(Self {
+            pool: Arc::new(pool),
+        })
     }
 }
 

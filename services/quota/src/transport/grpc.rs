@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 use tracing::instrument;
 
 use crate::{
-    domain::{CheckResult, DenyReason, QuotaEntry, ResourceDelta, QuotaError},
+    domain::{CheckResult, DenyReason, QuotaEntry, QuotaError, ResourceDelta},
     repository::traits::QuotaRepository,
     service::QuotaService,
 };
@@ -21,15 +21,10 @@ pub mod proto {
 }
 
 use proto::{
-    quota_service_server::QuotaService as QuotaServiceTrait,
-    CheckQuotaRequest, CheckQuotaResponse, DenyCode,
-    GetQuotaRequest, GetQuotaResponse,
-    GetUsageRequest, GetUsageResponse,
-    HealthCheckRequest, HealthCheckResponse,
-    ResourceUsage,
-    SetQuotaRequest, SetQuotaResponse,
-    UpdateUsageRequest, UpdateUsageResponse,
-    health_check_response::ServingStatus,
+    health_check_response::ServingStatus, quota_service_server::QuotaService as QuotaServiceTrait,
+    CheckQuotaRequest, CheckQuotaResponse, DenyCode, GetQuotaRequest, GetQuotaResponse,
+    GetUsageRequest, GetUsageResponse, HealthCheckRequest, HealthCheckResponse, ResourceUsage,
+    SetQuotaRequest, SetQuotaResponse, UpdateUsageRequest, UpdateUsageResponse,
 };
 
 pub struct GrpcHandler<R: QuotaRepository> {
@@ -57,7 +52,11 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         span.record("subject_id", req.subject_id.as_str());
 
         let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
-        let bucket_id = if req.bucket_id.is_empty() { None } else { Some(req.bucket_id.as_str()) };
+        let bucket_id = if req.bucket_id.is_empty() {
+            None
+        } else {
+            Some(req.bucket_id.as_str())
+        };
 
         match self.service.check_quota(&req.subject_id, bucket_id, &delta) {
             Ok(CheckResult::Allowed) => {
@@ -94,7 +93,11 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
         tracing::Span::current().record("subject_id", req.subject_id.as_str());
 
         let delta = proto_delta_to_domain(req.delta.unwrap_or_default());
-        let bucket_id = if req.bucket_id.is_empty() { None } else { Some(req.bucket_id.as_str()) };
+        let bucket_id = if req.bucket_id.is_empty() {
+            None
+        } else {
+            Some(req.bucket_id.as_str())
+        };
 
         self.service
             .update_usage(&req.subject_id, bucket_id, &delta)
@@ -194,33 +197,35 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
             Err(_) => ServingStatus::NotServing,
         };
 
-        Ok(Response::new(HealthCheckResponse { status: status.into() }))
+        Ok(Response::new(HealthCheckResponse {
+            status: status.into(),
+        }))
     }
 }
 
 // ── Proto ↔ domain conversions ────────────────────────────────────────────────
 
 fn proto_delta_to_domain(d: proto::ResourceDelta) -> ResourceDelta {
-    ResourceDelta { bytes: d.bytes, objects: d.objects, buckets: d.buckets }
+    ResourceDelta {
+        bytes: d.bytes,
+        objects: d.objects,
+        buckets: d.buckets,
+    }
 }
 
 fn deny_reason_to_proto(reason: &DenyReason) -> (DenyCode, String) {
     match reason {
-        DenyReason::UserStorageExceeded { .. } => (
-            DenyCode::UserStorageExceeded,
-            reason.human_readable(),
-        ),
-        DenyReason::BucketStorageExceeded { .. } => (
-            DenyCode::BucketStorageExceeded,
-            reason.human_readable(),
-        ),
-        DenyReason::UserBucketLimitReached { .. } => (
-            DenyCode::UserBucketLimitReached,
-            reason.human_readable(),
-        ),
-        DenyReason::UserObjectLimitReached { .. } => (
-            DenyCode::UserObjectLimitReached,
-            reason.human_readable(),
-        ),
+        DenyReason::UserStorageExceeded { .. } => {
+            (DenyCode::UserStorageExceeded, reason.human_readable())
+        }
+        DenyReason::BucketStorageExceeded { .. } => {
+            (DenyCode::BucketStorageExceeded, reason.human_readable())
+        }
+        DenyReason::UserBucketLimitReached { .. } => {
+            (DenyCode::UserBucketLimitReached, reason.human_readable())
+        }
+        DenyReason::UserObjectLimitReached { .. } => {
+            (DenyCode::UserObjectLimitReached, reason.human_readable())
+        }
     }
 }

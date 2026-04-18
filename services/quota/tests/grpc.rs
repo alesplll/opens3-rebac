@@ -20,8 +20,7 @@ use quota_service::{
 };
 
 use proto::{
-    quota_service_client::QuotaServiceClient,
-    quota_service_server::QuotaServiceServer,
+    quota_service_client::QuotaServiceClient, quota_service_server::QuotaServiceServer,
     CheckQuotaRequest, GetUsageRequest, ResourceDelta, SetQuotaRequest, UpdateUsageRequest,
 };
 
@@ -97,7 +96,11 @@ async fn spawn_server() -> QuotaServiceClient<Channel> {
 }
 
 fn delta(bytes: i64, objects: i64, buckets: i64) -> Option<ResourceDelta> {
-    Some(ResourceDelta { bytes, objects, buckets })
+    Some(ResourceDelta {
+        bytes,
+        objects,
+        buckets,
+    })
 }
 
 // ── CheckQuota ────────────────────────────────────────────────────────────────
@@ -181,7 +184,9 @@ async fn update_usage_then_get_usage_reflects_change() {
         .unwrap();
 
     let user_usage = client
-        .get_usage(GetUsageRequest { subject_id: "user:carol".into() })
+        .get_usage(GetUsageRequest {
+            subject_id: "user:carol".into(),
+        })
         .await
         .unwrap()
         .into_inner()
@@ -192,7 +197,9 @@ async fn update_usage_then_get_usage_reflects_change() {
     assert_eq!(user_usage.objects, 1);
 
     let bucket_usage = client
-        .get_usage(GetUsageRequest { subject_id: "bucket:photos".into() })
+        .get_usage(GetUsageRequest {
+            subject_id: "bucket:photos".into(),
+        })
         .await
         .unwrap()
         .into_inner()
@@ -235,7 +242,9 @@ async fn set_quota_then_get_quota_roundtrip() {
         .unwrap();
 
     let quota = client
-        .get_quota(proto::GetQuotaRequest { subject_id: "user:dave".into() })
+        .get_quota(proto::GetQuotaRequest {
+            subject_id: "user:dave".into(),
+        })
         .await
         .unwrap()
         .into_inner();
@@ -250,7 +259,9 @@ async fn get_quota_not_found_for_unknown_subject() {
     let mut client = spawn_server().await;
 
     let status = client
-        .get_quota(proto::GetQuotaRequest { subject_id: "user:nobody".into() })
+        .get_quota(proto::GetQuotaRequest {
+            subject_id: "user:nobody".into(),
+        })
         .await
         .unwrap_err();
 
@@ -264,7 +275,9 @@ async fn health_check_returns_serving() {
     let mut client = spawn_server().await;
 
     let resp = client
-        .health_check(proto::HealthCheckRequest { service: String::new() })
+        .health_check(proto::HealthCheckRequest {
+            service: String::new(),
+        })
         .await
         .unwrap()
         .into_inner();

@@ -6,9 +6,9 @@
 //!
 //! All methods are Send + Sync — shared behind Arc.
 
-use std::{sync::Arc, time::Instant};
 #[cfg(test)]
 use std::sync::Mutex;
+use std::{sync::Arc, time::Instant};
 
 use tracing::{debug, instrument, warn};
 
@@ -28,7 +28,11 @@ pub struct QuotaService<R: QuotaRepository> {
 
 impl<R: QuotaRepository> QuotaService<R> {
     pub fn new(cache: Arc<MemoryCache>, repo: Arc<R>, metrics: Arc<QuotaMetrics>) -> Self {
-        Self { cache, repo, metrics }
+        Self {
+            cache,
+            repo,
+            metrics,
+        }
     }
 
     // ── CheckQuota ────────────────────────────────────────────────────────────
@@ -57,7 +61,9 @@ impl<R: QuotaRepository> QuotaService<R> {
         };
 
         // Step 1: check user quota
-        let user_result = self.cache.check_and_reserve(subject_id, delta, &user_default);
+        let user_result = self
+            .cache
+            .check_and_reserve(subject_id, delta, &user_default);
 
         if let CheckResult::Denied(_) = &user_result {
             debug!(subject = %subject_id, "user quota denied");
@@ -73,8 +79,9 @@ impl<R: QuotaRepository> QuotaService<R> {
                     buckets_limit: QuotaEntry::UNLIMITED,
                 };
 
-                let bucket_result =
-                    self.cache.check_and_reserve(bucket_id, delta, &bucket_default);
+                let bucket_result = self
+                    .cache
+                    .check_and_reserve(bucket_id, delta, &bucket_default);
 
                 if let CheckResult::Denied(ref reason) = bucket_result {
                     // Rollback the user reservation
@@ -82,7 +89,10 @@ impl<R: QuotaRepository> QuotaService<R> {
 
                     let bucket_deny = match reason {
                         DenyReason::UserStorageExceeded { used, limit } => {
-                            DenyReason::BucketStorageExceeded { used: *used, limit: *limit }
+                            DenyReason::BucketStorageExceeded {
+                                used: *used,
+                                limit: *limit,
+                            }
                         }
                         other => other.clone(),
                     };
@@ -132,11 +142,7 @@ impl<R: QuotaRepository> QuotaService<R> {
     /// Set quota limits for a subject. Writes to cache immediately;
     /// Redis flush happens in the background via the periodic flush task.
     #[instrument(skip(self, quota), name = "service.set_quota", fields(subject = %subject_id))]
-    pub async fn set_quota(
-        &self,
-        subject_id: &str,
-        quota: QuotaEntry,
-    ) -> Result<(), QuotaError> {
+    pub async fn set_quota(&self, subject_id: &str, quota: QuotaEntry) -> Result<(), QuotaError> {
         if subject_id.is_empty() {
             return Err(QuotaError::InvalidArgument("subject_id is required".into()));
         }
@@ -210,7 +216,9 @@ impl<R: QuotaRepository> QuotaService<R> {
         }
 
         self.metrics.redis_flush_entries.record(count, &[]);
-        self.metrics.redis_flush_duration_seconds.record(start.elapsed().as_secs_f64(), &[]);
+        self.metrics
+            .redis_flush_duration_seconds
+            .record(start.elapsed().as_secs_f64(), &[]);
 
         Ok(())
     }
@@ -219,13 +227,13 @@ impl<R: QuotaRepository> QuotaService<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, Once};
     use crate::{
         cache::MemoryCache,
         domain::{CheckResult, DenyReason, QuotaEntry, QuotaError, ResourceDelta, UsageEntry},
         metrics::QuotaMetrics,
         repository::traits::QuotaRepository,
     };
+    use std::sync::{Arc, Mutex, Once};
 
     // ── No-op repository for unit tests ──────────────────────────────────────
 
@@ -285,7 +293,11 @@ mod tests {
     }
 
     fn delta(bytes: i64, objects: i64, buckets: i64) -> ResourceDelta {
-        ResourceDelta { bytes, objects, buckets }
+        ResourceDelta {
+            bytes,
+            objects,
+            buckets,
+        }
     }
 
     // ── check_quota ───────────────────────────────────────────────────────────
@@ -293,7 +305,9 @@ mod tests {
     #[test]
     fn check_quota_allows_within_default_limit() {
         let svc = make_service();
-        let result = svc.check_quota("user:alice", None, &delta(1024, 1, 0)).unwrap();
+        let result = svc
+            .check_quota("user:alice", None, &delta(1024, 1, 0))
+            .unwrap();
         assert_eq!(result, CheckResult::Allowed);
     }
 
@@ -311,12 +325,20 @@ mod tests {
         // Give user a small byte limit via cache
         svc.cache.set_limit(
             "user:alice",
-            QuotaEntry { bytes_limit: 10_000, objects_limit: -1, buckets_limit: -1 },
+            QuotaEntry {
+                bytes_limit: 10_000,
+                objects_limit: -1,
+                buckets_limit: -1,
+            },
         );
         // Give bucket an even smaller byte limit
         svc.cache.set_limit(
             "bucket:photos",
-            QuotaEntry { bytes_limit: 100, objects_limit: -1, buckets_limit: -1 },
+            QuotaEntry {
+                bytes_limit: 100,
+                objects_limit: -1,
+                buckets_limit: -1,
+            },
         );
 
         // Delta exceeds bucket limit but not user limit
@@ -324,7 +346,10 @@ mod tests {
             .check_quota("user:alice", Some("bucket:photos"), &delta(500, 1, 0))
             .unwrap();
 
-        assert!(matches!(result, CheckResult::Denied(DenyReason::BucketStorageExceeded { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::BucketStorageExceeded { .. })
+        ));
 
         // User usage must be rolled back to 0 — no reservation left
         let user_usage = svc.cache.get_usage("user:alice").unwrap_or_default();
@@ -337,7 +362,11 @@ mod tests {
 
         svc.cache.set_limit(
             "user:alice",
-            QuotaEntry { bytes_limit: 100, objects_limit: -1, buckets_limit: -1 },
+            QuotaEntry {
+                bytes_limit: 100,
+                objects_limit: -1,
+                buckets_limit: -1,
+            },
         );
 
         let result = svc
@@ -345,7 +374,10 @@ mod tests {
             .unwrap();
 
         // Denied at user level — bucket should have no usage recorded
-        assert!(matches!(result, CheckResult::Denied(DenyReason::UserStorageExceeded { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::UserStorageExceeded { .. })
+        ));
         assert!(svc.cache.get_usage("bucket:photos").is_none());
     }
 
@@ -361,7 +393,8 @@ mod tests {
     #[test]
     fn update_usage_applies_to_user_and_bucket() {
         let svc = make_service();
-        svc.update_usage("user:alice", Some("bucket:photos"), &delta(200, 1, 0)).unwrap();
+        svc.update_usage("user:alice", Some("bucket:photos"), &delta(200, 1, 0))
+            .unwrap();
 
         assert_eq!(svc.cache.get_usage("user:alice").unwrap().bytes, 200);
         assert_eq!(svc.cache.get_usage("bucket:photos").unwrap().bytes, 200);
@@ -370,8 +403,10 @@ mod tests {
     #[test]
     fn update_usage_negative_delta_releases_space() {
         let svc = make_service();
-        svc.update_usage("user:alice", None, &delta(500, 2, 0)).unwrap();
-        svc.update_usage("user:alice", None, &delta(-200, -1, 0)).unwrap();
+        svc.update_usage("user:alice", None, &delta(500, 2, 0))
+            .unwrap();
+        svc.update_usage("user:alice", None, &delta(-200, -1, 0))
+            .unwrap();
 
         let usage = svc.cache.get_usage("user:alice").unwrap();
         assert_eq!(usage.bytes, 300);
@@ -393,7 +428,8 @@ mod tests {
     #[tokio::test]
     async fn flush_to_storage_writes_to_repository() {
         let svc = make_service();
-        svc.update_usage("user:alice", None, &delta(100, 1, 0)).unwrap();
+        svc.update_usage("user:alice", None, &delta(100, 1, 0))
+            .unwrap();
 
         svc.flush_to_storage().await.unwrap();
 

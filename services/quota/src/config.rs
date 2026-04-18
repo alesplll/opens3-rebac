@@ -82,7 +82,8 @@ impl Config {
 
 /// Get the global singleton config. Panics if `init()` was not called.
 pub fn get() -> &'static Config {
-    CFG.get().expect("config not initialised — call config::init() first")
+    CFG.get()
+        .expect("config not initialised — call config::init() first")
 }
 
 /// Load env vars into the global singleton. Idempotent.

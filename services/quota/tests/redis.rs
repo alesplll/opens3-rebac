@@ -32,9 +32,15 @@ async fn flush_and_reload_usage_roundtrip() {
     };
 
     let subject = "test:flush_usage_roundtrip";
-    let entry = UsageEntry { bytes: 1024, objects: 3, buckets: 1 };
+    let entry = UsageEntry {
+        bytes: 1024,
+        objects: 3,
+        buckets: 1,
+    };
 
-    repo.flush_usage(&[(subject.to_string(), entry)]).await.unwrap();
+    repo.flush_usage(&[(subject.to_string(), entry)])
+        .await
+        .unwrap();
 
     let loaded = repo.load_all_usage().await.unwrap();
     let found = loaded.iter().find(|(id, _)| id == subject);
@@ -52,16 +58,32 @@ async fn flush_and_reload_usage_roundtrip() {
 #[tokio::test]
 #[ignore = "requires Redis"]
 async fn flush_usage_overwrites_existing_entry() {
-    let Some(repo) = connect().await else { return; };
+    let Some(repo) = connect().await else {
+        return;
+    };
 
     let subject = "test:flush_overwrite";
 
-    repo.flush_usage(&[(subject.to_string(), UsageEntry { bytes: 100, objects: 1, buckets: 0 })])
-        .await
-        .unwrap();
-    repo.flush_usage(&[(subject.to_string(), UsageEntry { bytes: 999, objects: 5, buckets: 2 })])
-        .await
-        .unwrap();
+    repo.flush_usage(&[(
+        subject.to_string(),
+        UsageEntry {
+            bytes: 100,
+            objects: 1,
+            buckets: 0,
+        },
+    )])
+    .await
+    .unwrap();
+    repo.flush_usage(&[(
+        subject.to_string(),
+        UsageEntry {
+            bytes: 999,
+            objects: 5,
+            buckets: 2,
+        },
+    )])
+    .await
+    .unwrap();
 
     let loaded = repo.load_all_usage().await.unwrap();
     let (_, entry) = loaded.iter().find(|(id, _)| id == subject).unwrap();
@@ -75,12 +97,20 @@ async fn flush_usage_overwrites_existing_entry() {
 #[tokio::test]
 #[ignore = "requires Redis"]
 async fn flush_and_get_limit_roundtrip() {
-    let Some(repo) = connect().await else { return; };
+    let Some(repo) = connect().await else {
+        return;
+    };
 
     let subject = "test:flush_limit_roundtrip";
-    let limit = QuotaEntry { bytes_limit: 5_000_000, objects_limit: 50, buckets_limit: 5 };
+    let limit = QuotaEntry {
+        bytes_limit: 5_000_000,
+        objects_limit: 50,
+        buckets_limit: 5,
+    };
 
-    repo.flush_limits(&[(subject.to_string(), limit)]).await.unwrap();
+    repo.flush_limits(&[(subject.to_string(), limit)])
+        .await
+        .unwrap();
 
     let got = repo.get_limit(subject).await.unwrap();
     assert!(got.is_some());
@@ -95,8 +125,13 @@ async fn flush_and_get_limit_roundtrip() {
 #[tokio::test]
 #[ignore = "requires Redis"]
 async fn get_limit_returns_none_for_unknown_subject() {
-    let Some(repo) = connect().await else { return; };
-    let got = repo.get_limit("test:definitely_does_not_exist_xyz123").await.unwrap();
+    let Some(repo) = connect().await else {
+        return;
+    };
+    let got = repo
+        .get_limit("test:definitely_does_not_exist_xyz123")
+        .await
+        .unwrap();
     assert!(got.is_none());
 }
 
@@ -105,16 +140,29 @@ async fn get_limit_returns_none_for_unknown_subject() {
 #[tokio::test]
 #[ignore = "requires Redis"]
 async fn delete_subject_removes_usage_and_limit() {
-    let Some(repo) = connect().await else { return; };
+    let Some(repo) = connect().await else {
+        return;
+    };
 
     let subject = "test:delete_subject";
 
-    repo.flush_usage(&[(subject.to_string(), UsageEntry { bytes: 100, objects: 1, buckets: 0 })])
-        .await
-        .unwrap();
+    repo.flush_usage(&[(
+        subject.to_string(),
+        UsageEntry {
+            bytes: 100,
+            objects: 1,
+            buckets: 0,
+        },
+    )])
+    .await
+    .unwrap();
     repo.flush_limits(&[(
         subject.to_string(),
-        QuotaEntry { bytes_limit: 1000, objects_limit: -1, buckets_limit: -1 },
+        QuotaEntry {
+            bytes_limit: 1000,
+            objects_limit: -1,
+            buckets_limit: -1,
+        },
     )])
     .await
     .unwrap();
@@ -131,6 +179,8 @@ async fn delete_subject_removes_usage_and_limit() {
 #[tokio::test]
 #[ignore = "requires Redis"]
 async fn health_check_ok_when_redis_available() {
-    let Some(repo) = connect().await else { return; };
+    let Some(repo) = connect().await else {
+        return;
+    };
     assert!(repo.health().await.is_ok());
 }

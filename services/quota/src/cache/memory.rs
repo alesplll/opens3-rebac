@@ -138,9 +138,11 @@ impl MemoryCache {
 
     /// Collect all usage entries for the periodic Redis flush.
     pub fn snapshot_usage(&self) -> Vec<(String, UsageEntry)> {
-        self.usage.iter().map(|e| (e.key().clone(), *e.value())).collect()
+        self.usage
+            .iter()
+            .map(|e| (e.key().clone(), *e.value()))
+            .collect()
     }
-
 }
 
 impl Default for MemoryCache {
@@ -155,7 +157,11 @@ mod tests {
     use crate::domain::{CheckResult, DenyReason, QuotaEntry, ResourceDelta};
 
     fn lim(bytes: i64, objects: i64, buckets: i64) -> QuotaEntry {
-        QuotaEntry { bytes_limit: bytes, objects_limit: objects, buckets_limit: buckets }
+        QuotaEntry {
+            bytes_limit: bytes,
+            objects_limit: objects,
+            buckets_limit: buckets,
+        }
     }
 
     fn unlimited() -> QuotaEntry {
@@ -167,7 +173,11 @@ mod tests {
     }
 
     fn d(bytes: i64, objects: i64, buckets: i64) -> ResourceDelta {
-        ResourceDelta { bytes, objects, buckets }
+        ResourceDelta {
+            bytes,
+            objects,
+            buckets,
+        }
     }
 
     // ── check_and_reserve ─────────────────────────────────────────────────────
@@ -193,21 +203,30 @@ mod tests {
     fn denies_bytes_exceeded() {
         let cache = MemoryCache::new();
         let result = cache.check_and_reserve("user:alice", &d(1001, 0, 0), &lim(1000, -1, -1));
-        assert!(matches!(result, CheckResult::Denied(DenyReason::UserStorageExceeded { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::UserStorageExceeded { .. })
+        ));
     }
 
     #[test]
     fn denies_objects_exceeded() {
         let cache = MemoryCache::new();
         let result = cache.check_and_reserve("user:alice", &d(0, 11, 0), &lim(-1, 10, -1));
-        assert!(matches!(result, CheckResult::Denied(DenyReason::UserObjectLimitReached { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::UserObjectLimitReached { .. })
+        ));
     }
 
     #[test]
     fn denies_buckets_exceeded() {
         let cache = MemoryCache::new();
         let result = cache.check_and_reserve("user:alice", &d(0, 0, 6), &lim(-1, -1, 5));
-        assert!(matches!(result, CheckResult::Denied(DenyReason::UserBucketLimitReached { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::UserBucketLimitReached { .. })
+        ));
     }
 
     #[test]
@@ -237,7 +256,10 @@ mod tests {
         // Custom limit is 500 bytes; default (passed as fallback) is 10 000
         cache.set_limit("user:alice", lim(500, -1, -1));
         let result = cache.check_and_reserve("user:alice", &d(600, 0, 0), &lim(10_000, -1, -1));
-        assert!(matches!(result, CheckResult::Denied(DenyReason::UserStorageExceeded { .. })));
+        assert!(matches!(
+            result,
+            CheckResult::Denied(DenyReason::UserStorageExceeded { .. })
+        ));
     }
 
     #[test]

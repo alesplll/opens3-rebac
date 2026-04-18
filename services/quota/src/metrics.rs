@@ -40,9 +40,7 @@ impl QuotaMetrics {
             redis_flush_entries: meter
                 .u64_histogram("quota_redis_flush_entries")
                 .with_description("Usage entries written per flush")
-                .with_boundaries(vec![
-                    0.0, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0,
-                ])
+                .with_boundaries(vec![0.0, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0])
                 .build(),
 
             redis_flush_duration_seconds: meter

@@ -110,7 +110,11 @@ mod tests {
 
     #[test]
     fn resource_delta_negate_reverses_sign() {
-        let d = ResourceDelta { bytes: 100, objects: 2, buckets: 1 };
+        let d = ResourceDelta {
+            bytes: 100,
+            objects: 2,
+            buckets: 1,
+        };
         let neg = d.negate();
         assert_eq!(neg.bytes, -100);
         assert_eq!(neg.objects, -2);
@@ -128,8 +132,16 @@ mod tests {
 
     #[test]
     fn usage_entry_apply_clamps_to_zero_on_underflow() {
-        let mut u = UsageEntry { bytes: 50, objects: 1, buckets: 0 };
-        u.apply(&ResourceDelta { bytes: -200, objects: -5, buckets: -1 });
+        let mut u = UsageEntry {
+            bytes: 50,
+            objects: 1,
+            buckets: 0,
+        };
+        u.apply(&ResourceDelta {
+            bytes: -200,
+            objects: -5,
+            buckets: -1,
+        });
         assert_eq!(u.bytes, 0);
         assert_eq!(u.objects, 0);
         assert_eq!(u.buckets, 0);
@@ -137,7 +149,11 @@ mod tests {
 
     #[test]
     fn usage_entry_from_delta_ignores_negative() {
-        let d = ResourceDelta { bytes: -100, objects: -1, buckets: 0 };
+        let d = ResourceDelta {
+            bytes: -100,
+            objects: -1,
+            buckets: 0,
+        };
         let u = UsageEntry::from(&d);
         assert_eq!(u.bytes, 0);
         assert_eq!(u.objects, 0);
@@ -157,7 +173,10 @@ mod tests {
 
     #[test]
     fn deny_reason_human_readable_contains_values() {
-        let r = DenyReason::UserStorageExceeded { used: 1100, limit: 1000 };
+        let r = DenyReason::UserStorageExceeded {
+            used: 1100,
+            limit: 1000,
+        };
         let s = r.human_readable();
         assert!(s.contains("1100"));
         assert!(s.contains("1000"));
