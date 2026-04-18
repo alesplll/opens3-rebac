@@ -38,8 +38,15 @@ make up-services
 ### Тесты
 
 ```bash
+# Юнит + gRPC тесты (без Redis)
 cargo test -p quota-service
 cargo test -p quota-service -- --nocapture   # с логами
+
+# gRPC in-process тесты отдельно
+cargo test -p quota-service --test grpc
+
+# Redis интеграционные (нужен Redis, #[ignore] по умолчанию)
+TEST_REDIS_URL=redis://localhost:6379/15 cargo test -p quota-service --test redis -- --include-ignored
 ```
 
 ### Proto regeneration (Go-стабы для Gateway)
@@ -58,7 +65,7 @@ gRPC Request
   └─► transport/grpc.rs     (proto ↔ domain конвертация)
         └─► service/quota.rs (бизнес-логика, reserve+rollback)
               └─► cache/memory.rs     (DashMap, горячий путь ~100ns)
-              └─► repository/redis.rs (persistence, flush каждые 500ms)
+              └─► repository/redis.rs (persistence, flush каждые 5s)
 ```
 
 ### Горячий путь CheckQuota
@@ -84,6 +91,7 @@ CheckQuota(subject, bucket, delta)
 ```
 src/
   main.rs            — точка входа, dotenvy, tokio::main
+  lib.rs             — pub mod ... (экспорт для integration tests в tests/)
   app.rs             — App::run(): инит всего, MetricsLayer, запуск gRPC
   config.rs          — OnceLock singleton, читается один раз
   metrics.rs         — QuotaMetrics: flush_total, flush_errors, flush_entries, flush_duration
@@ -99,6 +107,9 @@ src/
     quota.rs         — QuotaService (бизнес-логика, reserve+rollback, flush metrics)
   transport/
     grpc.rs          — GrpcHandler (tonic impl, proto↔domain)
+tests/
+  grpc.rs            — 8 in-process gRPC тестов (Tonic + TcpListenerStream, без Redis)
+  redis.rs           — 6 Redis интеграционных тестов (#[ignore = "requires Redis"], DB 15)
 ```
 
 ---
@@ -111,7 +122,7 @@ src/
 | `REDIS_HOST` | `localhost` | Redis хост |
 | `REDIS_PORT` | `6379` | Redis порт |
 | `REDIS_DB` | `1` | Redis DB индекс (0 занят authz) |
-| `REDIS_FLUSH_INTERVAL_MS` | `500` | Интервал flush в Redis |
+| `REDIS_FLUSH_INTERVAL_MS` | `5000` | Интервал flush в Redis |
 | `DEFAULT_USER_BYTES_LIMIT` | `10737418240` | 10 GiB по умолчанию |
 | `DEFAULT_USER_BUCKETS_LIMIT` | `100` | Лимит бакетов |
 | `DEFAULT_USER_OBJECTS_LIMIT` | `-1` | Без ограничений |
@@ -155,14 +166,15 @@ src/
 
 - **gRPC метрики** — через `rust-kit::middleware::grpc::MetricsLayer` (Tower): `grpc_quota_requests_total`, `grpc_quota_response_total`, `grpc_quota_histogram_response_time_seconds`
 - **Redis метрики** — через `QuotaMetrics` в `metrics.rs`: `quota_redis_flush_total`, `quota_redis_flush_errors_total`, `quota_redis_flush_entries`, `quota_redis_flush_duration_seconds`
-- **Трейсы** — `#[instrument]` на всех методах repository, видны в Jaeger
+- **Трейсы** — `#[instrument]` на всех методах transport/service/repository, видны в Jaeger. Span attributes: `subject_id`, `allowed`, `bucket` — через `tracing::field::Empty` + `span.record()`. Flush-спаны на уровне `debug` чтобы не засорять трейсы.
+- **Логи** — через `opentelemetry-appender-tracing` → OTLP → Elasticsearch (Kibana). При `ENABLE_OTLP=false` логи только в stdout.
 - **Grafana дашборд** — `infra/otel/grafana/dashboards/quota.json`, 5 секций: Summary / Traffic / Latency / Errors / Redis Persistence
 
 ---
 
 ## Известные ограничения / TODO
 
-- `flush_to_storage` пишет весь DashMap каждые 500ms — для >100k пользователей
+- `flush_to_storage` пишет весь DashMap каждые 5s — для >100k пользователей
   стоит добавить dirty-set чтобы писать только изменённые записи
 - Redis используется без AOF в dev (`--appendonly no` в docker-compose);
   в prod нужно включить `--appendonly yes` на redis-quota
