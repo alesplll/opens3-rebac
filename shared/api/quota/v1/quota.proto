@@ -1,0 +1,190 @@
+syntax = "proto3";
+
+package opens3.quota.v1;
+
+option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/quota/v1;quotav1";
+
+// QuotaService — сервис управления квотами хранилища.
+// Отвечает на вопрос: "есть ли у субъекта достаточно квоты для операции?"
+// Вызывается Gateway ДО выполнения операции (CheckQuota) и ПОСЛЕ (UpdateUsage).
+//
+// Порт: 50055 (конфигурируется через GRPC_PORT)
+// Реализация: Rust (tonic + tokio)
+//
+// Хранилище:
+//   In-memory: DashMap<subject_id, UsageEntry> + DashMap<subject_id, QuotaEntry>
+//   Persistence: Redis (AOF) с периодическим flush каждые 500 мс
+//
+// Kafka (async backup):
+//   Потребляет ← object-stored:        backup-инкремент usage
+//   Потребляет ← object-deleted:       декремент usage
+//   Потребляет ← bucket-deleted:       очистка квот бакета
+//   Потребляет ← quota-limits-changed: обновление лимитов в памяти
+//   Потребляет ← user-deleted:         удаление всех данных пользователя
+//
+// Маппинг S3-операций:
+//   PutObject:    CheckQuota(user + bucket, Δbytes=size, Δobjects=1) → UpdateUsage
+//   DeleteObject: UpdateUsage(user + bucket, Δbytes=-size, Δobjects=-1)
+//   CreateBucket: CheckQuota(user, Δbuckets=1) → UpdateUsage
+//   DeleteBucket: UpdateUsage(user, Δbuckets=-1)
+//   Get/List/Head: квота не проверяется
+service QuotaService {
+  // CheckQuota проверяет, есть ли у субъекта квота для выполнения операции.
+  // Атомарно резервирует ресурс (reserve-and-rollback при превышении).
+  // Вызывается синхронно ДО выполнения операции.
+  // Ошибки: INVALID_ARGUMENT (пустой subject_id или нулевой delta).
+  rpc CheckQuota(CheckQuotaRequest) returns (CheckQuotaResponse);
+
+  // UpdateUsage обновляет потребление субъекта.
+  // Fire-and-forget: Gateway вызывает после успешной операции.
+  // delta может быть отрицательным (удаление объекта/бакета).
+  rpc UpdateUsage(UpdateUsageRequest) returns (UpdateUsageResponse);
+
+  // GetUsage возвращает текущее потребление субъекта.
+  // Ошибки: NOT_FOUND (субъект не найден).
+  rpc GetUsage(GetUsageRequest) returns (GetUsageResponse);
+
+  // SetQuota устанавливает лимиты для субъекта.
+  // -1 означает "без ограничений" (unlimited).
+  // Используется административными инструментами.
+  rpc SetQuota(SetQuotaRequest) returns (SetQuotaResponse);
+
+  // GetQuota возвращает текущие лимиты субъекта.
+  // Ошибки: NOT_FOUND (лимиты не заданы — субъект unlimited).
+  rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse);
+
+  // HealthCheck — стандартный gRPC Health Checking Protocol.
+  // NOT_SERVING если Redis недоступен или не удалось загрузить данные при старте.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ─── Общие структуры ─────────────────────────────────────────────────────────
+
+// ResourceDelta — изменение ресурса (положительное = потребление, отрицательное = освобождение).
+message ResourceDelta {
+  int64 bytes   = 1; // байты (0 если не применимо)
+  int64 objects = 2; // количество объектов
+  int64 buckets = 3; // количество бакетов
+}
+
+// ResourceUsage — текущее потребление субъекта.
+message ResourceUsage {
+  int64 bytes   = 1;
+  int64 objects = 2;
+  int64 buckets = 3;
+}
+
+// ─── CheckQuota ───────────────────────────────────────────────────────────────
+
+message CheckQuotaRequest {
+  // Идентификатор субъекта (пользователя). Формат: "user:{uuid}".
+  string subject_id = 1;
+
+  // Идентификатор бакета. Формат: "bucket:{name}".
+  // Если непустой — проверяется также квота бакета.
+  // При PutObject: обязателен; при CreateBucket: пустой (бакет ещё не существует).
+  string bucket_id = 2;
+
+  // Изменение ресурсов, которое планируется выполнить.
+  ResourceDelta delta = 3;
+}
+
+message CheckQuotaResponse {
+  // true — операция разрешена, false — квота исчерпана.
+  bool allowed = 1;
+
+  // Структурированный код отказа (только при allowed=false).
+  DenyCode code = 2;
+
+  // Читаемое пояснение (для отладки, не для клиента).
+  // Примеры: "user storage exceeded: 10737418240/10737418240",
+  //          "user bucket limit reached: 100/100"
+  string reason = 3;
+}
+
+// DenyCode — структурированная причина отказа.
+// Используется Gateway для маппинга на HTTP статус коды:
+//   USER_STORAGE_EXCEEDED / BUCKET_STORAGE_EXCEEDED → 507 Insufficient Storage
+//   USER_BUCKET_LIMIT_REACHED / USER_OBJECT_LIMIT_REACHED → 400 Bad Request (TooManyBuckets)
+enum DenyCode {
+  DENY_CODE_UNSPECIFIED              = 0;
+  DENY_CODE_USER_STORAGE_EXCEEDED    = 1; // HTTP 507
+  DENY_CODE_BUCKET_STORAGE_EXCEEDED  = 2; // HTTP 507
+  DENY_CODE_USER_BUCKET_LIMIT_REACHED = 3; // HTTP 400
+  DENY_CODE_USER_OBJECT_LIMIT_REACHED = 4; // HTTP 400
+}
+
+// ─── UpdateUsage ──────────────────────────────────────────────────────────────
+
+message UpdateUsageRequest {
+  // Идентификатор субъекта. Формат: "user:{uuid}".
+  string subject_id = 1;
+
+  // Идентификатор бакета. Формат: "bucket:{name}".
+  // Если непустой — обновляется также потребление бакета.
+  string bucket_id = 2;
+
+  // Изменение ресурсов. Отрицательные значения — освобождение (удаление).
+  ResourceDelta delta = 3;
+}
+
+// UpdateUsageResponse — пустой ответ (fire-and-forget).
+message UpdateUsageResponse {}
+
+// ─── GetUsage ─────────────────────────────────────────────────────────────────
+
+message GetUsageRequest {
+  // Идентификатор субъекта. Формат: "user:{uuid}" или "bucket:{name}".
+  string subject_id = 1;
+}
+
+message GetUsageResponse {
+  ResourceUsage usage = 1;
+}
+
+// ─── SetQuota ─────────────────────────────────────────────────────────────────
+
+message SetQuotaRequest {
+  // Идентификатор субъекта. Формат: "user:{uuid}" или "bucket:{name}".
+  string subject_id = 1;
+
+  // Лимиты в байтах. -1 = без ограничений.
+  // По умолчанию (при первом создании пользователя):
+  //   bytes_limit   = 10 GiB (10737418240)
+  //   objects_limit = -1 (unlimited)
+  //   buckets_limit = 100
+  int64 bytes_limit   = 2;
+  int64 objects_limit = 3;
+  int64 buckets_limit = 4;
+}
+
+message SetQuotaResponse {
+  bool success = 1;
+}
+
+// ─── GetQuota ─────────────────────────────────────────────────────────────────
+
+message GetQuotaRequest {
+  string subject_id = 1;
+}
+
+message GetQuotaResponse {
+  int64 bytes_limit   = 1; // -1 = unlimited
+  int64 objects_limit = 2;
+  int64 buckets_limit = 3;
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────────
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN     = 0;
+    SERVING     = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+}

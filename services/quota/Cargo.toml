@@ -1,0 +1,58 @@
+[package]
+name = "quota-service"
+version = "0.1.0"
+edition = "2021"
+description = "Quota management service for opens3 — enforces storage, object, and bucket limits"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+# Shared kit
+rust-kit = { path = "../../shared/pkg/rust-kit" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# gRPC
+tonic = { version = "0.12", features = ["gzip"] }
+prost = "0.13"
+tonic-health = "0.12"
+tonic-reflection = "0.12"
+
+# Tower (for middleware in app.rs)
+tower = { version = "0.5", features = ["util"] }
+
+# Hot-path in-memory layer: lock-free concurrent HashMap
+dashmap = "6"
+
+# Redis async client with connection pooling
+fred = { version = "9", features = ["pool", "reconnect-on-auth-error"] }
+
+# Kafka consumer
+rdkafka = { version = "0.36", features = ["cmake-build", "sasl"] }
+
+# Observability
+tracing = "0.1"
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# Serialization (Kafka event payloads)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Config from env vars
+dotenvy = "0.15"
+
+# Utils
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+
+[build-dependencies]
+tonic-build = "0.12"
