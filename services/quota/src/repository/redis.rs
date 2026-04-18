@@ -153,14 +153,15 @@ impl QuotaRepository for RedisRepository {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async fn scan_keys(pool: &RedisPool, pattern: &str) -> Result<Vec<String>, QuotaError> {
+    use fred::types::Scanner;
     use futures::StreamExt;
     // scan is on RedisClient, not RedisPool — get one client via round-robin next()
     let client = pool.next();
     let mut stream = client.scan(pattern, Some(100_u32), None);
     let mut keys = Vec::new();
     while let Some(result) = stream.next().await {
-        let page: fred::types::ScanResult = result.map_err(QuotaError::Redis)?;
-        if let Some(page_keys) = page.results() {
+        let mut page: fred::types::ScanResult = result.map_err(QuotaError::Redis)?;
+        if let Some(page_keys) = page.take_results() {
             for key in page_keys {
                 keys.push(key.as_str_lossy().into_owned());
             }
