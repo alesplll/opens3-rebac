@@ -19,6 +19,7 @@ use tracing::info;
 use crate::{
     cache::MemoryCache,
     config,
+    metrics::QuotaMetrics,
     repository::RedisRepository,
     service::QuotaService,
     transport::grpc::{proto, GrpcHandler},
@@ -81,8 +82,9 @@ pub async fn run() -> anyhow::Result<()> {
     info!(url = %cfg.redis_url(), "connected to Redis");
 
     // 4. Memory cache + load from Redis
-    let cache   = Arc::new(MemoryCache::new());
-    let service = Arc::new(QuotaService::new(Arc::clone(&cache), Arc::clone(&repo)));
+    let cache          = Arc::new(MemoryCache::new());
+    let quota_metrics  = Arc::new(QuotaMetrics::new());
+    let service        = Arc::new(QuotaService::new(Arc::clone(&cache), Arc::clone(&repo), Arc::clone(&quota_metrics)));
 
     service.load_from_storage().await?;
 

@@ -2,6 +2,7 @@ mod app;
 mod cache;
 mod config;
 mod domain;
+mod metrics;
 mod repository;
 mod service;
 mod transport;

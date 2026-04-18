@@ -6,7 +6,7 @@
 //!
 //! All methods are Send + Sync — shared behind Arc.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use tracing::{debug, instrument, warn};
 
@@ -14,17 +14,19 @@ use crate::{
     cache::MemoryCache,
     config,
     domain::{CheckResult, DenyReason, QuotaEntry, QuotaError, ResourceDelta, UsageEntry},
+    metrics::QuotaMetrics,
     repository::traits::QuotaRepository,
 };
 
 pub struct QuotaService<R: QuotaRepository> {
     cache: Arc<MemoryCache>,
     repo: Arc<R>,
+    metrics: Arc<QuotaMetrics>,
 }
 
 impl<R: QuotaRepository> QuotaService<R> {
-    pub fn new(cache: Arc<MemoryCache>, repo: Arc<R>) -> Self {
-        Self { cache, repo }
+    pub fn new(cache: Arc<MemoryCache>, repo: Arc<R>, metrics: Arc<QuotaMetrics>) -> Self {
+        Self { cache, repo, metrics }
     }
 
     // ── CheckQuota ────────────────────────────────────────────────────────────
@@ -192,12 +194,22 @@ impl<R: QuotaRepository> QuotaService<R> {
 
     /// Called by the periodic flush task in app.rs every 500ms.
     pub async fn flush_to_storage(&self) -> Result<(), QuotaError> {
+        let start = Instant::now();
         let usage = self.cache.snapshot_usage();
+        let count = usage.len() as u64;
+
+        self.metrics.redis_flush_total.add(1, &[]);
+
         if !usage.is_empty() {
             if let Err(e) = self.repo.flush_usage(&usage).await {
                 warn!(error = %e, "failed to flush usage to Redis");
+                self.metrics.redis_flush_errors_total.add(1, &[]);
             }
         }
+
+        self.metrics.redis_flush_entries.record(count, &[]);
+        self.metrics.redis_flush_duration_seconds.record(start.elapsed().as_secs_f64(), &[]);
+
         Ok(())
     }
 }
