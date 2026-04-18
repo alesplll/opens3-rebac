@@ -2,6 +2,7 @@ name: Storage CI
 
 on:
   push:
+    branches: [main]
     paths:
       - "services/storage/**"
       - "shared/pkg/go/storage/**"

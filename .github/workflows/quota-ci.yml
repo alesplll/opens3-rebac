@@ -2,6 +2,7 @@ name: Quota CI
 
 on:
   push:
+    branches: [main]
     paths:
       - "services/quota/**"
       - "shared/pkg/rust-kit/**"
