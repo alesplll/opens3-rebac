@@ -36,7 +36,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -95,7 +95,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -163,7 +163,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -231,7 +231,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -311,7 +311,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -438,7 +438,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -577,7 +577,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -687,7 +687,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -809,7 +809,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -911,7 +911,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
