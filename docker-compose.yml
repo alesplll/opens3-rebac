@@ -244,6 +244,7 @@ services:
     env_file:
       - services/quota/.env
     environment:
+      - REDIS_HOST=redis
       - ENABLE_OTLP=true
       - OTLP_ENDPOINT=http://otel-collector:4317
     networks:
