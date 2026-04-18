@@ -149,6 +149,172 @@ impl Default for MemoryCache {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CheckResult, DenyReason, QuotaEntry, ResourceDelta};
+
+    fn lim(bytes: i64, objects: i64, buckets: i64) -> QuotaEntry {
+        QuotaEntry { bytes_limit: bytes, objects_limit: objects, buckets_limit: buckets }
+    }
+
+    fn unlimited() -> QuotaEntry {
+        QuotaEntry {
+            bytes_limit: QuotaEntry::UNLIMITED,
+            objects_limit: QuotaEntry::UNLIMITED,
+            buckets_limit: QuotaEntry::UNLIMITED,
+        }
+    }
+
+    fn d(bytes: i64, objects: i64, buckets: i64) -> ResourceDelta {
+        ResourceDelta { bytes, objects, buckets }
+    }
+
+    // ── check_and_reserve ─────────────────────────────────────────────────────
+
+    #[test]
+    fn allows_first_write_within_limit() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(100, 1, 0), &lim(1000, 10, 5));
+        assert_eq!(result, CheckResult::Allowed);
+        let usage = cache.get_usage("user:alice").unwrap();
+        assert_eq!(usage.bytes, 100);
+        assert_eq!(usage.objects, 1);
+    }
+
+    #[test]
+    fn allows_up_to_exact_limit() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(1000, 0, 0), &lim(1000, -1, -1));
+        assert_eq!(result, CheckResult::Allowed);
+    }
+
+    #[test]
+    fn denies_bytes_exceeded() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(1001, 0, 0), &lim(1000, -1, -1));
+        assert!(matches!(result, CheckResult::Denied(DenyReason::UserStorageExceeded { .. })));
+    }
+
+    #[test]
+    fn denies_objects_exceeded() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(0, 11, 0), &lim(-1, 10, -1));
+        assert!(matches!(result, CheckResult::Denied(DenyReason::UserObjectLimitReached { .. })));
+    }
+
+    #[test]
+    fn denies_buckets_exceeded() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(0, 0, 6), &lim(-1, -1, 5));
+        assert!(matches!(result, CheckResult::Denied(DenyReason::UserBucketLimitReached { .. })));
+    }
+
+    #[test]
+    fn unlimited_always_allows_large_delta() {
+        let cache = MemoryCache::new();
+        let result = cache.check_and_reserve("user:alice", &d(i64::MAX / 2, 0, 0), &unlimited());
+        assert_eq!(result, CheckResult::Allowed);
+    }
+
+    #[test]
+    fn denied_check_does_not_modify_usage() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(500, 1, 0));
+
+        let result = cache.check_and_reserve("user:alice", &d(600, 0, 0), &lim(1000, -1, -1));
+        assert!(matches!(result, CheckResult::Denied(..)));
+
+        // Usage must be unchanged after denial
+        let usage = cache.get_usage("user:alice").unwrap();
+        assert_eq!(usage.bytes, 500);
+        assert_eq!(usage.objects, 1);
+    }
+
+    #[test]
+    fn explicit_limit_overrides_default() {
+        let cache = MemoryCache::new();
+        // Custom limit is 500 bytes; default (passed as fallback) is 10 000
+        cache.set_limit("user:alice", lim(500, -1, -1));
+        let result = cache.check_and_reserve("user:alice", &d(600, 0, 0), &lim(10_000, -1, -1));
+        assert!(matches!(result, CheckResult::Denied(DenyReason::UserStorageExceeded { .. })));
+    }
+
+    #[test]
+    fn negative_delta_in_check_is_always_allowed() {
+        let cache = MemoryCache::new();
+        // Releasing resources (delete) should never be denied
+        let result = cache.check_and_reserve("user:alice", &d(-100, -1, 0), &lim(1000, 10, 5));
+        assert_eq!(result, CheckResult::Allowed);
+    }
+
+    // ── update ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn update_accumulates_usage() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(100, 1, 0));
+        cache.update("user:alice", &d(200, 2, 1));
+        let usage = cache.get_usage("user:alice").unwrap();
+        assert_eq!(usage.bytes, 300);
+        assert_eq!(usage.objects, 3);
+        assert_eq!(usage.buckets, 1);
+    }
+
+    #[test]
+    fn update_negative_clamps_at_zero() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(100, 1, 0));
+        cache.update("user:alice", &d(-999, -999, 0));
+        let usage = cache.get_usage("user:alice").unwrap();
+        assert_eq!(usage.bytes, 0);
+        assert_eq!(usage.objects, 0);
+    }
+
+    // ── snapshot ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_returns_all_entries() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(100, 1, 0));
+        cache.update("user:bob", &d(200, 2, 1));
+        let snap = cache.snapshot_usage();
+        assert_eq!(snap.len(), 2);
+    }
+
+    #[test]
+    fn snapshot_empty_when_no_entries() {
+        let cache = MemoryCache::new();
+        assert!(cache.snapshot_usage().is_empty());
+    }
+
+    // ── concurrent safety ────────────────────────────────────────────────────
+
+    #[test]
+    fn concurrent_updates_are_consistent() {
+        use std::{sync::Arc, thread};
+
+        let cache = Arc::new(MemoryCache::new());
+        let threads: Vec<_> = (0..10)
+            .map(|_| {
+                let c = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        c.update("user:shared", &d(1, 0, 0));
+                    }
+                })
+            })
+            .collect();
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        let usage = cache.get_usage("user:shared").unwrap();
+        assert_eq!(usage.bytes, 1000); // 10 threads × 100 updates × 1 byte
+    }
+}
+
 // ── Pure logic ────────────────────────────────────────────────────────────────
 
 /// Check whether applying `delta` to `current` would exceed `limit`.

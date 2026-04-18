@@ -103,3 +103,63 @@ impl DenyReason {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_delta_negate_reverses_sign() {
+        let d = ResourceDelta { bytes: 100, objects: 2, buckets: 1 };
+        let neg = d.negate();
+        assert_eq!(neg.bytes, -100);
+        assert_eq!(neg.objects, -2);
+        assert_eq!(neg.buckets, -1);
+    }
+
+    #[test]
+    fn resource_delta_negate_of_zero_is_zero() {
+        let d = ResourceDelta::default();
+        let neg = d.negate();
+        assert_eq!(neg.bytes, 0);
+        assert_eq!(neg.objects, 0);
+        assert_eq!(neg.buckets, 0);
+    }
+
+    #[test]
+    fn usage_entry_apply_clamps_to_zero_on_underflow() {
+        let mut u = UsageEntry { bytes: 50, objects: 1, buckets: 0 };
+        u.apply(&ResourceDelta { bytes: -200, objects: -5, buckets: -1 });
+        assert_eq!(u.bytes, 0);
+        assert_eq!(u.objects, 0);
+        assert_eq!(u.buckets, 0);
+    }
+
+    #[test]
+    fn usage_entry_from_delta_ignores_negative() {
+        let d = ResourceDelta { bytes: -100, objects: -1, buckets: 0 };
+        let u = UsageEntry::from(&d);
+        assert_eq!(u.bytes, 0);
+        assert_eq!(u.objects, 0);
+    }
+
+    #[test]
+    fn quota_entry_unlimited_flags() {
+        let q = QuotaEntry {
+            bytes_limit: QuotaEntry::UNLIMITED,
+            objects_limit: 10,
+            buckets_limit: QuotaEntry::UNLIMITED,
+        };
+        assert!(q.is_bytes_unlimited());
+        assert!(!q.is_objects_unlimited());
+        assert!(q.is_buckets_unlimited());
+    }
+
+    #[test]
+    fn deny_reason_human_readable_contains_values() {
+        let r = DenyReason::UserStorageExceeded { used: 1100, limit: 1000 };
+        let s = r.human_readable();
+        assert!(s.contains("1100"));
+        assert!(s.contains("1000"));
+    }
+}
