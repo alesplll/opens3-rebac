@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Quota management service for opens3 — enforces storage, object, and bucket limits"
 
+[lib]
+name = "quota_service"
+path = "src/lib.rs"
+
 [[bin]]
 name = "server"
 path = "src/main.rs"
@@ -51,6 +55,9 @@ dotenvy = "0.15"
 # Utils
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
+
+[dev-dependencies]
+tokio-stream = { version = "0.1", features = ["net"] }
 
 [build-dependencies]
 tonic-build = "0.12"
