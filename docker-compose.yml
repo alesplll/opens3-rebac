@@ -234,6 +234,28 @@ services:
       retries: 10
       start_period: 5s
 
+  quota:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/quota/Dockerfile
+    ports:
+      - "50055:50055"
+    env_file:
+      - services/quota/.env
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50055"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
   # gateway:
   #   profiles: [services]
   #   ...
