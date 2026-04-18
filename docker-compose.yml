@@ -243,6 +243,9 @@ services:
       - "50055:50055"
     env_file:
       - services/quota/.env
+    environment:
+      - ENABLE_OTLP=true
+      - OTLP_ENDPOINT=http://otel-collector:4317
     networks:
       - opens3-network
     restart: unless-stopped

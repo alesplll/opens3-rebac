@@ -25,7 +25,10 @@ use crate::{
 };
 
 use proto::quota_service_server::QuotaServiceServer;
-use rust_kit::telemetry::{closer::Closer, logger, metrics};
+use rust_kit::{
+    middleware::grpc::MetricsLayer,
+    telemetry::{closer::Closer, logger, metrics, metrics::GrpcMetrics},
+};
 
 pub async fn run() -> anyhow::Result<()> {
     // 1. Config
@@ -44,17 +47,23 @@ pub async fn run() -> anyhow::Result<()> {
     });
 
     let _metrics_provider = if let Some(ref endpoint) = otlp_endpoint {
-        Some(
-            metrics::init(metrics::Config {
-                service_name:  cfg.service_name.clone(),
-                environment:   cfg.environment.clone(),
-                otlp_endpoint: endpoint.clone(),
-            })
-            .map_err(|e| anyhow::anyhow!("metrics init failed: {e}"))?,
-        )
+        match metrics::init(metrics::Config {
+            service_name:  cfg.service_name.clone(),
+            environment:   cfg.environment.clone(),
+            otlp_endpoint: endpoint.clone(),
+        }) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                tracing::warn!(error = %e, "OTLP metrics unavailable, continuing without export");
+                None
+            }
+        }
     } else {
         None
     };
+
+    // gRPC-level metrics (works with any provider, including Noop)
+    let grpc_metrics = Arc::new(GrpcMetrics::new(&cfg.service_name));
 
     info!(
         service = %cfg.service_name,
@@ -117,6 +126,7 @@ pub async fn run() -> anyhow::Result<()> {
     }).await;
 
     Server::builder()
+        .layer(MetricsLayer::new(Arc::clone(&grpc_metrics)))
         .add_service(health_svc)
         .add_service(reflection_svc)
         .add_service(svc)
