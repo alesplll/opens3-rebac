@@ -90,7 +90,7 @@ impl QuotaRepository for RedisRepository {
         Ok(result)
     }
 
-    #[instrument(skip(self, entries), name = "redis.flush_usage", fields(count = entries.len()))]
+    #[instrument(level = "debug", skip(self, entries), name = "redis.flush_usage", fields(count = entries.len()))]
     async fn flush_usage(&self, entries: &[(String, UsageEntry)]) -> Result<(), QuotaError> {
         for (subject, usage) in entries {
             let key = format!("{USAGE_PREFIX}{subject}");
@@ -109,7 +109,7 @@ impl QuotaRepository for RedisRepository {
         Ok(())
     }
 
-    #[instrument(skip(self, entries), name = "redis.flush_limits", fields(count = entries.len()))]
+    #[instrument(level = "debug", skip(self, entries), name = "redis.flush_limits", fields(count = entries.len()))]
     async fn flush_limits(&self, entries: &[(String, QuotaEntry)]) -> Result<(), QuotaError> {
         for (subject, quota) in entries {
             let key = format!("{LIMIT_PREFIX}{subject}");
