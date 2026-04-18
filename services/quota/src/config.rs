@@ -43,7 +43,7 @@ impl Config {
             redis_port: var_parse("REDIS_PORT", 6379),
             redis_db: var_parse("REDIS_DB", 1),
             redis_password: std::env::var("REDIS_PASSWORD").ok(),
-            redis_flush_interval_ms: var_parse("REDIS_FLUSH_INTERVAL_MS", 5000),
+            redis_flush_interval_ms: var_parse("REDIS_FLUSH_INTERVAL_MS", 1000),
 
             default_user_bytes_limit: var_parse("DEFAULT_USER_BYTES_LIMIT", 10_737_418_240),
             default_user_objects_limit: var_parse("DEFAULT_USER_OBJECTS_LIMIT", -1),

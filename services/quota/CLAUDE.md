@@ -65,7 +65,7 @@ gRPC Request
   └─► transport/grpc.rs     (proto ↔ domain конвертация)
         └─► service/quota.rs (бизнес-логика, reserve+rollback)
               └─► cache/memory.rs     (DashMap, горячий путь ~100ns)
-              └─► repository/redis.rs (persistence, flush каждые 5s)
+              └─► repository/redis.rs (persistence, flush каждые 1s (только dirty entries))
 ```
 
 ### Горячий путь CheckQuota
@@ -122,7 +122,7 @@ tests/
 | `REDIS_HOST` | `localhost` | Redis хост |
 | `REDIS_PORT` | `6379` | Redis порт |
 | `REDIS_DB` | `1` | Redis DB индекс (0 занят authz) |
-| `REDIS_FLUSH_INTERVAL_MS` | `5000` | Интервал flush в Redis |
+| `REDIS_FLUSH_INTERVAL_MS` | `1000` | Интервал flush в Redis (только dirty entries) |
 | `DEFAULT_USER_BYTES_LIMIT` | `10737418240` | 10 GiB по умолчанию |
 | `DEFAULT_USER_BUCKETS_LIMIT` | `100` | Лимит бакетов |
 | `DEFAULT_USER_OBJECTS_LIMIT` | `-1` | Без ограничений |
@@ -174,8 +174,7 @@ tests/
 
 ## Известные ограничения / TODO
 
-- `flush_to_storage` пишет весь DashMap каждые 5s — для >100k пользователей
-  стоит добавить dirty-set чтобы писать только изменённые записи
+- `flush_to_storage` пишет только dirty entries каждые 1s — при нулевом трафике Redis не трогается
 - Redis используется без AOF в dev (`--appendonly no` в docker-compose);
   в prod нужно включить `--appendonly yes` на redis-quota
 - SetQuota write-through синхронный — при большом количестве вызовов можно

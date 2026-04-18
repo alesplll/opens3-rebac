@@ -6,7 +6,7 @@ use opentelemetry::{
 /// Service-level metrics for the Quota service.
 /// Covers Redis flush health — the only I/O on the non-hot path.
 pub struct QuotaMetrics {
-    /// Total flush cycles attempted (every 500ms background task tick)
+    /// Total flush cycles attempted (every 1s background task tick)
     pub redis_flush_total: Counter<u64>,
     /// Flush cycles that ended with a Redis error
     pub redis_flush_errors_total: Counter<u64>,

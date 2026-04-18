@@ -128,7 +128,7 @@ services/quota/
 3. Создаёт `GrpcMetrics` (Tower middleware) и `QuotaMetrics` (Redis flush)
 4. Подключается к Redis
 5. Загружает все данные из Redis в память (чтобы сервис не ходил в Redis при каждом запросе)
-6. Запускает фоновую задачу: каждые 5s сбрасывает изменения обратно в Redis
+6. Запускает фоновую задачу: каждые 1s сбрасывает изменения обратно в Redis
 7. Запускает gRPC сервер с `MetricsLayer`, health check и reflection
 8. Ждёт SIGTERM/SIGINT → красиво завершает все соединения
 
@@ -174,7 +174,7 @@ lock shard → прочитать текущее использование →
 - `update_usage` — fire-and-forget обновление после успешной операции
 - `set_quota` — write-through: сразу пишет в cache И в Redis (лимиты важны)
 - `load_from_storage` — при старте, заполняет cache из Redis
-- `flush_to_storage` — вызывается фоном каждые 5s, записывает метрики flush (count, duration, errors) через `QuotaMetrics`
+- `flush_to_storage` — вызывается фоном каждые 1s, записывает метрики flush (count, duration, errors) через `QuotaMetrics`
 
 #### `metrics.rs`
 Доменные метрики сервиса — отдельные от инфраструктурного `rust-kit`. `QuotaMetrics` инициализируется один раз при старте и передаётся в `QuotaService`. Содержит 4 инструмента: `redis_flush_total`, `redis_flush_errors_total`, `redis_flush_entries`, `redis_flush_duration_seconds`. Видны в Grafana в секции "Redis Persistence".

@@ -13,7 +13,7 @@ option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/quota/v1;quo
 //
 // Хранилище:
 //   In-memory: DashMap<subject_id, UsageEntry> + DashMap<subject_id, QuotaEntry>
-//   Persistence: Redis (AOF) с периодическим flush каждые 500 мс
+//   Persistence: Redis (AOF) с периодическим flush каждые 5s (только dirty entries)
 //
 // Kafka (async backup):
 //   Потребляет ← object-stored:        backup-инкремент usage
@@ -52,6 +52,11 @@ service QuotaService {
   // GetQuota возвращает текущие лимиты субъекта.
   // Ошибки: NOT_FOUND (лимиты не заданы — субъект unlimited).
   rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse);
+
+  // DeleteSubject удаляет все данные квоты для субъекта (usage + limits).
+  // Вызывается при удалении пользователя или бакета.
+  // Ошибки: INVALID_ARGUMENT (пустой subject_id).
+  rpc DeleteSubject(DeleteSubjectRequest) returns (DeleteSubjectResponse);
 
   // HealthCheck — стандартный gRPC Health Checking Protocol.
   // NOT_SERVING если Redis недоступен или не удалось загрузить данные при старте.
@@ -172,6 +177,17 @@ message GetQuotaResponse {
   int64 bytes_limit   = 1; // -1 = unlimited
   int64 objects_limit = 2;
   int64 buckets_limit = 3;
+}
+
+// ─── DeleteSubject ────────────────────────────────────────────────────────────
+
+message DeleteSubjectRequest {
+  // Идентификатор субъекта. Формат: "user:{uuid}" или "bucket:{name}".
+  string subject_id = 1;
+}
+
+message DeleteSubjectResponse {
+  bool success = 1;
 }
 
 // ─── HealthCheck ──────────────────────────────────────────────────────────────

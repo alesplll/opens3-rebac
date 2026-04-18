@@ -22,9 +22,10 @@ pub mod proto {
 
 use proto::{
     health_check_response::ServingStatus, quota_service_server::QuotaService as QuotaServiceTrait,
-    CheckQuotaRequest, CheckQuotaResponse, DenyCode, GetQuotaRequest, GetQuotaResponse,
-    GetUsageRequest, GetUsageResponse, HealthCheckRequest, HealthCheckResponse, ResourceUsage,
-    SetQuotaRequest, SetQuotaResponse, UpdateUsageRequest, UpdateUsageResponse,
+    CheckQuotaRequest, CheckQuotaResponse, DeleteSubjectRequest, DeleteSubjectResponse, DenyCode,
+    GetQuotaRequest, GetQuotaResponse, GetUsageRequest, GetUsageResponse, HealthCheckRequest,
+    HealthCheckResponse, ResourceUsage, SetQuotaRequest, SetQuotaResponse, UpdateUsageRequest,
+    UpdateUsageResponse,
 };
 
 pub struct GrpcHandler<R: QuotaRepository> {
@@ -185,6 +186,28 @@ impl<R: QuotaRepository> QuotaServiceTrait for GrpcHandler<R> {
             ))),
             Err(e) => Err(Status::internal(e.to_string())),
         }
+    }
+
+    #[instrument(
+        skip(self, request), name = "grpc.delete_subject",
+        fields(subject_id = tracing::field::Empty)
+    )]
+    async fn delete_subject(
+        &self,
+        request: Request<DeleteSubjectRequest>,
+    ) -> Result<Response<DeleteSubjectResponse>, Status> {
+        let req = request.into_inner();
+        tracing::Span::current().record("subject_id", req.subject_id.as_str());
+
+        self.service
+            .delete_subject(&req.subject_id)
+            .await
+            .map_err(|e| match e {
+                QuotaError::InvalidArgument(m) => Status::invalid_argument(m),
+                other => Status::internal(other.to_string()),
+            })?;
+
+        Ok(Response::new(DeleteSubjectResponse { success: true }))
     }
 
     #[instrument(skip(self), name = "grpc.health_check")]

@@ -6,8 +6,6 @@
 //!
 //! All methods are Send + Sync — shared behind Arc.
 
-#[cfg(test)]
-use std::sync::Mutex;
 use std::{sync::Arc, time::Instant};
 
 use tracing::{debug, instrument, warn};
@@ -169,11 +167,17 @@ impl<R: QuotaRepository> QuotaService<R> {
         Ok(limit)
     }
 
-    // ── External event handlers (Phase 2) ────────────────────────────────────
+    // ── DeleteSubject ─────────────────────────────────────────────────────────
 
-    #[allow(dead_code)] // Phase 2: called when user-deletion event arrives
-    pub fn on_user_deleted(&self, subject_id: &str) {
+    /// Remove all quota data (usage + limits) for a subject.
+    /// Called when a user or bucket is deleted.
+    #[instrument(skip(self), name = "service.delete_subject", fields(subject = %subject_id))]
+    pub async fn delete_subject(&self, subject_id: &str) -> Result<(), QuotaError> {
+        if subject_id.is_empty() {
+            return Err(QuotaError::InvalidArgument("subject_id is required".into()));
+        }
         self.cache.delete_subject(subject_id);
+        self.repo.delete_subject(subject_id).await
     }
 
     // ── Health ────────────────────────────────────────────────────────────────
@@ -203,7 +207,7 @@ impl<R: QuotaRepository> QuotaService<R> {
     /// Called by the periodic flush task in app.rs.
     pub async fn flush_to_storage(&self) -> Result<(), QuotaError> {
         let start = Instant::now();
-        let usage = self.cache.snapshot_usage();
+        let usage = self.cache.snapshot_dirty();
         let count = usage.len() as u64;
 
         self.metrics.redis_flush_total.add(1, &[]);
@@ -423,10 +427,31 @@ mod tests {
         assert_eq!(usage.objects, 0);
     }
 
+    // ── delete_subject ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn delete_subject_clears_cache_and_repo() {
+        let svc = make_service();
+        svc.update_usage("user:alice", Some("bucket:photos"), &delta(500, 2, 0))
+            .unwrap();
+
+        svc.delete_subject("user:alice").await.unwrap();
+
+        let usage = svc.get_usage("user:alice").unwrap();
+        assert_eq!(usage.bytes, 0, "usage must be cleared after delete");
+    }
+
+    #[tokio::test]
+    async fn delete_subject_empty_id_returns_error() {
+        let svc = make_service();
+        let result = svc.delete_subject("").await;
+        assert!(matches!(result, Err(QuotaError::InvalidArgument(_))));
+    }
+
     // ── flush ─────────────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn flush_to_storage_writes_to_repository() {
+    async fn flush_to_storage_writes_dirty_entries() {
         let svc = make_service();
         svc.update_usage("user:alice", None, &delta(100, 1, 0))
             .unwrap();
@@ -438,5 +463,25 @@ mod tests {
         let alice = flushed.iter().find(|(id, _)| id == "user:alice");
         assert!(alice.is_some());
         assert_eq!(alice.unwrap().1.bytes, 100);
+    }
+
+    #[tokio::test]
+    async fn flush_to_storage_skips_unchanged_entries() {
+        let svc = make_service();
+        svc.update_usage("user:alice", None, &delta(100, 1, 0))
+            .unwrap();
+
+        // First flush: dirty
+        svc.flush_to_storage().await.unwrap();
+        let count_after_first = svc.repo.flushed.lock().unwrap().len();
+
+        // Second flush: nothing changed — must not write
+        svc.flush_to_storage().await.unwrap();
+        let count_after_second = svc.repo.flushed.lock().unwrap().len();
+
+        assert_eq!(
+            count_after_first, count_after_second,
+            "second flush must be a no-op"
+        );
     }
 }

@@ -13,7 +13,7 @@ pub trait QuotaRepository: Send + Sync + 'static {
     /// Load all quota limits from storage (called once at startup).
     async fn load_all_limits(&self) -> Result<Vec<(String, QuotaEntry)>, QuotaError>;
 
-    /// Persist a batch of usage entries (called by the flush task every 5s).
+    /// Persist a batch of usage entries (called by the flush task every 1s, dirty-only).
     async fn flush_usage(&self, entries: &[(String, UsageEntry)]) -> Result<(), QuotaError>;
 
     /// Persist a batch of quota limits.

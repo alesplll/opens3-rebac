@@ -21,7 +21,8 @@ use quota_service::{
 
 use proto::{
     quota_service_client::QuotaServiceClient, quota_service_server::QuotaServiceServer,
-    CheckQuotaRequest, GetUsageRequest, ResourceDelta, SetQuotaRequest, UpdateUsageRequest,
+    CheckQuotaRequest, DeleteSubjectRequest, GetUsageRequest, ResourceDelta, SetQuotaRequest,
+    UpdateUsageRequest,
 };
 
 // ── No-op repository ──────────────────────────────────────────────────────────
@@ -266,6 +267,56 @@ async fn get_quota_not_found_for_unknown_subject() {
         .unwrap_err();
 
     assert_eq!(status.code(), tonic::Code::NotFound);
+}
+
+// ── DeleteSubject ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn delete_subject_removes_usage() {
+    let mut client = spawn_server().await;
+
+    client
+        .update_usage(UpdateUsageRequest {
+            subject_id: "user:eve".into(),
+            bucket_id: String::new(),
+            delta: delta(1024, 3, 0),
+        })
+        .await
+        .unwrap();
+
+    client
+        .delete_subject(DeleteSubjectRequest {
+            subject_id: "user:eve".into(),
+        })
+        .await
+        .unwrap();
+
+    let usage = client
+        .get_usage(GetUsageRequest {
+            subject_id: "user:eve".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .usage
+        .unwrap();
+
+    assert_eq!(usage.bytes, 0, "usage must be zero after delete");
+    assert_eq!(usage.objects, 0);
+}
+
+#[tokio::test]
+async fn delete_subject_empty_id_returns_invalid_argument() {
+    let mut client = spawn_server().await;
+
+    let status = client
+        .delete_subject(DeleteSubjectRequest {
+            subject_id: String::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
 }
 
 // ── HealthCheck ───────────────────────────────────────────────────────────────

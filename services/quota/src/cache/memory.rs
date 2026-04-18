@@ -14,12 +14,12 @@
 //!   │   MemoryCache       │  DashMap<SubjectId, UsageEntry>
 //!   │   (this module)     │  DashMap<SubjectId, QuotaEntry>
 //!   └────────┬────────────┘
-//!            │  flush every 500ms (background task in app.rs)
+//!            │  flush every 1s — only dirty entries (background task in app.rs)
 //!   ┌────────▼────────────┐
 //!   │   RedisRepository   │  AOF persistence
 //!   └─────────────────────┘
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use tracing::instrument;
 
 use crate::domain::{CheckResult, DenyReason, QuotaEntry, ResourceDelta, UsageEntry};
@@ -27,6 +27,7 @@ use crate::domain::{CheckResult, DenyReason, QuotaEntry, ResourceDelta, UsageEnt
 pub struct MemoryCache {
     usage: DashMap<String, UsageEntry>,
     limits: DashMap<String, QuotaEntry>,
+    dirty: DashSet<String>,
 }
 
 impl MemoryCache {
@@ -34,6 +35,7 @@ impl MemoryCache {
         Self {
             usage: DashMap::new(),
             limits: DashMap::new(),
+            dirty: DashSet::new(),
         }
     }
 
@@ -77,7 +79,7 @@ impl MemoryCache {
     ) -> CheckResult {
         // Snapshot the limit outside the usage entry lock to avoid deadlock
         // between the two DashMaps. A stale limit snapshot is acceptable here:
-        // SetQuota is rare; the 5s flush window is our consistency boundary.
+        // SetQuota is rare; the 1s flush window is our consistency boundary.
         let limit = self
             .limits
             .get(subject_id)
@@ -107,10 +109,14 @@ impl MemoryCache {
                 }
             });
 
-        match denied {
+        let result = match denied {
             Some(reason) => CheckResult::Denied(reason),
             None => CheckResult::Allowed,
+        };
+        if result == CheckResult::Allowed {
+            self.dirty.insert(subject_id.to_string());
         }
+        result
     }
 
     // ── Fire-and-forget update (after successful operation) ───────────────────
@@ -120,6 +126,7 @@ impl MemoryCache {
             .entry(subject_id.to_string())
             .and_modify(|u| u.apply(delta))
             .or_insert_with(|| UsageEntry::from(delta));
+        self.dirty.insert(subject_id.to_string());
     }
 
     // ── Admin: set / delete limits ────────────────────────────────────────────
@@ -128,19 +135,26 @@ impl MemoryCache {
         self.limits.insert(subject_id.to_string(), quota);
     }
 
-    #[allow(dead_code)] // Phase 2: wired up when user-deletion events arrive
     pub fn delete_subject(&self, subject_id: &str) {
         self.usage.remove(subject_id);
         self.limits.remove(subject_id);
+        self.dirty.remove(subject_id);
     }
 
     // ── Flush snapshot for persistence ───────────────────────────────────────
 
-    /// Collect all usage entries for the periodic Redis flush.
-    pub fn snapshot_usage(&self) -> Vec<(String, UsageEntry)> {
-        self.usage
-            .iter()
-            .map(|e| (e.key().clone(), *e.value()))
+    /// Collect only entries modified since the last flush.
+    ///
+    /// Atomically drains the dirty set: each key is removed before its value
+    /// is read. Any concurrent write that arrives after removal re-inserts the
+    /// key, so it appears in the next flush cycle — no data is ever lost.
+    pub fn snapshot_dirty(&self) -> Vec<(String, UsageEntry)> {
+        let keys: Vec<String> = self.dirty.iter().map(|k| k.clone()).collect();
+        for k in &keys {
+            self.dirty.remove(k);
+        }
+        keys.into_iter()
+            .filter_map(|k| self.usage.get(&k).map(|v| (k, *v)))
             .collect()
     }
 }
@@ -293,21 +307,72 @@ mod tests {
         assert_eq!(usage.objects, 0);
     }
 
-    // ── snapshot ──────────────────────────────────────────────────────────────
+    // ── snapshot_dirty ────────────────────────────────────────────────────────
 
     #[test]
-    fn snapshot_returns_all_entries() {
+    fn snapshot_dirty_returns_only_modified_entries() {
         let cache = MemoryCache::new();
         cache.update("user:alice", &d(100, 1, 0));
         cache.update("user:bob", &d(200, 2, 1));
-        let snap = cache.snapshot_usage();
+        let snap = cache.snapshot_dirty();
         assert_eq!(snap.len(), 2);
     }
 
     #[test]
-    fn snapshot_empty_when_no_entries() {
+    fn snapshot_dirty_empty_when_nothing_changed() {
         let cache = MemoryCache::new();
-        assert!(cache.snapshot_usage().is_empty());
+        assert!(cache.snapshot_dirty().is_empty());
+    }
+
+    #[test]
+    fn snapshot_dirty_clears_after_flush() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(100, 1, 0));
+        let first = cache.snapshot_dirty();
+        assert_eq!(first.len(), 1);
+        // Second flush: no changes since last flush
+        let second = cache.snapshot_dirty();
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn load_usage_does_not_mark_dirty() {
+        let cache = MemoryCache::new();
+        // Startup: data loaded from Redis — must NOT be written back
+        cache.load_usage(vec![(
+            "user:alice".into(),
+            UsageEntry {
+                bytes: 100,
+                objects: 1,
+                buckets: 0,
+            },
+        )]);
+        assert!(cache.snapshot_dirty().is_empty());
+    }
+
+    #[test]
+    fn check_and_reserve_allowed_marks_dirty() {
+        let cache = MemoryCache::new();
+        let lim = lim(1000, -1, -1);
+        cache.check_and_reserve("user:alice", &d(100, 0, 0), &lim);
+        assert_eq!(cache.snapshot_dirty().len(), 1);
+    }
+
+    #[test]
+    fn check_and_reserve_denied_does_not_mark_dirty() {
+        let cache = MemoryCache::new();
+        let lim = lim(50, -1, -1);
+        cache.check_and_reserve("user:alice", &d(100, 0, 0), &lim);
+        assert!(cache.snapshot_dirty().is_empty());
+    }
+
+    #[test]
+    fn delete_subject_removes_from_dirty() {
+        let cache = MemoryCache::new();
+        cache.update("user:alice", &d(100, 1, 0));
+        cache.delete_subject("user:alice");
+        // After delete the entry is gone — dirty set should also be cleared
+        assert!(cache.snapshot_dirty().is_empty());
     }
 
     // ── concurrent safety ────────────────────────────────────────────────────

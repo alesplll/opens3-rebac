@@ -10,7 +10,7 @@
 //!   TEST_REDIS_URL=redis://localhost:6379/15 cargo test -p quota-service --test redis -- --include-ignored
 
 use quota_service::{
-    domain::{QuotaEntry, ResourceDelta, UsageEntry},
+    domain::{QuotaEntry, UsageEntry},
     repository::{traits::QuotaRepository, RedisRepository},
 };
 

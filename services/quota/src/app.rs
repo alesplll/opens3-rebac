@@ -5,7 +5,7 @@
 //!   2. Init telemetry (logger, metrics)
 //!   3. Connect to Redis
 //!   4. Load quota data from Redis into MemoryCache
-//!   5. Start background flush task (every 500ms)
+//!   5. Start background flush task (every 1s, dirty-only)
 //!   6. Start gRPC server (health + reflection + QuotaService)
 //!   7. Wait for SIGTERM/SIGINT → graceful shutdown
 
@@ -96,7 +96,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     service.load_from_storage().await?;
 
-    // 5. Background flush task (Redis persistence every 500ms)
+    // 5. Background flush task (Redis persistence every 1s, dirty-only)
     {
         let flush_service = Arc::clone(&service);
         let flush_interval = Duration::from_millis(cfg.redis_flush_interval_ms);
