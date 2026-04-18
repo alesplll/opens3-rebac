@@ -62,17 +62,22 @@ make up-all
 
 ### Вариант 3: включить OTLP трейсинг (нужен observability stack)
 
-В `.env` поменяй:
+```bash
+make up-all   # поднимает сервисы + Jaeger + Prometheus + Grafana + OTel Collector
+```
+
+При запуске через docker compose `ENABLE_OTLP=true` выставляется автоматически через `docker-compose.yml`.
+Для локального `cargo run` выставь вручную в `.env`:
 ```env
 ENABLE_OTLP=true
-OTLP_ENDPOINT=http://otel-collector:4317
+OTLP_ENDPOINT=http://localhost:4317
 ```
 
 ---
 
 ## Структура файлов
 
-Сервис разбит на **5 слоёв**. Каждый слой знает только о слое ниже себя.
+Сервис разбит на **6 слоёв**. Каждый слой знает только о слое ниже себя.
 
 ```
 services/quota/
@@ -84,6 +89,7 @@ services/quota/
     ├── main.rs         ← точка входа
     ├── app.rs          ← главный оркестратор
     ├── config.rs       ← конфигурация из env vars
+    ├── metrics.rs      ← QuotaMetrics: счётчики Redis flush
     ├── domain/         ← доменные типы (бизнес-модели)
     │   ├── mod.rs
     │   ├── quota.rs    ← UsageEntry, QuotaEntry, ResourceDelta, CheckResult
@@ -111,12 +117,13 @@ services/quota/
 #### `app.rs`
 Главный оркестратор. Запускается в такой последовательности:
 1. Читает конфиг
-2. Инициализирует логгер и OTel метрики
-3. Подключается к Redis
-4. Загружает все данные из Redis в память (чтобы сервис не ходил в Redis при каждом запросе)
-5. Запускает фоновую задачу: каждые 500ms сбрасывает изменения обратно в Redis
-6. Запускает gRPC сервер с health check и reflection
-7. Ждёт SIGTERM/SIGINT → красиво завершает все соединения
+2. Инициализирует логгер и OTel метрики (не-фатально — при недоступном коллекторе продолжает работу)
+3. Создаёт `GrpcMetrics` (Tower middleware) и `QuotaMetrics` (Redis flush)
+4. Подключается к Redis
+5. Загружает все данные из Redis в память (чтобы сервис не ходил в Redis при каждом запросе)
+6. Запускает фоновую задачу: каждые 500ms сбрасывает изменения обратно в Redis
+7. Запускает gRPC сервер с `MetricsLayer`, health check и reflection
+8. Ждёт SIGTERM/SIGINT → красиво завершает все соединения
 
 #### `config.rs`
 Читает переменные окружения **один раз** при старте через `OnceLock` (Rust аналог Go `sync.Once`). После инициализации — доступен из любого места через `config::get()` без блокировок.
@@ -141,7 +148,7 @@ services/quota/
 quota:usage:{subject_id}  →  HASH { bytes, objects, buckets }
 quota:limit:{subject_id}  →  HASH { bytes_limit, objects_limit, buckets_limit }
 ```
-При старте — загружает все данные через `KEYS quota:usage:*`. При flush — пишет пачками через `HSET`.
+При старте — загружает все данные через `SCAN quota:usage:*` (не `KEYS` — он блокирует Redis). При flush — пишет пачками через `HSET`.
 
 #### `cache/memory.rs`
 **Горячий путь** — самый важный файл для производительности. Хранит все данные в `DashMap` — это concurrent HashMap с мелкой блокировкой (256 шардов). 
@@ -160,7 +167,10 @@ lock shard → прочитать текущее использование →
 - `update_usage` — fire-and-forget обновление после успешной операции
 - `set_quota` — write-through: сразу пишет в cache И в Redis (лимиты важны)
 - `load_from_storage` — при старте, заполняет cache из Redis
-- `flush_to_storage` — вызывается фоном каждые 500ms
+- `flush_to_storage` — вызывается фоном каждые 500ms, записывает метрики flush (count, duration, errors) через `QuotaMetrics`
+
+#### `metrics.rs`
+Доменные метрики сервиса — отдельные от инфраструктурного `rust-kit`. `QuotaMetrics` инициализируется один раз при старте и передаётся в `QuotaService`. Содержит 4 инструмента: `redis_flush_total`, `redis_flush_errors_total`, `redis_flush_entries`, `redis_flush_duration_seconds`. Видны в Grafana в секции "Redis Persistence".
 
 #### `transport/grpc.rs`
 gRPC обработчик. Принимает protobuf сообщения, конвертирует в доменные типы, вызывает service слой, конвертирует результат обратно в protobuf. Содержит встроенный дескриптор proto файла для gRPC reflection (чтобы работал `grpcurl list`).
@@ -392,13 +402,3 @@ grpcurl -plaintext -d '{
 
 Quota зависит только от Redis — самая простая зависимость в проекте.
 
----
-
-## Статус кода
-
-Код написан и архитектурно проверен, но **ещё не компилировался** — это первая ревизия. Перед `cargo build` возможны мелкие правки API:
-- Версии OTel crate меняются часто — методы `init` могут называться чуть иначе
-- fred 9.x API — методы `keys()`, `hmget()` — лучше проверить по документации
-- tonic-reflection `build_v1()` — может быть `build_v1alpha()` в зависимости от версии
-
-Запускать через `cargo build 2>&1` и фиксить ошибки компиляции по мере появления.

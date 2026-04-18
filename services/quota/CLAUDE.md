@@ -84,18 +84,19 @@ CheckQuota(subject, bucket, delta)
 ```
 src/
   main.rs            — точка входа, dotenvy, tokio::main
-  app.rs             — App::run(): инит всего, запуск gRPC
+  app.rs             — App::run(): инит всего, MetricsLayer, запуск gRPC
   config.rs          — OnceLock singleton, читается один раз
+  metrics.rs         — QuotaMetrics: flush_total, flush_errors, flush_entries, flush_duration
   domain/
     quota.rs         — UsageEntry, QuotaEntry, ResourceDelta, CheckResult, DenyReason
     error.rs         — QuotaError (thiserror)
   repository/
     traits.rs        — trait QuotaRepository (интерфейс хранилища)
-    redis.rs         — RedisRepository (fred pool, HMGET/HSET)
+    redis.rs         — RedisRepository (fred pool, SCAN/HMGET/HSET)
   cache/
     memory.rs        — MemoryCache (DashMap, атомарный check-and-reserve)
   service/
-    quota.rs         — QuotaService (бизнес-логика, reserve+rollback)
+    quota.rs         — QuotaService (бизнес-логика, reserve+rollback, flush metrics)
   transport/
     grpc.rs          — GrpcHandler (tonic impl, proto↔domain)
 ```
@@ -114,7 +115,7 @@ src/
 | `DEFAULT_USER_BYTES_LIMIT` | `10737418240` | 10 GiB по умолчанию |
 | `DEFAULT_USER_BUCKETS_LIMIT` | `100` | Лимит бакетов |
 | `DEFAULT_USER_OBJECTS_LIMIT` | `-1` | Без ограничений |
-| `ENABLE_OTLP` | `false` | OTel экспорт (включить при `make up-observability`) |
+| `ENABLE_OTLP` | `false` | OTel экспорт; в docker-compose переопределяется в `true` автоматически |
 | `OTLP_ENDPOINT` | `http://otel-collector:4317` | Эндпоинт коллектора |
 
 ---
@@ -150,6 +151,15 @@ src/
 
 ---
 
+## Observability
+
+- **gRPC метрики** — через `rust-kit::middleware::grpc::MetricsLayer` (Tower): `grpc_quota_requests_total`, `grpc_quota_response_total`, `grpc_quota_histogram_response_time_seconds`
+- **Redis метрики** — через `QuotaMetrics` в `metrics.rs`: `quota_redis_flush_total`, `quota_redis_flush_errors_total`, `quota_redis_flush_entries`, `quota_redis_flush_duration_seconds`
+- **Трейсы** — `#[instrument]` на всех методах repository, видны в Jaeger
+- **Grafana дашборд** — `infra/otel/grafana/dashboards/quota.json`, 5 секций: Summary / Traffic / Latency / Errors / Redis Persistence
+
+---
+
 ## Известные ограничения / TODO
 
 - `flush_to_storage` пишет весь DashMap каждые 500ms — для >100k пользователей
@@ -158,3 +168,4 @@ src/
   в prod нужно включить `--appendonly yes` на redis-quota
 - SetQuota write-through синхронный — при большом количестве вызовов можно
   сделать batch с debounce
+- `delete_subject` в cache/repository/service помечен `#[allow(dead_code)]` — Phase 2, пока не подключён к gRPC
