@@ -24,7 +24,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -116,7 +116,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "opens3-prometheus"
           },
           "editorMode": "code",
           "expr": "sum(rate(grpc_storage_server_response_total[$__rate_interval]))",
@@ -133,7 +133,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -225,7 +225,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -313,7 +313,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "opens3-prometheus"
           },
           "editorMode": "code",
           "expr": "sum by (method) (rate(grpc_storage_server_response_total{status=\"error\"}[$__rate_interval]))",
@@ -330,7 +330,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -418,7 +418,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "opens3-prometheus"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -439,7 +439,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "opens3-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -525,7 +525,7 @@
           "refId": "A"
         }
       ],
-      "title": "Прирост занятого метса",
+      "title": "\u041f\u0440\u0438\u0440\u043e\u0441\u0442 \u0437\u0430\u043d\u044f\u0442\u043e\u0433\u043e \u043c\u0435\u0442\u0441\u0430",
       "type": "timeseries"
     }
   ],
@@ -541,7 +541,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "New dashboard Copy",
-  "uid": "1aadd6cb-a6a7-4f49-8229-5c2b8e624d10",
+  "title": "Opens3 \u2014 Storage",
+  "uid": "opens3-storage",
   "version": 9
 }

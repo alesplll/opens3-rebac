@@ -2,6 +2,7 @@ name: Users CI
 
 on:
   push:
+    branches: [main]
     paths:
       - "services/users/**"
   pull_request:
