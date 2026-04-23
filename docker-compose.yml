@@ -132,6 +132,20 @@ services:
   # ── Services ───────────────────────────────────────────────────────────────
   # docker compose --profile services up
 
+  migrator-metadata:
+    profiles: [services]
+    build:
+      context: ./services/metadata
+      dockerfile: migrator.Dockerfile
+    env_file:
+      - services/metadata/.env
+    networks:
+      - opens3-network
+    restart: on-failure
+    depends_on:
+      postgres-metadata:
+        condition: service_healthy
+
   migrator-users:
     profiles: [services]
     build:
@@ -209,9 +223,18 @@ services:
       dockerfile: services/metadata/Dockerfile
     ports:
       - "50052:50052"
+    env_file:
+      - services/metadata/.env
     networks:
       - opens3-network
     restart: unless-stopped
+    depends_on:
+      postgres-metadata:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      migrator-metadata:
+        condition: service_completed_successfully
 
   storage:
     profiles: [services]
