@@ -1,151 +1,216 @@
 # CLAUDE.md — opens3-rebac
 
-> Этот файл помогает AI-ассистентам (Claude, Copilot и т.д.) быстро понять контекст проекта и давать точные, согласованные с архитектурой ответы.
+> Context file for AI assistants. Covers actual project state, architecture, and working guidelines.
 
 ---
 
-## Что такое этот проект
+## What this project is
 
-**OpenS3** — распределённое объектное хранилище, совместимое с S3 API, с авторизацией на основе **ReBAC** (Relationship-Based Access Control). Учебный командный проект на 4 человека.
+**OpenS3-ReBAC** — a distributed S3-compatible object storage with **ReBAC** (Relationship-Based Access Control) authorization. Team learning project (4 people).
 
-Репозиторий: https://github.com/alesplll/opens3-rebac  
+Repo: https://github.com/alesplll/opens3-rebac  
 Wiki: https://github.com/alesplll/opens3-rebac/wiki
 
 ---
 
-## Команда и сервисы
+## Services (current actual state)
 
-| Сервис | Язык | Порт | Кто |
-|---|---|---|---|
-| **Gateway** | Go | `:8080` (HTTP) | Макс |
-| **AuthZ (ReBAC)** | Python | `:50051` (gRPC) | Алекса (я) |
-| **Metadata Service** | Python | `:50052` (gRPC) | Аня |
-| **Data Node** | Go | `:50053` (gRPC) | Илья |
+| Service | Lang | Port | Owner | Status |
+|---|---|---|---|---|
+| **Gateway** | Go | `:8080` (HTTP) | Max | ⚠️ Not implemented |
+| **Auth** | Go | `:50050` (gRPC) | — | ✅ Complete |
+| **AuthZ (ReBAC)** | Python | `:50051` (gRPC) | Alexa | ✅ Complete |
+| **Metadata** | Go | `:50052` (gRPC) | Anya | ✅ Complete |
+| **Storage (Data Node)** | Go | `:50053` (gRPC) | Ilya | ✅ Complete |
+| **Users** | Go | `:50054` (gRPC) | — | ✅ Complete |
+| **Quota** | Rust | `:50055` (gRPC) | — | ✅ Complete |
 
-Связь между сервисами — **gRPC**. Клиент → Gateway — **HTTP/S3 API**.
+Service-to-service communication: **gRPC**. Client → Gateway: **HTTP / S3 API**.
 
 ---
 
-## Архитектура одной строкой
+## Architecture
 
 ```
-Client (HTTP S3) → Gateway → [AuthZ (ReBAC) | Metadata Service | Data Node]
-                                     ↕                  ↕
-                                   Neo4j            PostgreSQL
-                                   Redis
-                                                Kafka (async events)
+Client (HTTP / S3 API)
+        │
+        ▼
+   Gateway :8080          ← single entry point (NOT YET IMPLEMENTED)
+   /   |    |    \
+Auth  AuthZ Meta Storage
+:50050 :50051 :50052 :50053
+  │      │      │      │
+  │    Neo4j  PostgreSQL filesystem
+  │    Redis  Kafka
+  │
+Users :50054
+  │
+PostgreSQL
+
+Quota :50055  ← enforces per-user/bucket limits (Redis + Kafka)
 ```
 
-Gateway — единственная точка входа. Он **не хранит состояние**, только оркестрирует.
+---
+
+## Tech stack
+
+- **Go 1.24.1** — Auth, Users, Metadata, Storage (go.work workspace)
+- **Python 3.12** — AuthZ
+- **Rust 2021** — Quota (tonic + tokio + fred)
+- **gRPC / Protobuf** — all inter-service communication
+- **PostgreSQL** — Users (port 5432), Metadata (port 5433)
+- **Neo4j** — AuthZ relation graph
+- **Redis** — Auth/AuthZ cache, Quota hot-path storage
+- **Kafka** — async events (audit, cache invalidation, object lifecycle)
+- **Docker Compose** — local dev (`--profile services`, `--profile observability`)
+- **OpenTelemetry / Jaeger / Prometheus / Grafana / Kibana** — observability
 
 ---
 
-## Стек технологий
+## Repository structure
 
-- **Go 1.23** — Gateway, Data Node
-- **Python 3.12** — AuthZ, Metadata Service
-- **gRPC / Protobuf** — внутренняя связь сервисов
-- **PostgreSQL** — метаданные (buckets, objects, versions)
-- **Neo4j** — граф прав доступа (ReBAC)
-- **Redis** — кэш решений авторизации (TTL 30s)
-- **Kafka** — асинхронные события между сервисами
-- **Docker Compose** — локальная среда разработки
-- **Prometheus + Grafana** — мониторинг (Phase 4)
+```
+opens3-rebac/
+├── shared/
+│   ├── api/                   # Proto source files (source of truth)
+│   │   ├── auth/v1/auth.proto
+│   │   ├── user/v1/user.proto
+│   │   ├── metadata/v1/metadata.proto
+│   │   ├── storage/v1/storage.proto
+│   │   ├── authz/v1/authz.proto
+│   │   └── quota/v1/quota.proto
+│   └── pkg/
+│       ├── go/                # Generated Go stubs (*_pb.go, *_grpc.pb.go)
+│       ├── py/                # Generated Python stubs (*_pb2.py, *_pb2_grpc.py)
+│       ├── go-kit/            # Shared Go infrastructure
+│       │   ├── middleware/    # metrics, rate limiter, circuit breaker
+│       │   ├── tracing/       # OTel gRPC interceptor
+│       │   ├── logger/
+│       │   ├── tokens/        # JWT service
+│       │   ├── client/db/     # PostgreSQL + tx manager
+│       │   ├── kafka/         # producer + consumer
+│       │   └── contextx/
+│       ├── py_kit/            # Shared Python infrastructure
+│       └── rust-kit/          # Shared Rust infrastructure
+│
+├── services/
+│   ├── auth/                  # Go, JWT token issuance
+│   ├── users/                 # Go, user CRUD + credentials
+│   ├── authz/                 # Python, ReBAC engine
+│   ├── metadata/              # Go, bucket + object metadata
+│   ├── storage/               # Go, blob filesystem storage
+│   └── quota/                 # Rust, per-user/bucket quota enforcement
+│
+├── infra/otel/                # Observability configs (Jaeger, Prometheus, Grafana, Kibana)
+├── .github/workflows/         # CI per service (auth, users, metadata, storage, authz, quota)
+└── docker-compose.yml         # Full stack (profiles: services, observability)
+```
 
 ---
 
-## Протоколы / пакеты gRPC
+## Proto contracts
 
-| Сервис | proto package | service |
+Proto files live in `shared/api/`. Generated stubs are committed to `shared/pkg/go/` and `shared/pkg/py/`.
+
+| Service | package | RPC methods |
 |---|---|---|
-| AuthZ | `opens3.authz.v1` | `PermissionService` |
-| Metadata | `opens3.metadata.v1` | `MetadataService` |
-| Data Node | `opens3.storage.v1` | `DataStorageService` |
-
-Proto-файлы: `proto/authz/v1/authz.proto`, `proto/metadata/v1/metadata.proto`, `proto/storage/v1/storage.proto`
-
-> **Важно:** `services/authz/proto/authz.proto` (standalone) использует пакет `rebac.authz.v1`.
-> До интеграции Gateway ↔ AuthZ его нужно синхронизировать с shared proto (`opens3.authz.v1`).
-> См. `services/authz/issues/proto_package_sync.md`.
+| Auth | `opens3.auth.v1` | `Login`, `GetAccessToken`, `GetRefreshToken`, `ValidateToken`, `HealthCheck` |
+| Users | `opens3.user.v1` | `Create`, `Get`, `Delete`, `Update`, `UpdatePassword`, `ValidateCredentials`, `HealthCheck` |
+| AuthZ | `opens3.authz.v1` | `Check`, `WriteTuple`, `DeleteTuple`, `Read`, `HealthCheck` |
+| Metadata | `opens3.metadata.v1` | `CreateBucket`, `DeleteBucket`, `GetBucket`, `HeadBucket`, `ListBuckets`, `CreateObjectVersion`, `DeleteObjectMeta`, `GetObjectMeta`, `ListObjects`, `HealthCheck` |
+| Storage | `opens3.storage.v1` | `StoreObject`, `RetrieveObject`, `DeleteObject`, `InitiateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `HealthCheck` |
+| Quota | `opens3.quota.v1` | `CheckQuota`, `UpdateUsage`, `SetQuota`, `SetLimit`, `HealthCheck` |
 
 ---
 
-## Ключевые концепции
+## Key domain concepts
 
-### Соглашение об ID сущностей (AuthZ)
+### AuthZ: entity ID convention
 
-Все ID в AuthZ имеют формат `prefix:name`:
+All IDs in the AuthZ graph follow the format `prefix:name`:
 
-| Префикс | Тип | Пример |
+| Prefix | Type | Example |
 |---|---|---|
-| `user:` | Пользователь | `user:alice` |
-| `group:` | Группа | `group:editors` |
-| `bucket:` | Бакет | `bucket:photos` |
-| `object:` | Объект | `object:photos/cat.jpg` |
-| `folder:` | Папка | `folder:reports/2024` |
+| `user:` | User | `user:alice` |
+| `group:` | Group | `group:editors` |
+| `bucket:` | Bucket | `bucket:photos` |
+| `object:` | Object | `object:photos/cat.jpg` |
+| `folder:` | Folder | `folder:reports/2024` |
 
-### Маппинг S3 → ReBAC Check
-
-| S3 операция | action | object |
-|---|---|---|
-| GetObject | `read` | `object:{bucket}/{key}` |
-| PutObject | `write` | `object:{bucket}` (**бакет**, не объект) |
-| DeleteObject | `delete` | `object:{bucket}/{key}` |
-| ListBucket | `read` | `bucket:{bucket}` |
-| CreateBucket | — | **Check не нужен**, любой пользователь может создать |
-| DeleteBucket | `delete` | `bucket:{bucket}` |
-
-> **Важно:** при `PutObject` Check делается на `object:{bucket}` (родительский бакет), потому что объект ещё не существует. После успешного сохранения Gateway вызывает `WriteTuple` чтобы добавить объект в граф.
-
-### Иерархия уровней в ReBAC
+### AuthZ: permission level hierarchy
 
 ```
 read < write < create < delete < admin
 ```
 
-Ребро типа `HAS_PERMISSION` с `level: write` разрешает также `write`, `create`, `delete`, `admin`. `admin` разрешает всё.
+A `HAS_PERMISSION` edge with `level: write` also grants `write`, `create`, `delete`, `admin`.
 
-### Типы рёбер в Neo4j
+### AuthZ: Neo4j edge types
 
-| Ребро | От → К | Смысл |
+| Edge | From → To | Meaning |
 |---|---|---|
-| `MEMBER_OF` | User/Group → Group | Членство в группе (транзитивное) |
-| `HAS_PERMISSION` | User/Group → Resource | Разрешение с уровнем |
-| `PARENT_OF` | Resource → Resource | Иерархия (bucket → object) |
-| `OWNER_OF` | User → Resource | Полный доступ (legacy = admin) |
+| `MEMBER_OF` | User/Group → Group | Group membership (transitive) |
+| `HAS_PERMISSION` | User/Group → Resource | Permission with level |
+| `PARENT_OF` | Resource → Resource | Hierarchy (bucket → object) |
+| `OWNER_OF` | User → Resource | Full access (legacy = admin) |
 
-### Иерархия сущностей Metadata
+### AuthZ: Redis cache
+
+Key: `auth_decision:{subject}:{action}:{object}`, TTL 30s.  
+Invalidation: AuthZ publishes to `auth-changes` topic; `cache_invalidator` process consumes it.
+
+### S3 → ReBAC mapping
+
+| S3 operation | action | resource |
+|---|---|---|
+| `GetObject` | `read` | `object:{bucket}/{key}` |
+| `PutObject` | `write` | `object:{bucket}` (**bucket**, not the object — it doesn't exist yet) |
+| `DeleteObject` | `delete` | `object:{bucket}/{key}` |
+| `ListBucket` | `read` | `bucket:{bucket}` |
+| `CreateBucket` | — | no check needed — any user can create |
+| `DeleteBucket` | `delete` | `bucket:{bucket}` |
+
+### Metadata: entity hierarchy
 
 ```
 Bucket
-  └── Object (ключ, например photos/2026/cat.jpg)
-        └── Version (неизменяемый blob_id + size + ETag)
-              current_version_id → указатель на актуальную версию
+  └── Object (key, e.g. photos/2026/cat.jpg)
+        └── Version (immutable blob_id + size + ETag)
+              current_version_id → pointer to active version
 ```
 
-### Kafka топики
+### Quota: hot-path architecture
 
-| Топик | Кто пишет | Кто читает | Событие |
-|---|---|---|---|
-| `object-stored` | Data Node | Metadata Service | blob полностью записан |
-| `object-deleted` | Metadata Service | Data Node, AuthZ | объект помечен удалённым |
-| `bucket-deleted` | Metadata Service | AuthZ | бакет удалён |
-| `auth-changes` | AuthZ | AuthZ (cache_invalidator) | граф прав изменился |
-| `auth-audit` | AuthZ | — (log sink) | каждый Check |
+In-memory DashMap (~100ns lookup) → Redis persistence (flush every 1s).  
+Reserve-and-rollback pattern: check user quota → check bucket quota → commit.
 
 ---
 
-## Полные flow операций
+## Kafka topics
 
-### PutObject
+| Topic | Producer | Consumer | Event |
+|---|---|---|---|
+| `object-stored` | Storage | Metadata | blob fully written |
+| `object-deleted` | Metadata | Storage, AuthZ | object marked deleted |
+| `bucket-deleted` | Metadata | AuthZ | bucket deleted |
+| `auth-changes` | AuthZ | AuthZ cache_invalidator | graph changed |
+| `auth-audit` | AuthZ | — (log sink) | every Check decision |
+
+---
+
+## Full operation flows
+
+### PutObject (planned, Gateway not implemented)
 
 ```
 Client → PUT /{bucket}/{key}
-  → Gateway: извлечь user_id из JWT
-  → Check("user:{uid}", "write", "object:{bucket}") → ReBAC → ALLOW
-  → StoreObject(stream) → Data Node → { blob_id, checksum_md5 }
+  → Gateway: extract user_id from JWT
+  → Check("user:{uid}", "write", "object:{bucket}") → AuthZ → ALLOW
+  → CheckQuota(user_id, bucket) → Quota → ALLOW
+  → StoreObject(stream) → Storage → { blob_id, checksum_md5 }
   → CreateObjectVersion(bucket, key, blob_id, size, etag) → Metadata → { version_id }
-  → WriteTuple("bucket:{bucket}", "PARENT_OF", "object:{bucket}/{key}") → ReBAC
+  → WriteTuple("bucket:{bucket}", "PARENT_OF", "object:{bucket}/{key}") → AuthZ
+  → UpdateUsage(user_id, bucket, size) → Quota
   → 200 OK { ETag, version_id }
 ```
 
@@ -153,50 +218,38 @@ Client → PUT /{bucket}/{key}
 
 ```
 Client → GET /{bucket}/{key}
-  → Check("user:{uid}", "read", "object:{bucket}/{key}") → ReBAC → ALLOW
+  → Check("user:{uid}", "read", "object:{bucket}/{key}") → AuthZ → ALLOW
   → GetObjectMeta(bucket, key) → Metadata → { blob_id, size, etag, content_type }
-  → RetrieveObject(blob_id) → Data Node → stream bytes
+  → RetrieveObject(blob_id) → Storage → stream bytes
   → 200 OK + body stream
-```
-
-### DeleteObject
-
-```
-Client → DELETE /{bucket}/{key}
-  → Check("user:{uid}", "delete", "object:{bucket}/{key}") → ReBAC → ALLOW
-  → DeleteObjectMeta(bucket, key) → Metadata
-  → Metadata → Kafka: ObjectDeleted { blob_id }
-  → 204 No Content
-  (асинхронно: Data Node удаляет файл, AuthZ удаляет узел из графа)
 ```
 
 ### CreateBucket
 
 ```
 Client → PUT /{bucket}
-  → [нет Check]
+  → [no AuthZ check]
   → CreateBucket(name, owner_id) → Metadata → { bucket_id }
-  → WriteTuple("user:{uid}", "OWNER_OF", "bucket:{bucket}") → ReBAC
+  → WriteTuple("user:{uid}", "OWNER_OF", "bucket:{bucket}") → AuthZ
   → 200 OK
 ```
 
 ---
 
-## Обработка ошибок: gRPC → HTTP
+## gRPC → HTTP error mapping
 
-| gRPC | HTTP |
+| gRPC status | HTTP |
 |---|---|
 | `NOT_FOUND` | 404 |
 | `ALREADY_EXISTS` | 409 |
-| `FAILED_PRECONDITION` | 409 (например, бакет не пуст) |
-| `PERMISSION_DENIED` / allowed=false | 403 |
+| `FAILED_PRECONDITION` | 409 (e.g. bucket not empty) |
+| `PERMISSION_DENIED` | 403 |
+| `RESOURCE_EXHAUSTED` | 507 (quota exceeded) |
 | `INVALID_ARGUMENT` | 400 |
-| `RESOURCE_EXHAUSTED` | 507 |
 | `UNAVAILABLE` | 503 |
 | `INTERNAL` | 500 |
 
-Ошибки возвращаются клиенту в S3-совместимом XML:
-
+S3-compatible XML error format:
 ```xml
 <Error>
   <Code>NoSuchBucket</Code>
@@ -208,62 +261,65 @@ Client → PUT /{bucket}
 
 ---
 
-## Конфигурация (env vars по сервисам)
+## Environment variables
 
-### AuthZ
-
-| Var | Default | Описание |
+### Auth (`:50050`)
+| Var | Default | Required |
 |---|---|---|
-| `GRPC_PORT` | `50051` | gRPC порт |
-| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j |
-| `NEO4J_USER` | `neo4j` | |
-| `NEO4J_PASSWORD` | — | **обязателен** |
+| `GRPC_PORT` | `50050` | |
 | `REDIS_HOST` | `localhost` | |
 | `REDIS_PORT` | `6379` | |
-| `CACHE_TTL_SECONDS` | `30` | TTL кэша решений |
+| `JWT_SECRET` | — | ✅ |
+| `JWT_ALGORITHM` | `HS256` | |
+| `USERS_GRPC_ADDR` | `users:50054` | |
+
+### Users (`:50054`)
+| Var | Default | Required |
+|---|---|---|
+| `GRPC_PORT` | `50054` | |
+| `DATABASE_URL` | — | ✅ PostgreSQL DSN |
+
+### AuthZ (`:50051`)
+| Var | Default | Required |
+|---|---|---|
+| `GRPC_PORT` | `50051` | |
+| `NEO4J_URI` | `bolt://localhost:7687` | |
+| `NEO4J_USER` | `neo4j` | |
+| `NEO4J_PASSWORD` | — | ✅ |
+| `REDIS_HOST` | `localhost` | |
+| `REDIS_PORT` | `6379` | |
+| `CACHE_TTL_SECONDS` | `30` | |
 | `KAFKA_BOOTSTRAP` | `localhost:9092` | |
-| `KAFKA_CHANGES_TOPIC` | `auth-changes` | |
-| `KAFKA_AUDIT_TOPIC` | `auth-audit` | |
 
-### Metadata Service
-
-| Var | Default | Описание |
+### Metadata (`:50052`)
+| Var | Default | Required |
 |---|---|---|
 | `GRPC_PORT` | `50052` | |
-| `DATABASE_URL` | — | **обязателен** PostgreSQL DSN |
+| `DATABASE_URL` | — | ✅ PostgreSQL DSN |
 | `DB_MAX_CONNECTIONS` | `20` | |
 | `KAFKA_BOOTSTRAP` | `localhost:9092` | |
-| `KAFKA_OBJECT_DELETED_TOPIC` | `object-deleted` | |
-| `KAFKA_OBJECT_STORED_TOPIC` | `object-stored` | |
 
-### Data Node
-
-| Var | Default | Описание |
+### Storage (`:50053`)
+| Var | Default | Required |
 |---|---|---|
 | `GRPC_PORT` | `50053` | |
-| `DATA_DIR` | `/data/blobs` | директория blob-файлов |
-| `MULTIPART_DIR` | `/data/multipart` | временные part-файлы |
-| `KAFKA_BOOTSTRAP` | `localhost:9092` | |
-| `KAFKA_OBJECT_DELETED_TOPIC` | `object-deleted` | |
-| `KAFKA_OBJECT_STORED_TOPIC` | `object-stored` | |
+| `DATA_DIR` | `/data/blobs` | |
+| `MULTIPART_DIR` | `/data/multipart` | |
 | `MAX_CHUNK_SIZE_BYTES` | `8388608` | 8 MB |
 
-### Gateway
-
-| Var | Default | Описание |
+### Quota (`:50055`)
+| Var | Default | Required |
 |---|---|---|
-| `HTTP_PORT` | `8080` | |
-| `AUTHZ_GRPC_ADDR` | `authz:50051` | |
-| `METADATA_GRPC_ADDR` | `metadata:50052` | |
-| `STORAGE_GRPC_ADDR` | `storage:50053` | |
-| `JWT_SECRET` | — | **обязателен** |
-| `JWT_ALGORITHM` | `HS256` | |
-| `MAX_UPLOAD_SIZE_BYTES` | `5368709120` | 5 GB |
-| `GRPC_TIMEOUT_MS` | `5000` | |
+| `GRPC_PORT` | `50055` | |
+| `REDIS_HOST` | `localhost` | |
+| `REDIS_PORT` | `6379` | |
+| `FLUSH_INTERVAL_MS` | `1000` | |
 
 ---
 
-## Схема БД (PostgreSQL — Metadata Service)
+## Database schemas
+
+### PostgreSQL — Metadata Service
 
 ```sql
 CREATE TABLE buckets (
@@ -293,78 +349,117 @@ CREATE TABLE versions (
 );
 ```
 
-Индексы: `objects(bucket_id, key)`, `versions(object_id)`, `objects(bucket_id, key text_pattern_ops)` для ListObjects с prefix.
+Indexes: `objects(bucket_id, key)`, `versions(object_id)`, `objects(bucket_id, key text_pattern_ops)` for prefix-based `ListObjects`.
 
 ---
 
-## Структура файловой системы Data Node
+## Local development
 
-```
-/data/blobs/
-    {blob_id}            ← финальные объекты (UUID v4 имя файла)
-    ...
-/data/multipart/
-    {upload_id}/
-        part_1
-        part_2
-        ...
+```bash
+# Start all services + infra
+docker compose --profile services up --build -d
+
+# Start with observability (Jaeger, Prometheus, Grafana, Kibana)
+docker compose --profile services --profile observability up --build -d
+
+# Shortcuts via make
+make up-services
+make up-observability
+make down
+make down-volumes
+make rebuild
 ```
 
-> Рекомендация: вложенность `blobs/{blob_id[0:2]}/{blob_id}` чтобы не класть >100k файлов в одну директорию.
+### Observability UIs
+
+| UI | Address | Credentials |
+|---|---|---|
+| Jaeger | http://localhost:16686 | — |
+| Prometheus | http://localhost:9090 | — |
+| Grafana | http://localhost:3000 | — |
+| Kibana | http://localhost:5601 | — |
+| Neo4j Browser | http://localhost:7474 | neo4j / password123 |
 
 ---
 
-## Health checks
+## Testing
 
-- **AuthZ / Metadata / Data Node**: `rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse)` — определён в каждом proto-файле. `ServingStatus`: `SERVING` | `NOT_SERVING` | `UNKNOWN`.
-  - AuthZ: `NOT_SERVING` если Neo4j или Redis недоступны
-  - Metadata: `NOT_SERVING` если PostgreSQL или Kafka недоступны
-  - Data Node: `NOT_SERVING` если `DATA_DIR` недоступна
-- **Gateway**: `GET /health` → liveness, `GET /ready` → readiness (вызывает `HealthCheck` у всех трёх gRPC-сервисов)
+Each service has unit tests and (where applicable) integration tests.
+
+```bash
+# Go services (from repo root via go.work)
+go test ./services/auth/...
+go test ./services/users/...
+go test ./services/metadata/...
+go test ./services/storage/...
+
+# Python — AuthZ
+cd services/authz
+pytest tests/unit/
+pytest tests/integration/  # requires Neo4j running
+
+# Rust — Quota
+cd services/quota
+cargo test                         # unit + in-process gRPC tests
+TEST_REDIS_URL=redis://localhost:6379 cargo test -- --include-ignored  # with Redis
+```
+
+CI runs per-service via `.github/workflows/` on push to `main` and on PRs.
 
 ---
 
 ## Roadmap
 
-| Фаза | Статус | Что |
+| Phase | Status | What |
 |---|---|---|
-| **Phase 0** | ✅ Done | Синхронизация, контракты, Docker Compose |
+| **Phase 0** | ✅ Done | Contracts, Docker Compose, shared infrastructure |
 | **Phase 1** | 🔄 In Progress | MVP: PutObject + GetObject end-to-end |
-| **Phase 2** | ⏳ | CreateBucket, DeleteBucket, DeleteObject, Kafka, права доступа, версионирование |
-| **Phase 3** | ⏳ | Multipart upload, шеринг объектов, S3-совместимость |
-| **Phase 4** | ⏳ | Аудит, мониторинг, E2E тесты |
+| **Phase 2** | ⏳ | CreateBucket, DeleteBucket, DeleteObject, Kafka wiring, versioning |
+| **Phase 3** | ⏳ | Multipart upload, object sharing, full S3 compatibility |
+| **Phase 4** | ⏳ | Audit, E2E tests |
 
-**Принцип:** каждая фаза заканчивается рабочим демо, а не просто написанным кодом.
-
----
-
-## Частые вопросы / ловушки
-
-**Q: Почему при PutObject Check делается на бакет, а не объект?**  
-A: Объект ещё не существует — нечего проверять. Разрешение на запись в бакет означает возможность создавать объекты внутри. После создания Gateway добавляет `PARENT_OF` ребро в граф.
-
-**Q: Кто генерирует blob_id?**  
-A: Только Data Node. Metadata Service получает blob_id от Gateway, который получил его от Data Node.
-
-**Q: Как работает кэш AuthZ?**  
-A: Redis, ключ `auth_decision:{subject}:{action}:{object}`, TTL 30s. При изменении графа AuthZ публикует в `auth-changes`, фоновый процесс `cache_invalidator` инвалидирует ключи по паттерну.
-
-**Q: Data Node общается с Metadata Service напрямую?**  
-A: Нет. Только через Kafka. Data Node → `object-stored` → Metadata. Metadata → `object-deleted` → Data Node.
-
-**Q: Что значит `OWNER_OF` vs `HAS_PERMISSION{level: admin}`?**  
-A: `OWNER_OF` — legacy ребро, полный доступ. В новом коде лучше использовать `HAS_PERMISSION` с `level: admin`. Граф-запросы поддерживают оба варианта через fallback.
-
-**Q: Аутентификация vs авторизация?**  
-A: Gateway аутентифицирует (JWT → user_id). AuthZ авторизует (user_id → ALLOW/DENY). AuthZ ничего не знает о JWT.
+Each phase ends with a working demo.
 
 ---
 
-## Что НЕ делает каждый сервис (границы)
+## Service boundaries
 
-| Сервис | НЕ делает |
+| Service | Does NOT |
 |---|---|
-| **AuthZ** | аутентификацию, хранение метаданных, работу с байтами, знание об HTTP |
-| **Metadata** | хранение байтов, проверку прав, знание об S3 API |
-| **Data Node** | проверку прав, хранение метаданных, знание о ключах объектов |
-| **Gateway** | хранение данных, принятие решений о правах, знание о структуре графа |
+| **AuthZ** | authenticate users, store metadata, handle bytes, know about HTTP |
+| **Metadata** | store bytes, check permissions, know about S3 API |
+| **Storage** | check permissions, store metadata, know about object keys |
+| **Quota** | enforce auth, store metadata, know about blobs |
+| **Auth** | authorize (that's AuthZ), manage user profiles |
+| **Users** | issue tokens, know about S3, check permissions |
+| **Gateway** | store data, make authorization decisions, know about graph structure |
+
+---
+
+## Working guidelines for AI assistants
+
+### Commits
+- Commit **granularly** — one logical change per commit.
+- No `Co-Authored-By` lines.
+- Commit message format: `type(scope): short description` (e.g. `feat(metadata): add ListObjects handler`).
+
+### Tests
+- Every new feature or bug fix **must** include tests or an explicit offer to add them.
+- Go: table-driven tests with `testify`, mocks via `minimock`.
+- Python: `pytest`, fixtures in `conftest.py`.
+- Rust: `#[cfg(test)]` modules for unit tests, `tests/` for integration.
+- Integration tests that require external services (Neo4j, Redis) must be skippable without infra.
+
+### Documentation hygiene
+- When a gRPC contract changes (proto file, RPC name, field), update:
+  - The relevant proto file in `shared/api/`
+  - `README.md` (service section)
+  - `CLAUDE.md` (proto contracts table, env vars if needed)
+  - The service's own `README.md`
+- When a new service is added, add it to the services table and architecture diagram in both `CLAUDE.md` and `README.md`.
+- When env vars change, update both the service's own config and the env vars section here.
+
+### Code style
+- No comments explaining WHAT the code does — only WHY, when non-obvious.
+- No speculative abstractions. Implement only what the current task requires.
+- Error handling only at system boundaries (user input, external calls). Do not wrap internal errors defensively.
