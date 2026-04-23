@@ -9,6 +9,15 @@
   <img src="https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white" alt="Redis" />
   <img src="https://img.shields.io/badge/Kafka-Events-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/Rust-1.87-000000?logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/OpenTelemetry-Tracing-425CC7?logo=opentelemetry&logoColor=white" alt="OpenTelemetry" />
+  <img src="https://img.shields.io/badge/Jaeger-Tracing-66CFE3?logo=jaeger&logoColor=white" alt="Jaeger" />
+  <img src="https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white" alt="Prometheus" />
+  <img src="https://img.shields.io/badge/Grafana-Dashboards-F46800?logo=grafana&logoColor=white" alt="Grafana" />
+  <img src="https://img.shields.io/badge/Elasticsearch-Logs-005571?logo=elasticsearch&logoColor=white" alt="Elasticsearch" />
+  <img src="https://img.shields.io/badge/Kibana-UI-E8488B?logo=kibana&logoColor=white" alt="Kibana" />
+</p>
+
 </p>
 
 <h1 align="center">OpenS3-ReBAC</h1>
