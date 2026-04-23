@@ -1,0 +1,28 @@
+name: Metadata CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/metadata/**"
+  pull_request:
+    paths:
+      - "services/metadata/**"
+
+defaults:
+  run:
+    working-directory: services/metadata
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.1'
+
+      - name: Run tests
+        run: go test ./... -count=1
