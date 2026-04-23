@@ -1,6 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go" alt="Go" />
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/Rust-1.87-000000?logo=rust&logoColor=white" alt="Rust" />
   <img src="https://img.shields.io/badge/gRPC-Protobuf-00C7B7?logo=google-cloud&logoColor=white" alt="gRPC" />
   <img src="https://img.shields.io/badge/S3-Compatible%20API-FF9900?logo=amazons3&logoColor=white" alt="S3" />
   <img src="https://img.shields.io/badge/ReBAC-Authorization-6B46C1" alt="ReBAC" />
@@ -9,7 +10,6 @@
   <img src="https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white" alt="Redis" />
   <img src="https://img.shields.io/badge/Kafka-Events-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/Rust-1.87-000000?logo=rust&logoColor=white" alt="Rust" />
   <img src="https://img.shields.io/badge/OpenTelemetry-Tracing-425CC7?logo=opentelemetry&logoColor=white" alt="OpenTelemetry" />
   <img src="https://img.shields.io/badge/Jaeger-Tracing-66CFE3?logo=jaeger&logoColor=white" alt="Jaeger" />
   <img src="https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white" alt="Prometheus" />
