@@ -8,6 +8,7 @@ import (
 	authclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/auth"
 	authzclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/authz"
 	metadataclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/metadata"
+	quotaclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/quota"
 	storageclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/storage"
 	usersclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/grpc/users"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
@@ -23,6 +24,7 @@ import (
 	authv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	quotav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/quota/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	userv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"go.uber.org/zap"
@@ -35,12 +37,14 @@ type serviceProvider struct {
 	authzConn    *grpc.ClientConn
 	usersConn    *grpc.ClientConn
 	metadataConn *grpc.ClientConn
+	quotaConn    *grpc.ClientConn
 	storageConn  *grpc.ClientConn
 
 	authClient     grpcclient.AuthClient
 	authzClient    grpcclient.AuthZClient
 	usersClient    grpcclient.UsersClient
 	metadataClient grpcclient.MetadataClient
+	quotaClient    grpcclient.QuotaClient
 	storageClient  grpcclient.StorageClient
 	tokenVerifier  tokens.TokenVerifier
 	authenticator  authentication.Service
@@ -116,6 +120,19 @@ func (s *serviceProvider) StorageClient(ctx context.Context) grpcclient.StorageC
 	return s.storageClient
 }
 
+func (s *serviceProvider) QuotaClient(ctx context.Context) grpcclient.QuotaClient {
+	if s.quotaClient == nil {
+		cfg := config.AppConfig()
+		conn := s.quotaConnOrFatal(ctx)
+		s.quotaClient = quotaclient.NewClient(
+			quotav1.NewQuotaServiceClient(conn),
+			cfg.Quota.Timeout(),
+		)
+	}
+
+	return s.quotaClient
+}
+
 func (s *serviceProvider) AuthService(ctx context.Context) service.AuthService {
 	if s.authService == nil {
 		s.authService = authservice.NewService(
@@ -132,6 +149,7 @@ func (s *serviceProvider) GatewayService(ctx context.Context) service.GatewaySer
 		s.gatewayService = gatewayservice.NewService(
 			s.AuthZClient(ctx),
 			s.MetadataClient(ctx),
+			s.QuotaClient(ctx),
 			s.StorageClient(ctx),
 		)
 	}
@@ -212,6 +230,15 @@ func (s *serviceProvider) storageConnOrFatal(ctx context.Context) *grpc.ClientCo
 	}
 
 	return s.storageConn
+}
+
+func (s *serviceProvider) quotaConnOrFatal(ctx context.Context) *grpc.ClientConn {
+	if s.quotaConn == nil {
+		cfg := config.AppConfig()
+		s.quotaConn = s.mustDial(ctx, "quota", cfg.Quota.Address())
+	}
+
+	return s.quotaConn
 }
 
 func (s *serviceProvider) mustDial(ctx context.Context, name, address string) *grpc.ClientConn {

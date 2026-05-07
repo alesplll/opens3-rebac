@@ -2,6 +2,7 @@ name: AuthZ CI
 
 on:
   push:
+    branches: [main]
     paths:
       - "services/authz/**"
       - "shared/api/authz/**"

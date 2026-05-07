@@ -5,7 +5,7 @@ import warnings
 
 from . import storage_pb2 as storage__pb2
 
-GRPC_GENERATED_VERSION = '1.78.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -33,8 +33,10 @@ class DataStorageServiceStub(object):
     Порт: 50053 (конфигурируется через GRPC_PORT)
 
     Структура хранилища на диске:
-    /data/blobs/{blob_id}           — готовые объекты
-    /data/multipart/{upload_id}/    — временные части multipart-загрузки
+    {DATA_DIR}/{shard}/{blob_id}                       — готовые объекты
+    {MULTIPART_DIR}/uploads/{upload_id}/               — multipart session + parts
+    {MULTIPART_DIR}/uploads/{blob_id}/                 — staging single-part upload
+    {MULTIPART_DIR}/completed/{shard}/{upload_id}.json — marker для идемпотентного CompleteMultipartUpload
 
     Kafka:
     Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)
@@ -97,8 +99,10 @@ class DataStorageServiceServicer(object):
     Порт: 50053 (конфигурируется через GRPC_PORT)
 
     Структура хранилища на диске:
-    /data/blobs/{blob_id}           — готовые объекты
-    /data/multipart/{upload_id}/    — временные части multipart-загрузки
+    {DATA_DIR}/{shard}/{blob_id}                       — готовые объекты
+    {MULTIPART_DIR}/uploads/{upload_id}/               — multipart session + parts
+    {MULTIPART_DIR}/uploads/{blob_id}/                 — staging single-part upload
+    {MULTIPART_DIR}/completed/{shard}/{upload_id}.json — marker для идемпотентного CompleteMultipartUpload
 
     Kafka:
     Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)
@@ -107,7 +111,8 @@ class DataStorageServiceServicer(object):
 
     def StoreObject(self, request_iterator, context):
         """StoreObject принимает поток байт и сохраняет их как blob на диск.
-        Client-streaming: Gateway отправляет файл чанками, сервис собирает и сохраняет.
+        Client-streaming: первое сообщение должно быть header, все последующие — chunk.
+        Header содержит metadata и может также содержать первые байты файла.
         Возвращает blob_id (UUID) и MD5 для последующей регистрации в Metadata.
         Ошибки: RESOURCE_EXHAUSTED (недостаточно места), INTERNAL.
         """
@@ -146,8 +151,9 @@ class DataStorageServiceServicer(object):
 
     def UploadPart(self, request_iterator, context):
         """UploadPart сохраняет одну часть multipart-загрузки.
-        Client-streaming: Gateway отправляет байты одной части.
-        Части хранятся как /data/multipart/{upload_id}/part_{part_number}.
+        Client-streaming: первое сообщение должно быть header, все последующие — chunk.
+        Header содержит upload_id/part_number и может также содержать первые байты части.
+        Части хранятся как {MULTIPART_DIR}/uploads/{upload_id}/part_{part_number}.
         Ошибки: NOT_FOUND (upload_id не существует), INVALID_ARGUMENT (неверный part_number).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -240,8 +246,10 @@ class DataStorageService(object):
     Порт: 50053 (конфигурируется через GRPC_PORT)
 
     Структура хранилища на диске:
-    /data/blobs/{blob_id}           — готовые объекты
-    /data/multipart/{upload_id}/    — временные части multipart-загрузки
+    {DATA_DIR}/{shard}/{blob_id}                       — готовые объекты
+    {MULTIPART_DIR}/uploads/{upload_id}/               — multipart session + parts
+    {MULTIPART_DIR}/uploads/{blob_id}/                 — staging single-part upload
+    {MULTIPART_DIR}/completed/{shard}/{upload_id}.json — marker для идемпотентного CompleteMultipartUpload
 
     Kafka:
     Потребляет ← object-deleted: получает blob_id → удаляет файл с диска (идемпотентно)

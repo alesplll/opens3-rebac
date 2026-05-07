@@ -45,7 +45,10 @@ docker compose version
 - `users`
 - `auth`
 - `authz`
+- `quota`
 - `storage`
+- `gateway`
+- `metadata`
 
 Вместе с инфраструктурой:
 
@@ -57,12 +60,13 @@ docker compose version
 - `kafka`
 - `migrator-users`
 
-Пока не реализованы как рабочие сервисы:
+Важно:
 
-- `gateway`
-- `metadata`
+- `quota` поднимается как полноценный сервис и нужен `gateway`
+- `gateway` поднимается и связан с `auth`, `users`, `authz`, `storage` и `quota`
+- `metadata` пока остаётся стабом, поэтому полного S3 flow end-to-end всё ещё нет
 
-Поэтому полного S3 flow ещё нет. Этот запуск нужен для локальной разработки и проверки уже существующих сервисов.
+Этот запуск нужен для локальной разработки и проверки уже существующих сервисов и их интеграции.
 
 ## Самый короткий путь
 
@@ -77,7 +81,7 @@ docker compose --profile services up --build -d
 - поднимет инфраструктуру
 - соберёт локальные образы сервисов
 - запустит все сервисы из профиля `services`
-- дождётся зависимостей `auth`, `users`, `authz`, `storage` и старта контейнера `metadata` перед стартом `gateway`
+- дождётся зависимостей `auth`, `users`, `authz`, `quota`, `storage` и старта контейнера `metadata` перед стартом `gateway`
 
 ## Как проверить, что всё поднялось
 
@@ -99,7 +103,10 @@ docker compose ps
 - `users`
 - `auth`
 - `authz`
+- `quota`
 - `storage`
+- `metadata`
+- `gateway`
 
 ## Полезные команды
 
@@ -150,6 +157,8 @@ docker compose --profile services up --build -d
 - `auth` → `localhost:50050`
 - `authz` → `localhost:50051`
 - `storage` → `localhost:50053`
+- `quota` → `localhost:50055`
+- `gateway` → `localhost:8080`
 - `postgres-users` → `localhost:5432`
 - `postgres-metadata` → `localhost:5433`
 - `redis` → `localhost:6379`

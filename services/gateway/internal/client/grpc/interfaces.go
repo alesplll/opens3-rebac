@@ -7,6 +7,7 @@ import (
 	authv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/auth/v1"
 	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	quotav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/quota/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	userv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/user/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -39,6 +40,12 @@ type MetadataClient interface {
 	DeleteObjectMeta(ctx context.Context, req *metadatav1.DeleteObjectMetaRequest) (*metadatav1.DeleteObjectMetaResponse, error)
 	ListObjects(ctx context.Context, req *metadatav1.ListObjectsRequest) (*metadatav1.ListObjectsResponse, error)
 	HealthCheck(ctx context.Context, req *metadatav1.HealthCheckRequest) (*metadatav1.HealthCheckResponse, error)
+}
+
+type QuotaClient interface {
+	CheckQuota(ctx context.Context, req *quotav1.CheckQuotaRequest) (*quotav1.CheckQuotaResponse, error)
+	UpdateUsage(ctx context.Context, req *quotav1.UpdateUsageRequest) (*quotav1.UpdateUsageResponse, error)
+	HealthCheck(ctx context.Context, req *quotav1.HealthCheckRequest) (*quotav1.HealthCheckResponse, error)
 }
 
 type StorageClient interface {

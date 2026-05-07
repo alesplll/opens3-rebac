@@ -7,6 +7,7 @@ var (
 	ErrForbidden          = errors.New("forbidden")
 	ErrInvalidRange       = errors.New("invalid range")
 	ErrInvalidRequest     = errors.New("invalid request")
+	ErrTooManyBuckets     = errors.New("too many buckets")
 	ErrBucketAlreadyExist = errors.New("bucket already exists")
 	ErrBucketNotFound     = errors.New("bucket not found")
 	ErrObjectNotFound     = errors.New("object not found")

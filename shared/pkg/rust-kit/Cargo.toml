@@ -1,0 +1,37 @@
+[package]
+name = "rust-kit"
+version = "0.1.0"
+edition = "2021"
+description = "Shared observability and infrastructure kit for opens3 Rust services"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# gRPC (for middleware Tower Layer)
+tonic = "0.12"
+
+# Tracing (unified logging + distributed tracing)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-opentelemetry = "0.28"
+
+# OpenTelemetry
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["tonic", "trace", "metrics", "logs"] }
+opentelemetry-appender-tracing = "0.27"
+http = "1"
+opentelemetry-semantic-conventions = "0.27"
+
+# Tower (for gRPC middleware Layer)
+tower = { version = "0.5", features = ["util"] }
+tower-layer = "0.3"
+tower-service = "0.3"
+
+# Async trait support
+futures = "0.3"
+pin-project-lite = "0.2"
+
+# Time
+time = { version = "0.3", features = ["formatting"] }

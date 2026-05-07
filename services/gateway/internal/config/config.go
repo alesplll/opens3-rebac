@@ -19,6 +19,7 @@ type config struct {
 	AuthZClient GRPCClientConfig
 	Users       UsersClientConfig
 	Metadata    GRPCClientConfig
+	Quota       QuotaClientConfig
 	Storage     GRPCClientConfig
 	JWT         JWTConfig
 }
@@ -74,6 +75,11 @@ func Load(path ...string) error {
 		return err
 	}
 
+	quotaCfg, err := env.NewQuotaClientConfig()
+	if err != nil {
+		return err
+	}
+
 	storageCfg, err := env.NewStorageClientConfig()
 	if err != nil {
 		return err
@@ -94,6 +100,7 @@ func Load(path ...string) error {
 		AuthZClient: authzCfg,
 		Users:       usersCfg,
 		Metadata:    metadataCfg,
+		Quota:       quotaCfg,
 		Storage:     storageCfg,
 		JWT:         jwtCfg,
 	}

@@ -698,6 +698,8 @@ func mapHTTPError(err error) (int, string, string) {
 		return http.StatusForbidden, "AccessDenied", "Access denied"
 	case errors.Is(err, domainerrors.ErrBucketAlreadyExist):
 		return http.StatusConflict, "BucketAlreadyExists", "The requested bucket name is not available"
+	case errors.Is(err, domainerrors.ErrTooManyBuckets):
+		return http.StatusBadRequest, "TooManyBuckets", "You have attempted to create more buckets than allowed"
 	case errors.Is(err, domainerrors.ErrBucketNotFound):
 		return http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist"
 	case errors.Is(err, domainerrors.ErrObjectNotFound):

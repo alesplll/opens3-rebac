@@ -20,9 +20,9 @@ generate-all: generate
 generate-all-go: generate-go
 generate-all-py: generate-py
 
-generate-go: generate-user-go generate-auth-go generate-storage-go generate-metadata-go generate-authz-go
+generate-go: generate-user-go generate-auth-go generate-storage-go generate-metadata-go generate-authz-go generate-quota-go
 
-generate-py: generate-user-py generate-auth-py generate-storage-py generate-metadata-py generate-authz-py
+generate-py: generate-user-py generate-auth-py generate-storage-py generate-metadata-py generate-authz-py generate-quota-py
 
 generate-user-go:
 	mkdir -p $(GO_PROTO_OUT)/user/v1
@@ -123,6 +123,26 @@ generate-authz-py:
 		shared/api/authz/v1/authz.proto
 	touch shared/__init__.py shared/pkg/__init__.py $(PY_PROTO_OUT)/__init__.py $(PY_PROTO_OUT)/authz/__init__.py $(PY_PROTO_OUT)/authz/v1/__init__.py
 	perl -0pi -e 's/^import authz_pb2 as authz__pb2/from . import authz_pb2 as authz__pb2/m' $(PY_PROTO_OUT)/authz/v1/authz_pb2_grpc.py
+
+generate-quota-go:
+	mkdir -p $(GO_PROTO_OUT)/quota/v1
+	protoc \
+		--proto_path shared/api/quota/v1 \
+		--go_out=$(GO_PROTO_OUT)/quota/v1 --go_opt=paths=source_relative \
+		--plugin=protoc-gen-go=$(LOCAL_BIN)/protoc-gen-go \
+		--go-grpc_out=$(GO_PROTO_OUT)/quota/v1 --go-grpc_opt=paths=source_relative \
+		--plugin=protoc-gen-go-grpc=$(LOCAL_BIN)/protoc-gen-go-grpc \
+		shared/api/quota/v1/quota.proto
+
+generate-quota-py:
+	mkdir -p $(PY_PROTO_OUT)/quota/v1
+	PYTHONPATH="$(PY_PROTO_DEPS)" $(PYTHON) -m grpc_tools.protoc \
+		--proto_path=shared/api/quota/v1 \
+		--python_out=$(PY_PROTO_OUT)/quota/v1 \
+		--grpc_python_out=$(PY_PROTO_OUT)/quota/v1 \
+		shared/api/quota/v1/quota.proto
+	touch shared/__init__.py shared/pkg/__init__.py $(PY_PROTO_OUT)/__init__.py $(PY_PROTO_OUT)/quota/__init__.py $(PY_PROTO_OUT)/quota/v1/__init__.py
+	perl -0pi -e 's/^import quota_pb2 as quota__pb2/from . import quota_pb2 as quota__pb2/m' $(PY_PROTO_OUT)/quota/v1/quota_pb2_grpc.py
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 

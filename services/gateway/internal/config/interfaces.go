@@ -55,6 +55,10 @@ type UsersClientConfig interface {
 	GRPCClientConfig
 }
 
+type QuotaClientConfig interface {
+	GRPCClientConfig
+}
+
 type JWTConfig interface {
 	AccessTokenSecretKey() string
 	RefreshTokenSecretKey() string

@@ -14,6 +14,7 @@ type grpcClientsEnvConfig struct {
 	AuthZAddr            string        `env:"AUTHZ_GRPC_ADDR" envDefault:"authz:50051"`
 	UsersAddr            string        `env:"USERS_GRPC_ADDR" envDefault:"users:50054"`
 	MetadataAddr         string        `env:"METADATA_GRPC_ADDR" envDefault:"metadata:50052"`
+	QuotaAddr            string        `env:"QUOTA_GRPC_ADDR" envDefault:"quota:50055"`
 	StorageAddr          string        `env:"STORAGE_GRPC_ADDR" envDefault:"storage:50053"`
 	GRPCTimeout          time.Duration `env:"GRPC_TIMEOUT" envDefault:"5s"`
 	LegacyGRPCTimeoutMS  string        `env:"GRPC_TIMEOUT_MS"`
@@ -33,6 +34,10 @@ type usersClientConfig struct {
 }
 
 type metadataClientConfig struct {
+	raw grpcClientsEnvConfig
+}
+
+type quotaClientConfig struct {
 	raw grpcClientsEnvConfig
 }
 
@@ -74,6 +79,15 @@ func NewMetadataClientConfig() (*metadataClientConfig, error) {
 	}
 
 	return &metadataClientConfig{raw: raw}, nil
+}
+
+func NewQuotaClientConfig() (*quotaClientConfig, error) {
+	raw, err := newGRPCClientsEnvConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	return &quotaClientConfig{raw: raw}, nil
 }
 
 func NewStorageClientConfig() (*storageClientConfig, error) {
@@ -147,6 +161,18 @@ func (c *metadataClientConfig) Timeout() time.Duration {
 }
 
 func (c *metadataClientConfig) StreamTimeout() time.Duration {
+	return c.raw.GRPCTimeout
+}
+
+func (c *quotaClientConfig) Address() string {
+	return normalizeAddress(c.raw.QuotaAddr)
+}
+
+func (c *quotaClientConfig) Timeout() time.Duration {
+	return c.raw.GRPCTimeout
+}
+
+func (c *quotaClientConfig) StreamTimeout() time.Duration {
 	return c.raw.GRPCTimeout
 }
 

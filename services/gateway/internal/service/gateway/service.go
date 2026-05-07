@@ -13,6 +13,7 @@ import (
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
 	authzv1 "github.com/alesplll/opens3-rebac/shared/pkg/go/authz/v1"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	quotav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/quota/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,27 +27,38 @@ const (
 type gatewayService struct {
 	authzClient    grpcclient.AuthZClient
 	metadataClient grpcclient.MetadataClient
+	quotaClient    grpcclient.QuotaClient
 	storageClient  grpcclient.StorageClient
 }
 
 func NewService(
 	authzClient grpcclient.AuthZClient,
 	metadataClient grpcclient.MetadataClient,
+	quotaClient grpcclient.QuotaClient,
 	storageClient grpcclient.StorageClient,
 ) service.GatewayService {
 	return &gatewayService{
 		authzClient:    authzClient,
 		metadataClient: metadataClient,
+		quotaClient:    quotaClient,
 		storageClient:  storageClient,
 	}
 }
 
 func (s *gatewayService) CreateBucket(ctx context.Context, req service.CreateBucketRequest) (*service.CreateBucketResponse, error) {
+	quotaDelta := bucketCreateQuotaDelta()
+	if err := s.reserveQuota(ctx, req.UserID, "", quotaDelta); err != nil {
+		return nil, err
+	}
+
 	resp, err := s.metadataClient.CreateBucket(ctx, &metadatav1.CreateBucketRequest{
 		Name:    req.Bucket,
 		OwnerId: req.UserID,
 	})
 	if err != nil {
+		if rollbackErr := s.releaseQuotaReservation(ctx, req.UserID, "", quotaDelta); rollbackErr != nil {
+			return nil, fmt.Errorf("create bucket failed: %w; quota rollback failed: %v", mapBucketGRPCError(err), rollbackErr)
+		}
 		return nil, mapBucketGRPCError(err)
 	}
 
@@ -62,6 +74,11 @@ func (s *gatewayService) CreateBucket(ctx context.Context, req service.CreateBuc
 		if rollbackErr != nil {
 			return nil, fmt.Errorf("create bucket authz tuple failed: %w; rollback delete bucket failed: %v", authzErr, mapBucketGRPCError(rollbackErr))
 		}
+
+		if quotaRollbackErr := s.releaseQuotaReservation(ctx, req.UserID, "", quotaDelta); quotaRollbackErr != nil {
+			return nil, fmt.Errorf("create bucket authz tuple failed: %w; quota rollback failed: %v", authzErr, quotaRollbackErr)
+		}
+
 		return nil, authzErr
 	}
 
@@ -80,6 +97,8 @@ func (s *gatewayService) DeleteBucket(ctx context.Context, req service.DeleteBuc
 	if err != nil {
 		return mapGRPCError(err)
 	}
+
+	s.syncQuotaAfterDelete(ctx, req.UserID, "", bucketDeleteQuotaDelta())
 
 	return nil
 }
@@ -119,8 +138,16 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 		return nil, err
 	}
 
+	quotaDelta := objectCreateQuotaDelta(req.Size)
+	if err := s.reserveQuota(ctx, req.UserID, req.Bucket, quotaDelta); err != nil {
+		return nil, err
+	}
+
 	storeResp, err := s.storeObject(ctx, req.Body, req.Size, req.ContentType)
 	if err != nil {
+		if rollbackErr := s.releaseQuotaReservation(ctx, req.UserID, req.Bucket, quotaDelta); rollbackErr != nil {
+			return nil, fmt.Errorf("store object failed: %w; quota rollback failed: %v", err, rollbackErr)
+		}
 		return nil, err
 	}
 
@@ -133,6 +160,9 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 		ContentType: req.ContentType,
 	})
 	if err != nil {
+		if cleanupErr := s.rollbackStoredBlob(ctx, req.UserID, req.Bucket, storeResp.GetBlobId(), quotaDelta); cleanupErr != nil {
+			return nil, fmt.Errorf("create object metadata failed: %w; rollback failed: %v", mapObjectGRPCError(err), cleanupErr)
+		}
 		return nil, mapObjectGRPCError(err)
 	}
 
@@ -141,6 +171,9 @@ func (s *gatewayService) PutObject(ctx context.Context, req service.PutObjectReq
 		Relation: authzv1.Relation_RELATION_PARENT_OF,
 		Object:   objectResource(req.Bucket, req.Key),
 	}); err != nil {
+		if cleanupErr := s.rollbackCreatedObject(ctx, req.UserID, req.Bucket, req.Key, storeResp.GetBlobId(), quotaDelta); cleanupErr != nil {
+			return nil, fmt.Errorf("write authz tuple failed: %w; rollback failed: %v", mapGRPCError(err), cleanupErr)
+		}
 		return nil, mapGRPCError(err)
 	}
 
@@ -222,6 +255,14 @@ func (s *gatewayService) DeleteObject(ctx context.Context, req service.DeleteObj
 		return err
 	}
 
+	meta, err := s.metadataClient.GetObjectMeta(ctx, &metadatav1.GetObjectMetaRequest{
+		BucketName: req.Bucket,
+		Key:        req.Key,
+	})
+	if err != nil {
+		return mapGRPCError(err)
+	}
+
 	resp, err := s.metadataClient.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
 		BucketName: req.Bucket,
 		Key:        req.Key,
@@ -236,6 +277,8 @@ func (s *gatewayService) DeleteObject(ctx context.Context, req service.DeleteObj
 	if _, err := s.storageClient.DeleteObject(ctx, &storagev1.DeleteObjectRequest{BlobId: resp.GetBlobId()}); err != nil {
 		return mapGRPCError(err)
 	}
+
+	s.syncQuotaAfterDelete(ctx, req.UserID, req.Bucket, objectDeleteQuotaDelta(meta.GetSizeBytes()))
 
 	return nil
 }
@@ -438,6 +481,14 @@ func (s *gatewayService) Ready(ctx context.Context) error {
 		return domainerrors.ErrServiceUnavailable
 	}
 
+	quotaResp, err := s.quotaClient.HealthCheck(ctx, &quotav1.HealthCheckRequest{})
+	if err != nil {
+		return mapGRPCError(err)
+	}
+	if quotaResp.GetStatus() != quotav1.HealthCheckResponse_SERVING {
+		return domainerrors.ErrServiceUnavailable
+	}
+
 	storageResp, err := s.storageClient.HealthCheck(ctx, &storagev1.HealthCheckRequest{})
 	if err != nil {
 		return mapGRPCError(err)
@@ -447,6 +498,77 @@ func (s *gatewayService) Ready(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *gatewayService) reserveQuota(ctx context.Context, userID, bucket string, delta *quotav1.ResourceDelta) error {
+	resp, err := s.quotaClient.CheckQuota(ctx, &quotav1.CheckQuotaRequest{
+		SubjectId: subjectUser(userID),
+		BucketId:  quotaBucketID(bucket),
+		Delta:     delta,
+	})
+	if err != nil {
+		return mapGRPCError(err)
+	}
+
+	if resp.GetAllowed() {
+		return nil
+	}
+
+	switch resp.GetCode() {
+	case quotav1.DenyCode_DENY_CODE_USER_STORAGE_EXCEEDED, quotav1.DenyCode_DENY_CODE_BUCKET_STORAGE_EXCEEDED:
+		return domainerrors.ErrInsufficientSpace
+	case quotav1.DenyCode_DENY_CODE_USER_BUCKET_LIMIT_REACHED:
+		return domainerrors.ErrTooManyBuckets
+	case quotav1.DenyCode_DENY_CODE_USER_OBJECT_LIMIT_REACHED:
+		return fmt.Errorf("%w: object limit reached", domainerrors.ErrInvalidRequest)
+	default:
+		if strings.TrimSpace(resp.GetReason()) != "" {
+			return fmt.Errorf("%w: %s", domainerrors.ErrInvalidRequest, resp.GetReason())
+		}
+		return domainerrors.ErrInvalidRequest
+	}
+}
+
+func (s *gatewayService) releaseQuotaReservation(ctx context.Context, userID, bucket string, delta *quotav1.ResourceDelta) error {
+	_, err := s.quotaClient.UpdateUsage(ctx, &quotav1.UpdateUsageRequest{
+		SubjectId: subjectUser(userID),
+		BucketId:  quotaBucketID(bucket),
+		Delta:     negateQuotaDelta(delta),
+	})
+	if err != nil {
+		return mapGRPCError(err)
+	}
+
+	return nil
+}
+
+func (s *gatewayService) syncQuotaAfterDelete(ctx context.Context, userID, bucket string, delta *quotav1.ResourceDelta) {
+	// Quota also consumes delete events from Kafka, so a failed synchronous decrement
+	// should not turn an already successful delete into a client-visible failure.
+	_, _ = s.quotaClient.UpdateUsage(ctx, &quotav1.UpdateUsageRequest{
+		SubjectId: subjectUser(userID),
+		BucketId:  quotaBucketID(bucket),
+		Delta:     delta,
+	})
+}
+
+func (s *gatewayService) rollbackStoredBlob(ctx context.Context, userID, bucket, blobID string, delta *quotav1.ResourceDelta) error {
+	if _, err := s.storageClient.DeleteObject(ctx, &storagev1.DeleteObjectRequest{BlobId: blobID}); err != nil {
+		return mapGRPCError(err)
+	}
+
+	return s.releaseQuotaReservation(ctx, userID, bucket, delta)
+}
+
+func (s *gatewayService) rollbackCreatedObject(ctx context.Context, userID, bucket, key, blobID string, delta *quotav1.ResourceDelta) error {
+	if _, err := s.metadataClient.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
+		BucketName: bucket,
+		Key:        key,
+	}); err != nil {
+		return mapGRPCError(err)
+	}
+
+	return s.rollbackStoredBlob(ctx, userID, bucket, blobID, delta)
 }
 
 func (s *gatewayService) checkAccess(ctx context.Context, userID string, action authzv1.Action, object string) error {
@@ -677,4 +799,40 @@ func bucketResource(bucket string) string {
 
 func objectResource(bucket, key string) string {
 	return "object:" + bucket + "/" + key
+}
+
+func quotaBucketID(bucket string) string {
+	if strings.TrimSpace(bucket) == "" {
+		return ""
+	}
+
+	return bucketResource(bucket)
+}
+
+func bucketCreateQuotaDelta() *quotav1.ResourceDelta {
+	return &quotav1.ResourceDelta{Buckets: 1}
+}
+
+func bucketDeleteQuotaDelta() *quotav1.ResourceDelta {
+	return &quotav1.ResourceDelta{Buckets: -1}
+}
+
+func objectCreateQuotaDelta(size int64) *quotav1.ResourceDelta {
+	return &quotav1.ResourceDelta{Bytes: size, Objects: 1}
+}
+
+func objectDeleteQuotaDelta(size int64) *quotav1.ResourceDelta {
+	return &quotav1.ResourceDelta{Bytes: -size, Objects: -1}
+}
+
+func negateQuotaDelta(delta *quotav1.ResourceDelta) *quotav1.ResourceDelta {
+	if delta == nil {
+		return &quotav1.ResourceDelta{}
+	}
+
+	return &quotav1.ResourceDelta{
+		Bytes:   -delta.GetBytes(),
+		Objects: -delta.GetObjects(),
+		Buckets: -delta.GetBuckets(),
+	}
 }

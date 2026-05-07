@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "shared/pkg/rust-kit",
+    "services/quota",
+]
+resolver = "2"
