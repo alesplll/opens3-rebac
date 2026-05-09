@@ -153,11 +153,23 @@ Before implementing anything foundational (handler, service, repository, config,
 
 The canonical reference is **`services/users/`** — it covers handler structure, service layer with interface + mock, PostgreSQL repository, domain models, env config, table-driven tests, and SQL migration layout.
 
+### Branches
+- Format: `type/scope-description` — e.g. `feat/authz-cache-invalidation`, `fix/users-uuid-parsing`.
+
+### Issues
+- Title: specific and actionable — what's broken or what needs to be done.
+- Body: `## What` (2-3 sentences) + `## Acceptance criteria` (checklist).
+- For bugs: include reproduction steps in the What section.
+
+### Pull requests
+- Title format matches commits: `type(scope): short description`.
+- Link to issue via `closes #N` in PR body when applicable.
+- Descriptions: concise, no filler.
+
 ### GitHub (gh CLI)
 - Before any write action (review, comment, close, merge) — show draft and wait for confirmation.
 - Before reviewing a PR — always run `gh pr diff` + `gh pr view` to understand context.
 - Don't guess the intent of changes — ask if unclear.
-- Issue and PR descriptions: concise, no filler.
 
 ### Code style
 - No comments explaining WHAT — only WHY when non-obvious.
