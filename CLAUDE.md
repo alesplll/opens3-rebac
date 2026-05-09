@@ -48,32 +48,6 @@ Quota :50055 ── Redis ── Kafka
 
 ## Key domain concepts
 
-### AuthZ: entity ID format
-
-All IDs in the AuthZ graph: `prefix:name` — e.g. `user:alice`, `bucket:photos`, `object:photos/cat.jpg`.
-
-### AuthZ: permission hierarchy
-
-```
-read < write < create < delete < admin
-```
-
-A `HAS_PERMISSION` edge with `level: write` also grants `create`, `delete`, `admin`.
-
-### AuthZ: Neo4j edge types
-
-| Edge | Meaning |
-|---|---|
-| `MEMBER_OF` | Group membership (transitive) |
-| `HAS_PERMISSION` | Permission with level |
-| `PARENT_OF` | Resource hierarchy (bucket → object) |
-| `OWNER_OF` | Full access (legacy = admin) |
-
-### AuthZ: Redis cache
-
-Key: `auth_decision:{subject}:{action}:{object}`, TTL 30s.  
-Invalidation: AuthZ publishes to `auth-changes`; `cache_invalidator` process consumes it.
-
 ### S3 → ReBAC mapping
 
 | S3 operation | action | resource |
@@ -84,11 +58,6 @@ Invalidation: AuthZ publishes to `auth-changes`; `cache_invalidator` process con
 | `ListBucket` | `read` | `bucket:{bucket}` |
 | `CreateBucket` | — | no check — any user can create |
 | `DeleteBucket` | `delete` | `bucket:{bucket}` |
-
-### Quota: hot-path architecture
-
-In-memory DashMap (~100ns) → Redis persistence (flush every 1s).  
-Reserve-and-rollback: check user limit → check bucket limit → commit.
 
 ### Kafka topics
 
@@ -152,6 +121,24 @@ When a gRPC contract changes or a new service is added, update:
 Before implementing anything foundational (handler, service, repository, config, migrations, tests), **look at how it's done in the project first**.
 
 The canonical reference is **`services/users/`** — it covers handler structure, service layer with interface + mock, PostgreSQL repository, domain models, env config, table-driven tests, and SQL migration layout.
+
+### Branches
+- Format: `type/scope-description` — e.g. `feat/authz-cache-invalidation`, `fix/users-uuid-parsing`.
+
+### Issues
+- Title: specific and actionable — what's broken or what needs to be done.
+- Body: `## What` (2-3 sentences) + `## Acceptance criteria` (checklist).
+- For bugs: include reproduction steps in the What section.
+
+### Pull requests
+- Title format matches commits: `type(scope): short description`.
+- Link to issue via `closes #N` in PR body when applicable.
+- Descriptions: concise, no filler.
+
+### GitHub (gh CLI)
+- Before any write action (review, comment, close, merge) — show draft and wait for confirmation.
+- Before reviewing a PR — always run `gh pr diff` + `gh pr view` to understand context.
+- Don't guess the intent of changes — ask if unclear.
 
 ### Code style
 - No comments explaining WHAT — only WHY when non-obvious.
