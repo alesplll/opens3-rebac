@@ -48,32 +48,6 @@ Quota :50055 ── Redis ── Kafka
 
 ## Key domain concepts
 
-### AuthZ: entity ID format
-
-All IDs in the AuthZ graph: `prefix:name` — e.g. `user:alice`, `bucket:photos`, `object:photos/cat.jpg`.
-
-### AuthZ: permission hierarchy
-
-```
-read < write < create < delete < admin
-```
-
-A `HAS_PERMISSION` edge with `level: write` also grants `create`, `delete`, `admin`.
-
-### AuthZ: Neo4j edge types
-
-| Edge | Meaning |
-|---|---|
-| `MEMBER_OF` | Group membership (transitive) |
-| `HAS_PERMISSION` | Permission with level |
-| `PARENT_OF` | Resource hierarchy (bucket → object) |
-| `OWNER_OF` | Full access (legacy = admin) |
-
-### AuthZ: Redis cache
-
-Key: `auth_decision:{subject}:{action}:{object}`, TTL 30s.  
-Invalidation: AuthZ publishes to `auth-changes`; `cache_invalidator` process consumes it.
-
 ### S3 → ReBAC mapping
 
 | S3 operation | action | resource |
@@ -85,11 +59,6 @@ Invalidation: AuthZ publishes to `auth-changes`; `cache_invalidator` process con
 | `CreateBucket` | — | no check — any user can create |
 | `DeleteBucket` | `delete` | `bucket:{bucket}` |
 
-### Quota: hot-path architecture
-
-In-memory DashMap (~100ns) → Redis persistence (flush every 1s).  
-Reserve-and-rollback: check user limit → check bucket limit → commit.
-
 ### Kafka topics
 
 | Topic | Producer | Consumer |
@@ -99,20 +68,6 @@ Reserve-and-rollback: check user limit → check bucket limit → commit.
 | `bucket-deleted` | Metadata | AuthZ |
 | `auth-changes` | AuthZ | AuthZ cache_invalidator |
 | `auth-audit` | AuthZ | — (log sink) |
-
----
-
-## Service boundaries
-
-| Service | Does NOT |
-|---|---|
-| **AuthZ** | authenticate users, store metadata, handle bytes, know about HTTP |
-| **Metadata** | store bytes, check permissions, know about S3 API |
-| **Storage** | check permissions, store metadata, know about object keys |
-| **Quota** | enforce auth, store metadata, know about blobs |
-| **Auth** | authorize (that's AuthZ), manage user profiles |
-| **Users** | issue tokens, know about S3, check permissions |
-| **Gateway** | store data, make authorization decisions, know about graph structure |
 
 ---
 
