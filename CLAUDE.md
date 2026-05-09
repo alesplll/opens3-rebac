@@ -71,6 +71,20 @@ Quota :50055 ── Redis ── Kafka
 
 ---
 
+## Service boundaries
+
+| Service | Does NOT |
+|---|---|
+| **AuthZ** | authenticate users, store metadata, handle bytes, know about HTTP |
+| **Metadata** | store bytes, check permissions, know about S3 API |
+| **Storage** | check permissions, store metadata, know about object keys |
+| **Quota** | enforce auth, store metadata, know about blobs |
+| **Auth** | authorize (that's AuthZ), manage user profiles |
+| **Users** | issue tokens, know about S3, check permissions |
+| **Gateway** | store data, make authorization decisions, know about graph structure |
+
+---
+
 ## Roadmap
 
 | Phase | Status | What |

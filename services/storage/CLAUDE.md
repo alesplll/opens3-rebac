@@ -9,9 +9,9 @@ Port: `:50053`
 ## Architecture
 
 ```
-cmd/main.go → app/app.go → service_provider.go (DI)
+cmd/server/main.go → internal/app/app.go → internal/app/service_provider.go (DI)
 
-handler/storage/
+internal/handler/storage/
   handler.go           — implements StorageServiceServer
   store_object.go      — StoreObject: client-streaming (chunks → blob)
   retrieve_object.go   — RetrieveObject: server-streaming (blob → chunks)
@@ -20,11 +20,12 @@ handler/storage/
   upload_part.go
   complete_multipart.go
   abort_multipart.go
+  health_check.go
   chunk_reader.go      — helper: reads io.Reader in fixed-size chunks
   upload_streams.go    — stream adapter helpers
   client_stream.go
 
-service/storage/
+internal/service/storage/
   service.go           — StorageService interface + constructor
   store_object.go
   retrieve_object.go
@@ -35,8 +36,12 @@ service/storage/
   abort_multipart.go
   health_check.go
 
-repository/
-  repository.go        — StorageRepository interface (filesystem ops)
+internal/repository/
+  repository.go              — StorageRepository interface
+  storage/repository.go      — filesystem implementation
+  storage/store_blob.go, retrieve_blob.go, delete_blob.go
+  storage/multipart.go       — multipart session management
+  storage/health.go
 ```
 
 ## Key details

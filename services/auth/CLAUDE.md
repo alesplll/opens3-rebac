@@ -9,23 +9,28 @@ Port: `:50050`
 ## Architecture
 
 ```
-cmd/main.go → app/app.go → service_provider.go (DI)
+cmd/server/main.go → internal/app/app.go → internal/app/service_provider.go (DI)
 
-handler/auth/
+internal/handler/auth/
+  handler.go           — implements AuthServiceServer
   login.go             — Login RPC: validate credentials via Users client → issue tokens
   get_access_token.go  — reissue access token from refresh token
   get_refresh_token.go — reissue refresh token
   validate_token.go    — ValidateToken RPC: verify JWT, return claims
 
-service/auth/
-  service.go           — orchestrates UserClient + TokenService + Repository
-  verify_token.go
-  get_access_token.go
-  get_refresh_token.go
+internal/service/
+  service.go           — AuthService interface
+  auth/
+    service.go         — orchestrates UserClient + TokenService + Repository
+    login.go
+    verify_token.go
+    get_access_token.go
+    get_refresh_token.go
 
-repository/             — refresh token persistence (Redis)
-client/grpc/            — gRPC client to Users service
-config/env/             — env var configs (jwt, redis, grpc, security, rate_limiter)
+internal/repository/auth/ — refresh token persistence (Redis)
+internal/client/grpc/     — gRPC client to Users service
+internal/client/cache/    — Redis cache client
+internal/config/env/      — env var configs (jwt, redis, grpc, security, rate_limiter, metrics, tracing, logger, user_grpc)
 ```
 
 ## Key dependencies

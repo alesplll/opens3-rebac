@@ -9,9 +9,9 @@ Port: `:50052`
 ## Architecture
 
 ```
-cmd/main.go → (standard app/service_provider pattern)
+cmd/server/main.go → (standard app/service_provider pattern)
 
-handler/metadata/
+internal/handler/metadata/
   handler.go — implements MetadataServiceServer (currently skeleton)
 ```
 

@@ -9,25 +9,27 @@ Port: `:50054`
 ## Architecture
 
 ```
-cmd/main.go → app/app.go → service_provider.go (DI)
+cmd/server/main.go → internal/app/app.go → internal/app/service_provider.go (DI)
 
-handler/user/
+internal/handler/user/
   handler.go              — implements UserServiceServer
   create.go, get.go, update.go, delete.go
   validate_credentials.go — used by Auth service for login
   update_password.go
 
-service/
+internal/service/
   service.go              — UserService interface
+  user/service.go         — implementation
 
-repository/user/
-  repository.go           — UserRepository interface (PostgreSQL)
-  create.go, get.go, update.go, delete.go
-  get_hashed_password.go, updatePassword.go
+internal/repository/
+  repository.go           — UserRepository interface
+  user/repository.go      — PostgreSQL implementation
+  user/create.go, get.go, update.go, delete.go
+  user/get_hashed_password.go, updatePassword.go
 
-conventer/user/user.go    — domain ↔ proto conversion
-validator/                 — input validation
-config/env/               — pg, grpc, metrics, tracing
+internal/conventer/user/user.go — domain ↔ proto conversion (note: typo in dirname is intentional)
+internal/validator/              — input validation
+internal/config/env/             — pg, grpc, metrics, tracing, logger, rate_limiter
 ```
 
 ## Key details
