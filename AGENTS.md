@@ -14,8 +14,8 @@ Go services follow the same layout: `cmd/server` for entrypoints and `internal/`
 - `make down` / `make down-volumes`: stop containers; the latter also removes persisted data.
 - `make generate`: regenerate shared Go and Python protobuf bindings from `shared/api`.
 - `go test ./...` from `services/auth`, `services/users`, or `services/storage`: run tests for one Go service module.
-- `make test-metadata-repo-integration`: run Metadata repository integration tests against the dedicated e2e PostgreSQL profile.
-- `make test-metadata-repo-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata repository integration tests.
+- `make test-metadata-integration`: run Metadata integration tests against the dedicated e2e PostgreSQL profile.
+- `make test-metadata-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata integration tests.
 - `python3 -m pytest tests/unit -v` from `services/authz`: run AuthZ unit tests.
 - `python3 -m pytest tests/integration -v -m integration` from `services/authz`: run Neo4j-backed integration tests.
 

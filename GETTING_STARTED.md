@@ -186,8 +186,8 @@ docker compose logs -f <service-name>
 ```bash
 make up-services
 make up-e2e
-make test-metadata-repo-integration
-make test-metadata-repo-integration-local
+make test-metadata-integration
+make test-metadata-integration-local
 make down
 make down-volumes
 make rebuild

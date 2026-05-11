@@ -59,16 +59,16 @@ func (s *MySuite) SetupSuite() {
 make up-e2e
 ```
 
-Запустить только metadata repo integration tests:
+Запустить metadata integration tests:
 
 ```bash
-make test-metadata-repo-integration
+make test-metadata-integration
 ```
 
 Поднять контейнер и сразу прогнать тесты одним target:
 
 ```bash
-make test-metadata-repo-integration-local
+make test-metadata-integration-local
 ```
 
 Остановить e2e окружение:

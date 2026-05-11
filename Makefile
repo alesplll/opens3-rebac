@@ -155,11 +155,11 @@ test-storage:
 test-users-service:
 	go test ./services/users/internal/service/user/tests -count=1
 
-test-metadata-repo-integration:
-	cd services/metadata && go test -tags=integration ./internal/repository/object/tests -count=1
+test-metadata-integration:
+	cd services/metadata && go test -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
 
-test-metadata-repo-integration-local: up-e2e
-	cd services/metadata && go test -tags=integration ./internal/repository/object/tests -count=1
+test-metadata-integration-local: up-e2e
+	cd services/metadata && go test -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
 
 # ── Docker ─────────────────────────────────────────────────────────────────────
 
