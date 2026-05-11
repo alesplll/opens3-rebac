@@ -12,14 +12,17 @@ option go_package = "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1;
 //
 // PostgreSQL схема:
 //   buckets (id UUID, name TEXT UNIQUE, owner_id UUID, created_at TIMESTAMPTZ)
-//   objects (id UUID, bucket_id UUID→buckets, key TEXT, current_version_id UUID, UNIQUE(bucket_id, key))
-//   versions (id UUID, object_id UUID→objects, blob_id UUID, size_bytes BIGINT,
-//             etag TEXT, content_type TEXT, created_at TIMESTAMPTZ, is_deleted BOOLEAN)
+//   objects (id UUID, bucket_id UUID→buckets, key TEXT, current_version_id UUID,
+//            pending_version_id UUID, status TEXT, UNIQUE(bucket_id, key))
+//   versions (id UUID, object_id UUID→objects, blob_id UUID NULL, size_bytes BIGINT,
+//             etag TEXT, content_type TEXT, version_number BIGINT,
+//             kind version_kind, state version_state,
+//             created_at TIMESTAMPTZ, committed_at TIMESTAMPTZ, aborted_at TIMESTAMPTZ)
 //
 // Kafka:
 //   Публикует → object-deleted: при DeleteObjectMeta (запускает async-очистку в Data Node и AuthZ)
 //   Публикует → bucket-deleted: при DeleteBucket (запускает async-очистку графа в AuthZ)
-//   Потребляет ← object-stored: резервный путь для подтверждения версии объекта
+//   Consumer для object-stored / pending upload flow пока не реализован в этом сервисе
 service MetadataService {
   // ─── Bucket Management ────────────────────────────────────────────────────
 
@@ -44,8 +47,9 @@ service MetadataService {
 
   // ─── Object Management ────────────────────────────────────────────────────
 
-  // CreateObjectVersion регистрирует новую версию объекта после того, как Data Node
-  // подтвердил запись blob'а на диск. Вызывается Gateway сразу после StoreObject.
+  // CreateObjectVersion регистрирует новую committed-версию объекта после того,
+  // как Storage уже сохранил blob. Текущая реализация сразу обновляет current_version_id.
+  // Полный pending/finalize flow через pending_version_id ещё не реализован.
   // Ошибки: NOT_FOUND (бакет не существует), INVALID_ARGUMENT.
   rpc CreateObjectVersion(CreateObjectVersionRequest) returns (CreateObjectVersionResponse);
 
@@ -54,8 +58,9 @@ service MetadataService {
   // Ошибки: NOT_FOUND (бакет или объект не существуют).
   rpc GetObjectMeta(GetObjectMetaRequest) returns (GetObjectMetaResponse);
 
-  // DeleteObjectMeta помечает объект удалённым и публикует ObjectDeleted в Kafka.
-  // Асинхронно запускает: удаление файла в Data Node + очистку графа в AuthZ.
+  // DeleteObjectMeta удаляет метаданные объекта и публикует object-deleted в Kafka.
+  // Асинхронно запускает: удаление файла в Storage + очистку графа в AuthZ.
+  // Delete marker flow ещё не реализован.
   // Ошибки: NOT_FOUND.
   rpc DeleteObjectMeta(DeleteObjectMetaRequest) returns (DeleteObjectMetaResponse);
 
@@ -83,12 +88,12 @@ message BucketInfo {
 // ObjectInfo — метаданные объекта (краткая форма для ListObjects).
 message ObjectInfo {
   string object_id     = 1; // UUID
-  string version_id    = 2; // UUID актуальной версии
+  string version_id    = 2; // UUID актуальной committed blob-версии
   string key           = 3; // S3 ключ объекта (напр. "path/to/file.jpg")
-  string etag          = 4; // MD5, обёрнутый в кавычки по спецификации S3 ("\"abc123\"")
+  string etag          = 4; // ETag, как хранится в metadata
   int64  size_bytes    = 5;
   string content_type  = 6; // MIME тип (напр. "image/jpeg")
-  int64  last_modified = 7; // Unix timestamp в миллисекундах последней модификации
+  int64  last_modified = 7; // Unix timestamp в миллисекундах актуальной committed версии
 }
 
 // ─── Bucket ───────────────────────────────────────────────────────────────────
@@ -143,9 +148,9 @@ message HeadBucketResponse {
 message CreateObjectVersionRequest {
   string bucket_name  = 1; // Имя бакета
   string key          = 2; // S3 ключ объекта (напр. "2024/january/cat.jpg")
-  string blob_id      = 3; // UUID, возвращённый Data Node из StoreObject / CompleteMultipartUpload
+  string blob_id      = 3; // UUID, возвращённый Storage из StoreObject / CompleteMultipartUpload
   int64  size_bytes   = 4; // Размер blob в байтах
-  string etag         = 5; // MD5 содержимого в hex без кавычек
+  string etag         = 5; // ETag, как его нужно сохранить в metadata
   string content_type = 6; // MIME тип (напр. "image/jpeg")
 }
 
@@ -158,19 +163,19 @@ message CreateObjectVersionResponse {
 message GetObjectMetaRequest {
   string bucket_name = 1;
   string key         = 2;
-  // UUID конкретной версии. Если пусто — возвращается актуальная версия (current_version_id).
+  // UUID конкретной committed blob-версии. Если пусто — возвращается current_version_id.
   string version_id  = 3;
 }
 
 message GetObjectMetaResponse {
   string object_id     = 1;
   string version_id    = 2;
-  // blob_id — ключ для вызова Data Node DataStorageService.RetrieveObject.
+  // blob_id — ключ для вызова Storage DataStorageService.RetrieveObject.
   string blob_id       = 3;
   int64  size_bytes    = 4;
   string etag          = 5;
   string content_type  = 6;
-  int64  last_modified = 7; // Unix timestamp в миллисекундах
+  int64  last_modified = 7; // Unix timestamp в миллисекундах committed версии
 }
 
 message DeleteObjectMetaRequest {
@@ -180,7 +185,7 @@ message DeleteObjectMetaRequest {
 
 message DeleteObjectMetaResponse {
   string object_id = 1; // UUID удалённого объекта
-  string blob_id   = 2; // UUID blob'а — включается в событие ObjectDeleted в Kafka
+  string blob_id   = 2; // UUID текущего blob'а для async cleanup; может быть пустым
   bool   success   = 3;
 }
 
