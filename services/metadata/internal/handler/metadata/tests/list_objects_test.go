@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,37 +18,33 @@ func TestListObjects(t *testing.T) {
 		ctx := context.Background()
 		firstModified := time.UnixMilli(1712345678901)
 		secondModified := time.UnixMilli(1712345679901)
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			listObjectsFunc: func(gotCtx context.Context, bucketName, prefix, continuationToken string, maxKeys int32) ([]*model.ObjectListItem, string, bool, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", bucketName)
-				require.Equal(t, "cats/", prefix)
-				require.Equal(t, "token-1", continuationToken)
-				require.EqualValues(t, 100, maxKeys)
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.ListObjectsMock.
+			Expect(ctx, "photos", "cats/", "token-1", int32(100)).
+			Return([]*model.ObjectListItem{
+				{
+					ObjectID:     "object-1",
+					VersionID:    "version-1",
+					Key:          "cats/1.jpg",
+					Etag:         "\"etag-1\"",
+					SizeBytes:    123,
+					ContentType:  "image/jpeg",
+					LastModified: firstModified,
+				},
+				{
+					ObjectID:     "object-2",
+					VersionID:    "version-2",
+					Key:          "cats/2.jpg",
+					Etag:         "\"etag-2\"",
+					SizeBytes:    456,
+					ContentType:  "image/jpeg",
+					LastModified: secondModified,
+				},
+			}, "token-2", true, nil)
 
-				return []*model.ObjectListItem{
-					{
-						ObjectID:     "object-1",
-						VersionID:    "version-1",
-						Key:          "cats/1.jpg",
-						Etag:         "\"etag-1\"",
-						SizeBytes:    123,
-						ContentType:  "image/jpeg",
-						LastModified: firstModified,
-					},
-					{
-						ObjectID:     "object-2",
-						VersionID:    "version-2",
-						Key:          "cats/2.jpg",
-						Etag:         "\"etag-2\"",
-						SizeBytes:    456,
-						ContentType:  "image/jpeg",
-						LastModified: secondModified,
-					},
-				}, "token-2", true, nil
-			},
-		})
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.ListObjects(ctx, &metadatav1.ListObjectsRequest{
 			BucketName:        "photos",
@@ -85,12 +83,12 @@ func TestListObjects(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			listObjectsFunc: func(context.Context, string, string, string, int32) ([]*model.ObjectListItem, string, bool, error) {
-				return nil, "", false, serviceErr
-			},
-		})
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.ListObjectsMock.Expect(ctx, "photos", "", "", int32(0)).Return(nil, "", false, serviceErr)
+
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.ListObjects(ctx, &metadatav1.ListObjectsRequest{
 			BucketName: "photos",

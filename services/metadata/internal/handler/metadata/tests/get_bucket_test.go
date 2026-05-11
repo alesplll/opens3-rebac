@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,20 +17,19 @@ func TestGetBucket(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		createdAt := time.UnixMilli(1712345678901)
+		mc := minimock.NewController(t)
 
-		handler := newHandler(&bucketServiceStub{
-			getBucketFunc: func(gotCtx context.Context, name string) (*model.Bucket, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", name)
+		bucketServiceMock := mocks.NewBucketServiceMock(mc)
+		bucketServiceMock.GetBucketMock.
+			Expect(ctx, "photos").
+			Return(&model.Bucket{
+				ID:        "bucket-1",
+				Name:      "photos",
+				OwnerID:   "owner-1",
+				CreatedAt: createdAt,
+			}, nil)
 
-				return &model.Bucket{
-					ID:        "bucket-1",
-					Name:      "photos",
-					OwnerID:   "owner-1",
-					CreatedAt: createdAt,
-				}, nil
-			},
-		}, nil)
+		handler := newHandler(bucketServiceMock, nil)
 
 		res, err := handler.GetBucket(ctx, &metadatav1.GetBucketRequest{
 			BucketName: "photos",
@@ -48,12 +49,12 @@ func TestGetBucket(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(&bucketServiceStub{
-			getBucketFunc: func(context.Context, string) (*model.Bucket, error) {
-				return nil, serviceErr
-			},
-		}, nil)
+		bucketServiceMock := mocks.NewBucketServiceMock(mc)
+		bucketServiceMock.GetBucketMock.Expect(ctx, "photos").Return(nil, serviceErr)
+
+		handler := newHandler(bucketServiceMock, nil)
 
 		res, err := handler.GetBucket(ctx, &metadatav1.GetBucketRequest{
 			BucketName: "photos",

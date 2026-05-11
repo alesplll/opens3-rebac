@@ -5,22 +5,21 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDeleteObjectMeta(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			deleteObjectMetaFunc: func(gotCtx context.Context, bucketName, key string) (string, string, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", bucketName)
-				require.Equal(t, "cats/1.jpg", key)
-				return "object-1", "blob-1", nil
-			},
-		})
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.DeleteObjectMetaMock.Expect(ctx, "photos", "cats/1.jpg").Return("object-1", "blob-1", nil)
+
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
 			BucketName: "photos",
@@ -38,12 +37,12 @@ func TestDeleteObjectMeta(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			deleteObjectMetaFunc: func(context.Context, string, string) (string, string, error) {
-				return "", "", serviceErr
-			},
-		})
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.DeleteObjectMetaMock.Expect(ctx, "photos", "cats/1.jpg").Return("", "", serviceErr)
+
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.DeleteObjectMeta(ctx, &metadatav1.DeleteObjectMetaRequest{
 			BucketName: "photos",

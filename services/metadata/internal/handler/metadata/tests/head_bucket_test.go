@@ -5,21 +5,21 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHeadBucket(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
+		mc := minimock.NewController(t)
 
-		handler := newHandler(&bucketServiceStub{
-			headBucketFunc: func(gotCtx context.Context, name string) (bool, string, string, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", name)
-				return true, "bucket-1", "owner-1", nil
-			},
-		}, nil)
+		bucketServiceMock := mocks.NewBucketServiceMock(mc)
+		bucketServiceMock.HeadBucketMock.Expect(ctx, "photos").Return(true, "bucket-1", "owner-1", nil)
+
+		handler := newHandler(bucketServiceMock, nil)
 
 		res, err := handler.HeadBucket(ctx, &metadatav1.HeadBucketRequest{
 			BucketName: "photos",
@@ -36,12 +36,12 @@ func TestHeadBucket(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(&bucketServiceStub{
-			headBucketFunc: func(context.Context, string) (bool, string, string, error) {
-				return false, "", "", serviceErr
-			},
-		}, nil)
+		bucketServiceMock := mocks.NewBucketServiceMock(mc)
+		bucketServiceMock.HeadBucketMock.Expect(ctx, "photos").Return(false, "", "", serviceErr)
+
+		handler := newHandler(bucketServiceMock, nil)
 
 		res, err := handler.HeadBucket(ctx, &metadatav1.HeadBucketRequest{
 			BucketName: "photos",

@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,25 +17,22 @@ func TestGetObjectMeta(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		lastModified := time.UnixMilli(1712345678901)
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			getObjectMetaFunc: func(gotCtx context.Context, bucketName, key, versionID string) (*model.ObjectMeta, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", bucketName)
-				require.Equal(t, "cats/1.jpg", key)
-				require.Equal(t, "version-1", versionID)
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.GetObjectMetaMock.
+			Expect(ctx, "photos", "cats/1.jpg", "version-1").
+			Return(&model.ObjectMeta{
+				ObjectID:     "object-1",
+				VersionID:    "version-1",
+				BlobID:       "blob-1",
+				SizeBytes:    123,
+				Etag:         "\"etag-1\"",
+				ContentType:  "image/jpeg",
+				LastModified: lastModified,
+			}, nil)
 
-				return &model.ObjectMeta{
-					ObjectID:     "object-1",
-					VersionID:    "version-1",
-					BlobID:       "blob-1",
-					SizeBytes:    123,
-					Etag:         "\"etag-1\"",
-					ContentType:  "image/jpeg",
-					LastModified: lastModified,
-				}, nil
-			},
-		})
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.GetObjectMeta(ctx, &metadatav1.GetObjectMetaRequest{
 			BucketName: "photos",
@@ -56,12 +55,12 @@ func TestGetObjectMeta(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			getObjectMetaFunc: func(context.Context, string, string, string) (*model.ObjectMeta, error) {
-				return nil, serviceErr
-			},
-		})
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.GetObjectMetaMock.Expect(ctx, "photos", "cats/1.jpg", "").Return(nil, serviceErr)
+
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.GetObjectMeta(ctx, &metadatav1.GetObjectMetaRequest{
 			BucketName: "photos",

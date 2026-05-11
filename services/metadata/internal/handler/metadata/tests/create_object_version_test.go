@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alesplll/opens3-rebac/services/metadata/pkg/mocks"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
+	"github.com/gojuno/minimock/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,20 +16,14 @@ func TestCreateObjectVersion(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		createdAt := time.UnixMilli(1712345678901)
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			createObjectVersionFunc: func(gotCtx context.Context, bucketName, key, blobID string, sizeBytes int64, etag, contentType string) (string, string, time.Time, error) {
-				require.Equal(t, ctx, gotCtx)
-				require.Equal(t, "photos", bucketName)
-				require.Equal(t, "cats/1.jpg", key)
-				require.Equal(t, "blob-1", blobID)
-				require.EqualValues(t, 123, sizeBytes)
-				require.Equal(t, "\"etag-1\"", etag)
-				require.Equal(t, "image/jpeg", contentType)
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.CreateObjectVersionMock.
+			Expect(ctx, "photos", "cats/1.jpg", "blob-1", int64(123), "\"etag-1\"", "image/jpeg").
+			Return("object-1", "version-1", createdAt, nil)
 
-				return "object-1", "version-1", createdAt, nil
-			},
-		})
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.CreateObjectVersion(ctx, &metadatav1.CreateObjectVersionRequest{
 			BucketName:  "photos",
@@ -49,12 +45,14 @@ func TestCreateObjectVersion(t *testing.T) {
 	t.Run("service error", func(t *testing.T) {
 		ctx := context.Background()
 		serviceErr := errors.New("service error")
+		mc := minimock.NewController(t)
 
-		handler := newHandler(nil, &objectServiceStub{
-			createObjectVersionFunc: func(context.Context, string, string, string, int64, string, string) (string, string, time.Time, error) {
-				return "", "", time.Time{}, serviceErr
-			},
-		})
+		objectServiceMock := mocks.NewObjectServiceMock(mc)
+		objectServiceMock.CreateObjectVersionMock.
+			Expect(ctx, "photos", "cats/1.jpg", "", int64(0), "", "").
+			Return("", "", time.Time{}, serviceErr)
+
+		handler := newHandler(nil, objectServiceMock)
 
 		res, err := handler.CreateObjectVersion(ctx, &metadatav1.CreateObjectVersionRequest{
 			BucketName: "photos",
