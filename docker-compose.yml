@@ -58,6 +58,24 @@ services:
       retries: 15
       start_period: 5s
 
+  postgres-metadata-e2e:
+    profiles: [e2e]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${E2E_METADATA_DB_NAME:-metadata_e2e_db}
+      POSTGRES_USER: ${E2E_METADATA_DB_USER:-metadata_e2e_user}
+      POSTGRES_PASSWORD: ${E2E_METADATA_DB_PASSWORD:-metadata_e2e_password}
+    ports:
+      - "${E2E_METADATA_DB_PORT:-5434}:5432"
+    networks:
+      - opens3-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${E2E_METADATA_DB_USER:-metadata_e2e_user} -d ${E2E_METADATA_DB_NAME:-metadata_e2e_db}"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 5s
+
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]

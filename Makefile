@@ -155,10 +155,23 @@ test-storage:
 test-users-service:
 	go test ./services/users/internal/service/user/tests -count=1
 
+test-metadata-repo-integration:
+	cd services/metadata && go test -tags=integration ./internal/repository/object/tests -count=1
+
+test-metadata-repo-integration-local: up-e2e
+	cd services/metadata && go test -tags=integration ./internal/repository/object/tests -count=1
+
 # ── Docker ─────────────────────────────────────────────────────────────────────
 
 up-services:
 	docker compose --profile services up -d
+
+up-e2e:
+	docker compose --env-file e2e/.env --profile e2e up -d --wait --force-recreate postgres-metadata-e2e
+
+down-e2e:
+	docker compose --env-file e2e/.env --profile e2e stop postgres-metadata-e2e
+	docker compose --env-file e2e/.env --profile e2e rm -f postgres-metadata-e2e
 
 up-observability:
 	docker compose --profile observability up -d
