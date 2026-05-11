@@ -128,6 +128,24 @@ func TestDeleteBucket(t *testing.T) {
 				return mocks.NewProducerMock(mc)
 			},
 		},
+		{
+			name:    "error: producer failure",
+			args:    args{ctx: ctx, name: "my-bucket"},
+			wantErr: domainerrors.ErrInternal,
+			buildRepoMock: func(mc *minimock.Controller) *mocks.BucketRepositoryMock {
+				m := mocks.NewBucketRepositoryMock(mc)
+				m.GetMock.Return(existingBucket, nil)
+				m.CountObjectsMock.Return(0, nil)
+				m.DeleteMock.Return(nil)
+				return m
+			},
+			buildTxMock: executingTx,
+			buildProducerMock: func(mc *minimock.Controller) *mocks.ProducerMock {
+				m := mocks.NewProducerMock(mc)
+				m.SendMock.Return(errors.New("kafka send failed"))
+				return m
+			},
+		},
 	}
 
 	for _, tt := range tests {

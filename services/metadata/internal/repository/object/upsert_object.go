@@ -2,8 +2,11 @@ package object
 
 import (
 	"context"
+	"errors"
 
+	domainerrors "github.com/alesplll/opens3-rebac/services/metadata/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
+	"github.com/jackc/pgx/v4"
 )
 
 // UpsertObject creates an object record if it does not exist yet (same bucket+key),
@@ -23,6 +26,9 @@ RETURNING id`
 	var objectID string
 	err := r.db.DB().QueryRowContext(ctx, q, bucketName, key).Scan(&objectID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", domainerrors.ErrBucketNotFound
+		}
 		return "", err
 	}
 

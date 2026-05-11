@@ -3,6 +3,8 @@ package object
 import (
 	"context"
 	"encoding/json"
+
+	domainerrors "github.com/alesplll/opens3-rebac/services/metadata/internal/errors/domain_errors"
 )
 
 type objectDeletedEvent struct {
@@ -17,7 +19,9 @@ func (s *objectService) DeleteObjectMeta(ctx context.Context, bucketName, key st
 	}
 
 	payload, _ := json.Marshal(objectDeletedEvent{ObjectID: objectID, BlobID: blobID})
-	_ = s.objectDeleted.Send(ctx, []byte(objectID), payload, nil)
+	if err := s.objectDeleted.Send(ctx, []byte(objectID), payload, nil); err != nil {
+		return "", "", domainerrors.ErrInternal
+	}
 
 	return objectID, blobID, nil
 }

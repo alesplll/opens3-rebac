@@ -22,7 +22,7 @@ func TestDeleteObjectMeta(t *testing.T) {
 	ctx := context.Background()
 
 	wantObjectID := "object-uuid-1"
-	wantBlobID   := "blob-uuid-1"
+	wantBlobID := "blob-uuid-1"
 
 	tests := []struct {
 		name              string
@@ -76,6 +76,21 @@ func TestDeleteObjectMeta(t *testing.T) {
 			},
 			buildProducerMock: func(mc *minimock.Controller) *mocks.ProducerMock {
 				return mocks.NewProducerMock(mc)
+			},
+		},
+		{
+			name:    "error: producer failure",
+			args:    args{ctx: ctx, bucketName: "my-bucket", key: "photos/cat.jpg"},
+			wantErr: domainerrors.ErrInternal,
+			buildRepoMock: func(mc *minimock.Controller) *mocks.ObjectRepositoryMock {
+				m := mocks.NewObjectRepositoryMock(mc)
+				m.DeleteMock.Return(wantObjectID, wantBlobID, nil)
+				return m
+			},
+			buildProducerMock: func(mc *minimock.Controller) *mocks.ProducerMock {
+				m := mocks.NewProducerMock(mc)
+				m.SendMock.Return(errors.New("kafka send failed"))
+				return m
 			},
 		},
 	}

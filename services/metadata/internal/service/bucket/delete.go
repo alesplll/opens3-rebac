@@ -39,7 +39,9 @@ func (s *bucketService) DeleteBucket(ctx context.Context, name string) error {
 	}
 
 	payload, _ := json.Marshal(bucketDeletedEvent{BucketID: bucketID, BucketName: name})
-	_ = s.bucketDeleted.Send(ctx, []byte(bucketID), payload, nil)
+	if err := s.bucketDeleted.Send(ctx, []byte(bucketID), payload, nil); err != nil {
+		return domainerrors.ErrInternal
+	}
 
 	return nil
 }
