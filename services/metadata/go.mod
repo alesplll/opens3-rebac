@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/IBM/sarama v1.46.2
 	github.com/Masterminds/squirrel v1.5.4
+	github.com/alesplll/opens3-rebac/e2e v0.0.0
 	github.com/alesplll/opens3-rebac/shared v0.0.0-20260411102603-54e958e41a13
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/gojuno/minimock/v3 v3.4.7
@@ -12,6 +13,7 @@ require (
 	github.com/jackc/pgconn v1.14.3
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/joho/godotenv v1.5.1
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.76.0
 )
@@ -72,3 +74,5 @@ require (
 )
 
 replace google.golang.org/genproto v0.0.0-20200423170343-7949de9c1215 => google.golang.org/genproto v0.0.0-20240401170217-c3f982113cda
+
+replace github.com/alesplll/opens3-rebac/e2e => ../../e2e
