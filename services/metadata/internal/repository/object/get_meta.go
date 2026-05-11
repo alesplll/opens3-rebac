@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 
-	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 	domainerrors "github.com/alesplll/opens3-rebac/services/metadata/internal/errors/domain_errors"
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
-	repoModel "github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/model"
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/converter"
+	repoModel "github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/model"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 	"github.com/jackc/pgx/v4"
 )
 
@@ -28,7 +28,12 @@ SELECT o.id AS object_id,
 FROM objects o
 JOIN buckets b ON o.bucket_id = b.id
 JOIN versions v ON v.id = $3
-WHERE b.name = $1 AND o.key = $2 AND v.is_deleted = false`
+WHERE b.name = $1
+  AND o.key = $2
+  AND o.status = '` + string(model.ObjectStatusActive) + `'
+  AND v.object_id = o.id
+  AND v.kind = '` + string(model.VersionKindBlob) + `'
+  AND v.state = '` + string(model.VersionStateCommitted) + `'`
 		args = []any{bucketName, key, versionID}
 	} else {
 		rawSQL = `
@@ -42,7 +47,11 @@ SELECT o.id AS object_id,
 FROM objects o
 JOIN buckets b ON o.bucket_id = b.id
 JOIN versions v ON v.id = o.current_version_id
-WHERE b.name = $1 AND o.key = $2 AND v.is_deleted = false`
+WHERE b.name = $1
+  AND o.key = $2
+  AND o.status = '` + string(model.ObjectStatusActive) + `'
+  AND v.kind = '` + string(model.VersionKindBlob) + `'
+  AND v.state = '` + string(model.VersionStateCommitted) + `'`
 		args = []any{bucketName, key}
 	}
 

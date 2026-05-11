@@ -22,7 +22,8 @@ RETURNING o.id,
 		QueryRaw: rawSQL,
 	}
 
-	var objectID, blobID string
+	var objectID string
+	var blobID *string
 	err := r.db.DB().QueryRowContext(ctx, q, bucketName, key).Scan(&objectID, &blobID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -31,5 +32,9 @@ RETURNING o.id,
 		return "", "", err
 	}
 
-	return objectID, blobID, nil
+	if blobID == nil {
+		return objectID, "", nil
+	}
+
+	return objectID, *blobID, nil
 }

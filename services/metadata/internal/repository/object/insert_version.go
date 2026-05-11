@@ -5,6 +5,7 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 )
 
@@ -14,7 +15,7 @@ func (r *repo) InsertVersion(ctx context.Context, objectID, blobID string, sizeB
 	builder := sq.Insert(versionsTable).
 		PlaceholderFormat(sq.Dollar).
 		Columns("object_id", "blob_id", "size_bytes", "etag", "content_type", "state", "committed_at").
-		Values(objectID, blobID, sizeBytes, etag, contentType, "committed", sq.Expr("now()")).
+		Values(objectID, blobID, sizeBytes, etag, contentType, model.VersionStateCommitted, sq.Expr("now()")).
 		Suffix("RETURNING id, created_at")
 
 	query, args, err := builder.ToSql()

@@ -5,8 +5,8 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/model"
-	repoModel "github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/model"
 	"github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/converter"
+	repoModel "github.com/alesplll/opens3-rebac/services/metadata/internal/repository/object/model"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/client/db"
 )
 
@@ -31,7 +31,9 @@ func (r *repo) List(ctx context.Context, bucketName, prefix, continuationToken s
 		Join("buckets b ON o.bucket_id = b.id").
 		Join("versions v ON v.id = o.current_version_id").
 		Where(sq.Eq{"b.name": bucketName}).
-		Where(sq.Eq{"v.is_deleted": false}).
+		Where(sq.Eq{"o.status": model.ObjectStatusActive}).
+		Where(sq.Eq{"v.kind": model.VersionKindBlob}).
+		Where(sq.Eq{"v.state": model.VersionStateCommitted}).
 		OrderBy("o.key ASC").
 		Limit(uint64(maxKeys))
 
