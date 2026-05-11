@@ -13,8 +13,8 @@ import (
 func (r *repo) InsertVersion(ctx context.Context, objectID, blobID string, sizeBytes int64, etag, contentType string) (string, time.Time, error) {
 	builder := sq.Insert(versionsTable).
 		PlaceholderFormat(sq.Dollar).
-		Columns("object_id", "blob_id", "size_bytes", "etag", "content_type").
-		Values(objectID, blobID, sizeBytes, etag, contentType).
+		Columns("object_id", "blob_id", "size_bytes", "etag", "content_type", "state", "committed_at").
+		Values(objectID, blobID, sizeBytes, etag, contentType, "committed", sq.Expr("now()")).
 		Suffix("RETURNING id, created_at")
 
 	query, args, err := builder.ToSql()
