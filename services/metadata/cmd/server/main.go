@@ -1,30 +1,23 @@
 package main
 
 import (
-	"log"
-	"net"
+	"context"
+	"fmt"
 
-	metadatahandler "github.com/alesplll/opens3-rebac/services/metadata/internal/handler/metadata"
-	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
+	"github.com/alesplll/opens3-rebac/services/metadata/internal/app"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"go.uber.org/zap"
 )
 
-const grpcPort = ":50052"
-
 func main() {
-	lis, err := net.Listen("tcp", grpcPort)
+	appCtx := context.Background()
+
+	a, err := app.NewApp(appCtx)
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", grpcPort, err)
+		panic(fmt.Sprintf("failed to init app with error: %v", err))
 	}
 
-	server := grpc.NewServer()
-	metadatav1.RegisterMetadataServiceServer(server, metadatahandler.NewHandler())
-	reflection.Register(server)
-
-	log.Printf("metadata gRPC stub listens on %s", grpcPort)
-
-	if err := server.Serve(lis); err != nil {
-		log.Fatalf("failed to serve gRPC server: %v", err)
+	if err := a.Run(); err != nil {
+		logger.Fatal(appCtx, "failed to run app", zap.Error(err))
 	}
 }

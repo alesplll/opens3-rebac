@@ -177,6 +177,9 @@ opens3-rebac/
 
 ```bash
 make up-services
+make up-e2e
+make test-metadata-integration
+make test-metadata-integration-local
 make down
 make down-volumes
 make rebuild
