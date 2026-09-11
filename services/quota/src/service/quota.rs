@@ -105,8 +105,8 @@ impl<R: QuotaRepository> QuotaService<R> {
 
     // ── UpdateUsage ───────────────────────────────────────────────────────────
 
-    /// Fire-and-forget usage update. Called after a successful S3 operation.
-    /// Delta can be negative (object/bucket deletion).
+    /// Apply a usage delta that was not already reserved by CheckQuota, or
+    /// compensate a reservation with a negative delta after an operation fails.
     #[instrument(skip(self, delta), name = "service.update_usage", fields(subject = %subject_id, bucket = ?bucket_id))]
     pub fn update_usage(
         &self,
@@ -216,6 +216,12 @@ impl<R: QuotaRepository> QuotaService<R> {
             if let Err(e) = self.repo.flush_usage(&usage).await {
                 warn!(error = %e, "failed to flush usage to Redis");
                 self.metrics.redis_flush_errors_total.add(1, &[]);
+
+                // snapshot_dirty removes marks before the I/O. Restore them on
+                // failure so a subject without later mutations is retried too.
+                self.cache
+                    .mark_dirty(usage.iter().map(|(subject_id, _)| subject_id.as_str()));
+                return Err(e);
             }
         }
 
@@ -244,6 +250,7 @@ mod tests {
     #[derive(Default)]
     struct NoopRepo {
         flushed: Mutex<Vec<(String, UsageEntry)>>,
+        fail_flush: bool,
     }
 
     #[async_trait::async_trait]
@@ -255,6 +262,9 @@ mod tests {
             Ok(vec![])
         }
         async fn flush_usage(&self, entries: &[(String, UsageEntry)]) -> Result<(), QuotaError> {
+            if self.fail_flush {
+                return Err(QuotaError::Internal("forced flush failure".into()));
+            }
             self.flushed.lock().unwrap().extend_from_slice(entries);
             Ok(())
         }
@@ -483,5 +493,30 @@ mod tests {
             count_after_first, count_after_second,
             "second flush must be a no-op"
         );
+    }
+
+    #[tokio::test]
+    async fn flush_to_storage_retries_entries_after_failure() {
+        init_config();
+        let cache = Arc::new(MemoryCache::new());
+        let repo = Arc::new(NoopRepo {
+            flushed: Mutex::new(Vec::new()),
+            fail_flush: true,
+        });
+        let svc = QuotaService::new(
+            Arc::clone(&cache),
+            repo,
+            Arc::new(QuotaMetrics::new()),
+        );
+        svc.update_usage("user:alice", None, &delta(100, 1, 0))
+            .unwrap();
+
+        let result = svc.flush_to_storage().await;
+
+        assert!(matches!(result, Err(QuotaError::Internal(_))));
+        let retry = cache.snapshot_dirty();
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0].0, "user:alice");
+        assert_eq!(retry[0].1.bytes, 100);
     }
 }
