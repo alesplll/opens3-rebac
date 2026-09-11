@@ -1,6 +1,8 @@
 # Kubernetes deployment: проект
 
-Статус: **план, не готовый manifest**. Обновлено: 2026-09-11.
+- Дата: 2026-04-06
+- Актуализировано: 2026-09-11
+Статус: **план, не готовый manifest**.
 
 В репозитории пока нет Helm chart, Gateway, Placement и распределённого Storage.
 Поэтому этот документ фиксирует порядок проектирования и критерии проверки, а не
@@ -33,6 +35,19 @@ copy/paste deployment.
 members на общем failure domain теряют большинство при одном отказе. PostgreSQL
 primary/replica и Redis master/replica/Sentinel также разносятся. Один Sentinel не
 создаёт failover quorum.
+
+## Варианты размещения и сети
+
+- **Минимальный стенд:** один namespace и обычные Services; проще запустить, но
+  он не проверяет multi-zone отказоустойчивость.
+- **Headless Service + client-side gRPC balancing:** клиент видит pods и сам
+  распределяет соединения; нужен корректный resolver и health handling.
+- **Service mesh:** даёт traffic policy и mTLS, но добавляет эксплуатационную
+  сложность; нужен только после появления конкретных требований.
+
+Stateful dependencies можно поднять проверенными charts/operators либо вынести в
+managed services. Выбор зависит от учебной цели: изучение эксплуатации кластера
+или проверка поведения самих OpenS3 services.
 
 ## Probes
 

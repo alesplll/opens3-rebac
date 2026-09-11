@@ -1,7 +1,8 @@
 # Storage filesystem architecture
 
+- Дата: 2026-04-08
+- Актуализировано: 2026-09-11
 Статус: **текущее устройство single-node Storage и открытые ограничения**.
-Обновлено: 2026-09-11.
 
 Storage работает с `blob_id`, `upload_id` и multipart parts. Он не знает S3 bucket,
 key или permission. Metadata остаётся catalog authority.

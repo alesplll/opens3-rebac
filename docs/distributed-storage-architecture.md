@@ -1,132 +1,208 @@
-# Распределённое хранение: проект архитектуры
+# Распределённое хранение — шардирование и репликация
 
-Статус: **проект, не реализован**. Обновлено: 2026-09-11.
+- Дата: 2026-04-06
+- Актуализировано: 2026-09-11
+Связанные документы: [Storage Service — план реализации](storage-service-implementation-plan.md) | [Kubernetes deployment](kubernetes-deployment-plan.md)
 
-Текущий Storage — один локальный blob store. Этот документ фиксирует требования,
-которые нужно решить до появления нескольких Storage nodes. Он не описывает
-гарантии текущего runtime.
+## Контекст и текущее состояние
 
-## Инварианты
+Сейчас Storage работает как один локальный blob store: принимает поток, создаёт
+`blob_id`, сохраняет файл на локальной файловой системе и возвращает его по этому
+идентификатору. Placement Service, репликации и автоматического repair пока нет.
 
-1. Metadata публикует только committed version, для которой достигнута выбранная
-   durability policy.
-2. Независимые PUT создают разные logical versions. Retry одной внутренней
-   операции узнаётся по operation ID, а не по ETag/content hash.
-3. Logical blob имеет стабильный ID. Реплики либо принимают этот ID в Storage API,
-   либо Metadata хранит mapping logical ID → node-local IDs.
-4. Чтение использует только подтверждённые holders текущей version и умеет
-   повторить запрос на другой реплике.
-5. Topology/epoch является согласованным состоянием control plane; frontend может
-   быть stateless только относительно локального диска.
-6. Старый coordinator не может записать по устаревшей topology: Storage проверяет
-   monotonic fencing token/epoch.
+Цель этого плана — перейти к нескольким Storage nodes, сохранив простую модель:
+Storage отвечает за байты, Metadata — за объектные версии, Placement — за
+размещение и состояние реплик, Gateway или отдельный coordinator ведёт data path.
 
-## N, W и R
+## Базовые параметры
 
-`N` — число желаемых копий, `W` — число durable acknowledgements до commit, `R` —
-число реплик, участвующих в read protocol.
+- `N` — желаемое число реплик blob;
+- `W` — число durable acknowledgements, после которых запись можно считать
+  выполненной;
+- `R` — число реплик, участвующих в чтении;
+- `topology_epoch` — версия состава кластера и placement state;
+- `operation_id` — идентификатор одной повторяемой команды записи.
 
-Условие `W + R > N` даёт пересечение кворумов только при дополнительных
-предпосылках: единый порядок versions, правильное чтение наиболее новой версии,
-согласованная membership и обработка concurrent writes. Оно само по себе не
-доказывает linearizability.
+Для первого прототипа можно исследовать `N=3`, `W=2`, `R=1`. Это ещё не готовая
+гарантия strong consistency. Условие `W + R > N` полезно только вместе с единым
+порядком версий, согласованным membership, выбором самой новой версии и обработкой
+конкурентных записей.
 
-Для immutable blob с authoritative Metadata pointer возможна более простая схема:
-запись получает W acknowledgements, Metadata сохраняет точный список подтвердивших
-holders, чтение выбирает их и повторяется при ошибке. `N=3/W=2/R=1` безопасно
-описывать только вместе с этим правилом; «читать с любой живой ноды» недостаточно.
+В OpenS3 проще опираться на authoritative pointer в Metadata: после `W` durable
+записей Metadata фиксирует конкретную committed version и список подтвердивших
+holders. Чтение обращается только к ним и при ошибке пробует следующую реплику.
 
-## Идентификаторы и Storage API
+## Placement Service
 
-Текущий StoreObject не принимает blob ID и создаёт UUID на каждой node. Поэтому
-он не может без изменения контракта создать одинаковую реплику несколькими
-вызовами.
+Placement хранит и выдаёт:
 
-Нужно выбрать один вариант:
+- текущий `topology_epoch` и membership;
+- назначенные и подтверждённые holders каждого logical blob;
+- состояние nodes и время последнего health signal;
+- очередь repair/rebalance;
+- tombstones до завершения удаления со всех реплик.
 
-- coordinator выдаёт logical blob ID, а Storage принимает его вместе с
-  `operation_id` и `topology_epoch`;
-- каждая node возвращает local blob ID, а Metadata атомарно хранит mapping всех
-  подтверждённых реплик.
+Статус `suspect` запрещает назначать node для новых записей, но сам по себе не
+останавливает старого coordinator. Для защиты от split brain Storage должен
+сравнивать fencing token/epoch с последним принятым значением и отклонять stale
+команды.
 
-Первый вариант упрощает lookup/delete, второй сохраняет локальную автономность.
-Решение должно быть принято до реализации Gateway fan-out.
+## Идентификатор реплики
 
-## Data path
+Текущий `StoreObject` создаёт новый UUID внутри каждой Storage node. Поэтому
+несколько независимых вызовов не создадут реплики с одинаковым `blob_id` без
+изменения контракта. Возможны два варианта:
 
-### Параллельная запись coordinator → Storage
+1. Coordinator выбирает logical `blob_id`, а Storage принимает его вместе с
+   `operation_id` и `topology_epoch`.
+2. Каждая node создаёт local `blob_id`, а Metadata/Placement хранит mapping
+   `logical_blob_id → node + local_blob_id`.
 
-Coordinator читает вход один раз, помещает chunks в bounded buffers и независимо
-передаёт их N workers. Он ждёт W полных durable commits и отменяет/помечает
-оставшиеся попытки для repair.
+Первый вариант проще для чтения и удаления. Второй меньше меняет автономность
+Storage, но усложняет каталог реплик. Выбор нужен до реализации fan-out.
 
-Обычный `io.MultiWriter` для этого недостаточен: он вызывает writers
-последовательно, поэтому одна заблокированная pipe тормозит весь вход. Реализация
-обязана определить backpressure, memory bound, client cancellation и поведение
-после частичного успеха.
+## Три варианта записи
 
-### Chain replication
+### Вариант A: Gateway-driven parallel write
 
-Primary пересылает поток по цепочке, а acknowledgement возвращается после нужного
-числа durable commits. Передачу можно pipeline-ить; задержка не равна автоматически
-сумме полных времен записи каждой node. Схема требует изменения Storage, обработки
-разрыва цепочки и fencing.
+Gateway или выделенный coordinator получает targets от Placement, читает входной
+поток один раз и передаёт chunks нескольким Storage workers через bounded buffers.
+После `W` полных durable commits он регистрирует version в Metadata.
 
-### Отдельный data proxy
+Плюсы: минимальное число новых компонентов и удобный первый прототип. Минусы:
+Gateway знает topology, держит fan-out/backpressure и тратит исходящий bandwidth
+на каждую реплику.
 
-Proxy скрывает topology от Gateway, но становится частью data path. Его frontend
-можно масштабировать горизонтально, однако placement decisions, membership и
-repair state требуют согласованного backend/control plane. GFS и Ceph полезны как
-источники отдельных идей, но не являются буквальными примерами центрального
-proxy: их клиенты передают data непосредственно storage servers/OSDs после
-получения placement metadata.
+Обычный `io.MultiWriter` здесь недостаточен: writers вызываются последовательно,
+поэтому одна медленная node блокирует весь поток. Нужны независимые workers,
+ограничение памяти, cancellation и cleanup частичных записей.
 
-Для первого прототипа рекомендуется параллельный coordinator с явным logical ID и
-Metadata как authority. Это рекомендация проекта, а не утверждение о реализации.
+### Вариант B: chain replication
 
-## Placement и failure handling
+Coordinator отправляет поток primary node, та пересылает его дальше по цепочке.
+Acknowledgement возвращается после заданного числа durable commits. Передачу
+можно pipeline-ить, поэтому задержка не обязана равняться сумме полных времён
+записи на каждой node.
 
-Placement отвечает за membership, allocation, locate и repair. Его долговечное
-состояние включает:
+Плюсы: Gateway отправляет данные один раз. Минусы: Storage становится участником
+протокола репликации; нужны reconfiguration, fencing и обработка разрыва цепочки.
 
-- текущий topology epoch;
-- desired/confirmed holders;
-- node health с таймстампами;
-- очередь repair/rebalance и прогресс;
-- tombstones до завершения удаления со всех поколений реплик.
+### Вариант C: Placement/Data Proxy
 
-Статус `suspect` исключает node из нового placement, но не является fencing.
-Fencing требует токена, который Storage сравнивает с последним принятым epoch и
-отклоняет старые записи.
+Отдельный proxy получает placement и ведёт fan-out, а Gateway видит один data
+endpoint. Frontend proxy можно масштабировать горизонтально, но membership,
+epochs и repair state должны храниться в согласованном control plane.
 
-Repair должен быть rate-limited и idempotent. При возвращении node checksums
-помогают проверить bytes, но не определяют, какая topology/version актуальна.
+Плюсы: Gateway не знает topology, data path можно развивать отдельно. Минусы:
+появляется ещё один нагруженный компонент и сетевой hop.
 
-## Delete и события
+GFS и Ceph полезны как источники идей о placement и recovery, но не являются
+точными примерами такого proxy: после получения metadata их data path идёт к
+storage servers/OSDs.
 
-Событие удаления должно содержать logical resource/version ID и точные replica
-references либо позволять Placement получить их из durable catalog. Очистка по
-переиспользуемым bucket/key опасна: запоздавшее событие старого поколения способно
-удалить данные нового объекта.
+## Сравнение вариантов
 
-Delete marker в versioning-enabled bucket скрывает current object, но не удаляет
-старые version blobs. Permanent version delete и physical GC — отдельные команды.
+| Критерий | A: parallel coordinator | B: chain | C: data proxy |
+|---|---|---|---|
+| Изменения Storage API | logical ID/epoch | протокол репликации | logical ID/epoch |
+| Нагрузка на Gateway | высокая | ниже | низкая |
+| Новый компонент | не обязателен | не обязателен | обязателен |
+| Сложность failure handling | средняя | высокая | высокая |
+| Подход для первого этапа | **да** | позже | после измерений |
 
-Kafka delivery проектируется как at-least-once. DB state и outbound event должны
-фиксироваться через transactional outbox; consumers обязаны быть идемпотентными.
+Рекомендуемый первый этап — вариант A с coordinator-selected logical ID и
+Metadata как источником истины. Это решение для прототипа, которое нужно
+подтвердить тестами; варианты B и C остаются кандидатами при росте нагрузки.
 
-## Проверки до включения
+## Consistent hash ring
 
-- write succeeds только после W durable acknowledgements;
-- timeout retry с тем же operation ID возвращает прежний terminal result;
-- чтение не обращается к node, не подтвердившей current version;
-- stale coordinator получает rejection по epoch;
-- node loss не нарушает declared durability/read availability;
-- repair не превышает заданный bandwidth/concurrency;
-- late delete не затрагивает новое поколение resource;
-- Metadata pointer не становится видимым до завершения write policy.
+Ring может выбирать предпочтительные nodes для нового blob:
 
-Источники для сравнения архитектур:
+1. Placement хэширует logical `blob_id`.
+2. Находит следующую virtual node на ring.
+3. Выбирает `N` разных физических nodes с учётом failure domain.
+4. Сохраняет назначение и затем отдельно отмечает durable acknowledgements.
+
+Ring не заменяет каталог фактических holders. После падения, частичной записи или
+rebalance вычисленное размещение может отличаться от реально подтверждённого.
+Чтение использует committed catalog, а ring — для новых назначений и repair.
+
+## Изменения в сервисах
+
+### Gateway/coordinator
+
+- получает placement и fencing epoch;
+- передаёт один поток репликам с bounded backpressure;
+- ждёт `W` durable результатов;
+- повторяет ту же команду по `operation_id`;
+- после частичного успеха создаёт durable cleanup/repair work.
+
+### Storage
+
+- принимает выбранную схему logical/local ID;
+- проверяет `topology_epoch`;
+- идемпотентно возвращает terminal result одной операции;
+- сообщает checksum и durable commit;
+- поддерживает repair copy и удаление конкретной реплики.
+
+### Metadata
+
+- делает version видимой только после выполнения write policy;
+- хранит logical blob и подтверждённых holders либо ссылку на Placement catalog;
+- не использует ETag как ключ идемпотентности;
+- публикует cleanup/repair events через transactional outbox.
+
+## Kafka, delete и repair
+
+Kafka подходит для repair, rebalance и cleanup, которым не требуется держать
+клиентский запрос открытым. Доставка проектируется как at-least-once: события
+имеют `event_id`, resource generation, version и точные replica references, а
+consumers выполняют команды идемпотентно.
+
+Удаление по одному bucket/key опасно: позднее событие старого поколения может
+затронуть новый объект с тем же именем. Delete marker скрывает текущий объект, но
+не удаляет старые version blobs. Permanent version delete и physical GC идут
+отдельным flow.
+
+Repair ограничивается по bandwidth/concurrency. Checksums подтверждают байты, но
+актуальную version и topology определяет control plane.
+
+## Основные failure modes
+
+1. **Split brain.** Старый coordinator пишет после изменения topology — Storage
+   отклоняет stale epoch.
+2. **Partial write.** Записано меньше `W` или ответ потерян — операция остаётся
+   незавершённой, а подтверждённые orphan replicas попадают в cleanup/repair.
+3. **Stale read.** Клиент попал на node без current version — чтение выбирает
+   holders из committed Metadata и умеет сделать retry.
+4. **Thundering herd.** После падения node repair ограничивается очередью,
+   приоритетами и лимитами, а не стартует для всех blob одновременно.
+5. **Late delete.** Команда содержит поколение/version/blob IDs и не удаляет
+   ресурс только по переиспользуемому имени.
+
+## Поэтапная реализация
+
+1. Зафиксировать logical ID, operation ID и fencing в protobuf.
+2. Реализовать Placement membership и durable replica catalog.
+3. Добавить parallel coordinator для `N=3/W=2`.
+4. Перевести read path на confirmed holders с retry.
+5. Добавить outbox, cleanup и rate-limited repair.
+6. Провести node-loss, partition и rebalance tests.
+7. По метрикам решить, нужен ли chain replication или отдельный data proxy.
+
+## Проверки
+
+- success записи возможен только после `W` durable acknowledgements;
+- retry с тем же `operation_id` возвращает тот же terminal result;
+- независимый PUT одинаковых байтов создаёт новую logical version;
+- чтение не выбирает неподтвердившую current version node;
+- stale coordinator получает rejection;
+- падение одной node соответствует заявленной durability/availability;
+- repair не превышает заданные лимиты;
+- late delete не затрагивает новое поколение ресурса;
+- Metadata pointer не виден до выполнения write policy.
+
+Материалы для сравнения:
 [The Google File System](https://static.googleusercontent.com/media/research.google.com/en/us/archive/gfs-sosp2003.pdf),
 [Ceph architecture](https://docs.ceph.com/en/quincy/architecture/),
 [Go io.MultiWriter](https://pkg.go.dev/io#MultiWriter).

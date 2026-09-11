@@ -2,7 +2,7 @@
 
 Дата проверки: 10 сентября 2026 года. Статус: **выполнено автономно; см. отметки по каждому пункту**.
 
-Проверены 23 Markdown-файла основного checkout, все 18 Markdown-страниц опубликованной Wiki и тексты всех 37 issues, включая закрытые. Повторяющиеся проблемы объединены по исправлению; это список обнаруженных проблем, а не утверждение об отсутствии любых других дефектов.
+Проверены 23 Markdown-файла исходного checkout, все 18 Markdown-страниц опубликованной Wiki и тексты всех 37 issues, включая закрытые. После проверки один устаревший файл удалён по решению владельца. Повторяющиеся проблемы объединены по исправлению; это список обнаруженных проблем, а не утверждение об отсутствии любых других дефектов.
 
 Основания: исходный код, protobuf, миграции, Makefile, Compose, CI и первичная документация внешних систем. Исходный checkout: `e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75`; исходная Wiki: `009dbd2905ef190dc4f6f16ec93801870ebabf9d`, исправленная Wiki: `db3a1c7`. Неприменённые изменения пользователя в `services/authz/proto/generate.sh` и `.DS_Store` сохранены и не входят в PR.
 
@@ -50,11 +50,11 @@ Users использует порт 50054, AuthZ — 50051: указание Use
 
 **Статус: ✅ исправлено в PR.**
 
-**Где:** [README.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/README.md), [docs/auth-users-integration.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/auth-users-integration.md), [docs/wiki-audit-2026-04-02.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/wiki-audit-2026-04-02.md), [docs/users-service-unit-test-plan.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/users-service-unit-test-plan.md).
+**Где:** [README.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/README.md), удалённый `docs/auth-users-integration.md`, [docs/wiki-audit-2026-04-02.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/wiki-audit-2026-04-02.md), [docs/users-service-unit-test-plan.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/users-service-unit-test-plan.md).
 
 Абсолютная ссылка на локальный `GETTING_STARTED.md` не открывается у читателя GitHub. Апрельские документы содержат утверждения своего времени: Metadata отсутствует, Storage placeholder, старые пути kit/Neo4j, отсутствие части AuthZ-валидаций. План Users-тестов уже во многом реализован.
 
-**Исправить:** локальную ссылку заменить репозиторной; у исторических документов явно указать дату/статус, ссылку на актуальные инструкции и не подавать прошлый снимок как текущий. Не «исправлять прошлое» заменой всех исторических фактов современными.
+**Исправить:** локальную ссылку заменить репозиторной; лишний integration snapshot удалить по решению владельца. У оставшихся планов сохранить исходную дату, добавить дату актуализации и короткий срез текущего состояния, не переписывая прошлое задним числом.
 
 ### D05 · P1 · Users приписана отсутствующая защита RPC
 
@@ -844,7 +844,7 @@ p99 — процентиль, не максимальная задержка; me
 | [GETTING_STARTED.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/GETTING_STARTED.md) | D01, D03 |
 | [AGENTS.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/AGENTS.md) | D01, D03; инструкции по стилю не оценивались как факты о runtime |
 | [CLAUDE.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/CLAUDE.md) | D01–D03, D08–D14, D28, W10 |
-| [docs/auth-users-integration.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/auth-users-integration.md) | D04: исторический снимок, старые пути/статусы |
+| `docs/auth-users-integration.md` | D04: удалён после проверки по решению владельца |
 | [docs/class_diagram.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/class_diagram.md) | D02, D05–D06 |
 | [docs/object_diagram.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/object_diagram.md) | D02, D06 |
 | [docs/sequence_diagrams.md](https://github.com/alesplll/opens3-rebac/blob/e4b2cfbd94e965c04443dd7ff6d482cdd67b7e75/docs/sequence_diagrams.md) | D02, D06, D08, W06, W16 |

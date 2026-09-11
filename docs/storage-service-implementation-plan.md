@@ -1,9 +1,11 @@
 # Storage Service: состояние и дальнейший план
 
-Обновлено: 2026-09-11.
+- Дата: 2026-04-07
+- Актуализировано: 2026-09-11
 
-Этот документ заменяет исторический план от 2026-04-07. Текущий контракт подробно
-описан в [`services/storage/README.md`](../services/storage/README.md), устройство
+План сохраняет исходную цель и показывает, что уже реализовано, а что остаётся
+доделать. Текущий контракт подробно описан в
+[`services/storage/README.md`](../services/storage/README.md), устройство
 filesystem — в [`storage-fs-architecture.md`](storage-fs-architecture.md).
 
 ## Реализовано
@@ -55,13 +57,15 @@ MD5.
 
 ### 3. Metadata lifecycle
 
-Если сохраняется простой sync flow:
+Для согласования Storage и Metadata рассматривались два варианта.
+
+Простой sync flow подходит для минимального стенда:
 
 ```text
 Storage durable commit → Metadata committed version → HTTP success
 ```
 
-Если вводится pending/finalize:
+Pending/finalize сложнее, но явно хранит незавершённую операцию:
 
 ```text
 durable intent + operation/version ID
@@ -73,6 +77,10 @@ durable intent + operation/version ID
 Асинхронный Kafka event может участвовать внутри, но клиентский success barrier не
 может предшествовать видимости committed version. Retry использует operation ID,
 не ETag.
+
+Полностью event-driven finalize также возможен, если Gateway ждёт correlated
+terminal event. Для первого этапа sync flow проще; pending/finalize нужен при
+появлении recovery незавершённых операций и асинхронной оркестрации.
 
 ### 4. Cleanup events
 
@@ -91,6 +99,11 @@ delete и GC — отдельный flow.
 До нескольких nodes нужно изменить идентификацию реплик: текущий StoreObject не
 принимает coordinator-selected blob ID. Quorum, fencing, placement state и repair
 описаны в [`distributed-storage-architecture.md`](distributed-storage-architecture.md).
+
+Коротко о вариантах: Gateway/coordinator может писать реплики параллельно,
+Storage nodes могут передавать поток по chain, либо fan-out можно вынести в
+отдельный data proxy. Для первого прототипа выбран parallel coordinator; выбор
+нужно пересмотреть после измерения bandwidth и latency.
 
 ## Проверки готовности
 
