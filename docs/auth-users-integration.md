@@ -1,5 +1,11 @@
 # Интеграция Go-сервисов: auth + users
 
+> **Исторический снимок ветки на 2026-04-02.** Пути, состав сервисов и оценки
+> готовности ниже относятся к тому checkout. Актуальный запуск и контракты:
+> [`README.md`](../README.md), [`GETTING_STARTED.md`](../GETTING_STARTED.md),
+> [`services/auth/README.md`](../services/auth/README.md) и
+> [`services/users/README.md`](../services/users/README.md).
+
 > Ветка: `feat/auth_users/service-integration`
 
 Эта ветка переводит сервисы **auth** и **users** из изолированных проектов в единое монорепо.

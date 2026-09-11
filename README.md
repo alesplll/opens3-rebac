@@ -1,216 +1,159 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go" alt="Go" />
-  <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/Rust-1.87-000000?logo=rust&logoColor=white" alt="Rust" />
-  <img src="https://img.shields.io/badge/gRPC-Protobuf-00C7B7?logo=google-cloud&logoColor=white" alt="gRPC" />
-  <img src="https://img.shields.io/badge/S3-Compatible%20API-FF9900?logo=amazons3&logoColor=white" alt="S3" />
-  <img src="https://img.shields.io/badge/ReBAC-Authorization-6B46C1" alt="ReBAC" />
-  <img src="https://img.shields.io/badge/Neo4j-Graph%20DB-008CC1?logo=neo4j&logoColor=white" alt="Neo4j" />
-  <img src="https://img.shields.io/badge/PostgreSQL-Metadata-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white" alt="Redis" />
-  <img src="https://img.shields.io/badge/Kafka-Events-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
-  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/OpenTelemetry-Tracing-425CC7?logo=opentelemetry&logoColor=white" alt="OpenTelemetry" />
-  <img src="https://img.shields.io/badge/Jaeger-Tracing-66CFE3?logo=jaeger&logoColor=white" alt="Jaeger" />
-  <img src="https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white" alt="Prometheus" />
-  <img src="https://img.shields.io/badge/Grafana-Dashboards-F46800?logo=grafana&logoColor=white" alt="Grafana" />
-  <img src="https://img.shields.io/badge/Elasticsearch-Logs-005571?logo=elasticsearch&logoColor=white" alt="Elasticsearch" />
-  <img src="https://img.shields.io/badge/Kibana-UI-E8488B?logo=kibana&logoColor=white" alt="Kibana" />
-</p>
-
+  <img src="https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go" alt="Go 1.24.1" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/Rust-1.95-000000?logo=rust&logoColor=white" alt="Rust 1.95" />
+  <img src="https://img.shields.io/badge/gRPC-Protobuf-00C7B7?logo=google-cloud&logoColor=white" alt="gRPC and Protobuf" />
 </p>
 
 <h1 align="center">OpenS3-ReBAC</h1>
 
 <p align="center">
-  Распределённое объектное хранилище с S3 API и авторизацией на основе ReBAC
+  Учебный монорепозиторий сервисов для объектного хранилища с ReBAC-авторизацией.
 </p>
 
----
+## Текущее состояние
 
-## Что это
+В репозитории реализованы внутренние gRPC-сервисы Auth, Users, AuthZ, Metadata,
+Storage и Quota. Внешний HTTP Gateway ещё не реализован, поэтому текущий checkout
+не предоставляет готовый S3 endpoint для `aws-cli`, boto3 и других стандартных S3
+клиентов. Диаграммы распределённого хранения, Gateway, репликации и части Kafka-flow
+в `docs/` и Wiki описывают проектируемую архитектуру.
 
-**OpenS3-ReBAC** — учебный командный проект: S3-совместимое объектное хранилище (бакеты, объекты, версионирование) с гибкой авторизацией на основе графа отношений (Relationship-Based Access Control).
+| Сервис | Реализация | Порт на хосте | Основные зависимости |
+|---|---|---:|---|
+| Auth | Go | 50050 | Users, Redis |
+| AuthZ | Python | 50051 | Neo4j, Redis, Kafka |
+| Metadata | Go | 50052 | PostgreSQL, Kafka |
+| Storage | Go | 50053 | локальная файловая система |
+| Users | Go | 50054 | PostgreSQL |
+| Quota | Rust | 50055 | Redis |
+| Gateway | планируется | 8080 | внутренние gRPC-сервисы |
 
-Клиенты работают через стандартный S3 API (boto3, aws-cli, любой S3 SDK). Внутри — четыре микросервиса, общающихся по gRPC.
+Сервис Storage хранит immutable blobs и поддерживает внутренние RPC для обычной и
+multipart-загрузки. Metadata хранит buckets, objects и versions. Наличие этих RPC
+само по себе не означает полной S3-совместимости: внешний HTTP-контракт, SigV4 и
+end-to-end orchestration входят в будущий Gateway.
 
 ## Быстрый старт
 
-Если у вас установлен только Docker и вы хотите просто поднять локально всё, что уже реализовано, используйте пошаговую инструкцию:
-
-- [GETTING_STARTED.md](GETTING_STARTED.md)
-
-Короткая версия:
+Нужны Docker и Docker Compose plugin. Из корня репозитория:
 
 ```bash
-cd /путь/до/opens3-rebac
 docker compose --profile services up --build -d
+docker compose ps
 ```
 
-Важно: команды нужно запускать именно из корня репозитория, где лежит `docker-compose.yml`.
+Подробная инструкция: [GETTING_STARTED.md](GETTING_STARTED.md).
 
----
-
-## Архитектура
-
-```
-Client (HTTP / S3 API)
-        │
-        ▼
-    Gateway :8080          ← единственная точка входа
-   /  |  |   \
-  /   |  |    \
-Auth AuthZ Meta Storage    ← gRPC-сервисы
-:50050 :50051 :50052 :50053
-  │      │      │
-  │    Neo4j  PostgreSQL
-  │    Redis
-  │
-Users :50051               ← управление пользователями
-  │
-PostgreSQL
-         │
-       Kafka               ← асинхронные события между сервисами
-```
-
-## Сервисы
-
-| Сервис | Стек | Порт | Ответственный |
-|---|---|---|---|
-| **Gateway** | Go | `:8080` | Макс |
-| **AuthZ (ReBAC)** | Python | `:50051` | Алекса |
-| **Metadata** | Python | `:50052` | Аня |
-| **Data Node** | Go | `:50053` | Илья |
-| **Auth** | Go | `:50050` | — |
-| **Users** | Go | `:50051` (gRPC) | — |
-
----
-
-## AuthZ / ReBAC Service
-
-Сервис авторизации отвечает на вопрос: **«может ли `user:alice` выполнить `read` над `object:photos/cat.jpg`?»**
-
-Решение принимается обходом графа отношений в **Neo4j**: пользователь → группы → ресурсы. Результат кэшируется в **Redis** (TTL 30 с). Каждое решение и изменение графа аудитируется через **Kafka**.
-
-```
-Gateway → Check(subject, action, object)
-              │
-              ├─ Redis (cache hit) → ALLOW/DENY
-              └─ Neo4j (graph traversal) → ALLOW/DENY → кэш + аудит
-```
-
-gRPC API: `Check` · `WriteTuple` · `DeleteTuple` · `Read` · `HealthCheck`
-
-Подробнее: [`services/authz/README.md`](services/authz/README.md)
-
----
-
-## Auth Service
-
-Сервис аутентификации пользователей. Выдаёт JWT refresh/access токены и валидирует их для других сервисов.
-
-```
-Gateway → Auth.Login(email, password)
-            │
-            ├─ Users (gRPC ValidateCredentials) → OK
-            └─ выдаёт refresh token + access token
-```
-
-Защита от перебора: Redis хранит счётчик неудачных попыток (`login_attempts:{email}`, TTL 30 с, лимит 6 попыток). Rate limiter: 30 req/s.
-
-gRPC API: `Login` · `GetRefreshToken` · `GetAccessToken` · `ValidateToken` · `HealthCheck`
-
-Подробнее: [`services/auth/README.md`](services/auth/README.md)
-
----
-
-## Users Service
-
-Сервис управления пользователями. Хранит учётные записи в PostgreSQL, публикует события в Kafka. Является источником истины о credentials — Auth Service обращается к нему при каждом логине.
-
-```
-Auth → ValidateCredentials(email, password) → Users
-                                                 │
-                                              PostgreSQL (bcrypt check)
-```
-
-При создании/удалении пользователя публикует события `user.created` / `user.deleted` в Kafka для каскадной обработки в других сервисах.
-
-gRPC API: `Create` · `Get` · `Delete` · `Update` · `ValidateCredentials` · `HealthCheck`
-
-Подробнее: [`services/users/README.md`](services/users/README.md)
-
----
-
-## Структура репозитория
-
-```
-opens3-rebac/
-├── proto/                        # Shared gRPC контракты (source of truth)
-│   ├── authz/v1/authz.proto      # opens3.authz.v1.PermissionService
-│   ├── metadata/v1/metadata.proto # opens3.metadata.v1.MetadataService
-│   └── storage/v1/storage.proto  # opens3.storage.v1.DataStorageService
-│
-├── services/
-│   ├── authz/                    # ReBAC authorization engine (Python)
-│   ├── metadata/                 # Metadata service (Python)
-│   ├── storage/                  # Data Node (Go)
-│   ├── gateway/                  # HTTP Gateway (Go)
-│   ├── auth/                     # Authentication service (Go)
-│   └── users/                    # User management service (Go)
-│
-├── infra/                        # Docker Compose, K8s манифесты
-├── .github/                      # CI/CD workflows
-└── docs/                         # Диаграммы, ADR, документация
-```
-
----
-
-## Запуск
-
-Для первого локального запуска используйте пошаговую инструкцию:
-
-- [GETTING_STARTED.md](/Users/grishinid/home/01_Coding/06_pets/opens3-rebac/GETTING_STARTED.md)
-- [GETTING_STARTED.md](GETTING_STARTED.md)
-
-Короткие команды через `make`:
+Через Makefile доступны основные команды:
 
 ```bash
 make up-services
 make up-e2e
 make test-metadata-integration
 make test-metadata-integration-local
+make up-observability
 make down
 make down-volumes
-make rebuild
+make generate
 ```
 
-> Gateway и Metadata пока не реализованы, поэтому полного S3 flow ещё нет.
+## Реализованные границы сервисов
 
-### Observability
+### Auth
+
+`Login` проверяет credentials через Users и возвращает refresh token.
+`GetAccessToken` отдельно выпускает access token. Новый refresh token сейчас не
+отзывает старый: server-side revocation ещё не реализован. Redis хранит счётчики
+неудачных входов, а не реестр JWT-сессий. Rate limiter действует внутри одного
+процесса.
+
+### Users
+
+Users хранит учётные записи в PostgreSQL и предоставляет Create, Get, Update,
+UpdatePassword, Delete и ValidateCredentials. Сервис рассчитан на внутреннюю сеть:
+текущий gRPC server не проверяет JWT и не ограничивает переданный `user_id`
+идентичностью вызывающего. Kafka-события пользователей сейчас не публикуются.
+
+### AuthZ
+
+AuthZ проверяет прямые `HAS_PERMISSION` и разрешения групп, достижимых через
+`MEMBER_OF`; более высокий permission level включает нижние. Ребро `PARENT_OF`
+можно хранить, но текущая проверка не наследует по нему разрешения bucket → object.
+Кэш решений имеет TTL. Kafka invalidator не входит в основной Compose-процесс, а
+его текущие hints не дают строгой гарантии немедленного отзыва всех зависимых
+решений.
+
+### Metadata
+
+Metadata предоставляет каталог buckets/objects/versions и публикует события
+удаления после изменения БД. До внедрения transactional outbox это best-effort
+граница: успешное изменение БД и публикация в Kafka не атомарны.
+
+### Storage
+
+Storage записывает blob во временный файл, синхронизирует файл и атомарно
+переименовывает его на той же файловой системе. Это обеспечивает атомарную
+видимость имени, но текущий код не синхронизирует каталог и не обещает полную
+устойчивость к потере питания. Репликация и placement service пока не реализованы.
+
+### Quota
+
+`CheckQuota` одновременно проверяет и резервирует положительную дельту. После
+успешной операции ту же дельту нельзя повторно передавать в `UpdateUsage`; при
+неуспехе резерв надо компенсировать отрицательной дельтой. Текущая атомарность
+ограничена одной записью и одним процессом Quota, поэтому сервис пока рассчитан на
+одну активную реплику.
+
+## Структура репозитория
+
+```text
+services/               # auth, users, authz, metadata, storage, quota
+shared/api/              # исходные protobuf-контракты
+shared/pkg/go/           # сгенерированный Go-код
+shared/pkg/py/           # сгенерированный Python-код
+shared/pkg/go-kit/       # общие Go-компоненты
+shared/pkg/py-kit/       # общие Python-компоненты
+shared/pkg/rust-kit/     # общие Rust-компоненты
+infra/                   # observability и инфраструктурные настройки
+e2e/                     # общая инфраструктура интеграционных тестов
+docs/                    # актуальные и датированные проектные документы
+```
+
+Сгенерированные файлы в `shared/pkg/go` и `shared/pkg/py` не редактируются
+вручную. После изменения `shared/api` используйте `make generate`.
+
+## Observability
 
 ```bash
 make up-observability
-
-docker compose --profile services --profile observability down
 ```
 
 | UI | Адрес |
 |---|---|
-| Jaeger | http://localhost:16686 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 |
-| Kibana | http://localhost:5601 |
-| Neo4j Browser | http://localhost:7474 (neo4j / password123) |
+| Jaeger | <http://localhost:16686> |
+| Prometheus | <http://localhost:9090> |
+| Grafana | <http://localhost:3000> |
+| Kibana | <http://localhost:5601> |
+| Neo4j Browser | <http://localhost:7474> |
 
----
+Стандартный gRPC Health сообщает состояние процесса, установленное приложением.
+Он не во всех сервисах проверяет доступность базы или диска. У Storage есть
+отдельный custom HealthCheck для файлового каталога.
 
-## Roadmap
+## Статус roadmap
 
-| Фаза | Статус | Что |
-|---|---|---|
-| **Phase 0** | ✅ Done | Синхронизация, контракты, Docker Compose |
-| **Phase 1** | 🔄 In Progress | MVP: PutObject + GetObject end-to-end |
-| **Phase 2** | ⏳ | CreateBucket, DeleteBucket, DeleteObject, Kafka, права, версионирование |
-| **Phase 3** | ⏳ | Multipart upload, шеринг объектов, S3-совместимость |
-| **Phase 4** | ⏳ | Аудит, мониторинг, E2E тесты |
+Phase 0 (контракты, Compose и базовые сервисы) завершена частично в текущем
+checkout. Ближайшая цель — реализовать Gateway и согласовать end-to-end запись с
+сильной read-after-write видимостью. Versioning, multipart orchestration,
+репликация, надёжный outbox и полная S3-совместимость остаются дальнейшими этапами.
+
+## Документация
+
+- [Первый запуск](GETTING_STARTED.md)
+- [Auth](services/auth/README.md)
+- [Users](services/users/README.md)
+- [AuthZ](services/authz/README.md)
+- [Storage](services/storage/README.md)
+- [Quota](services/quota/README.md)
+- [GitHub Wiki](https://github.com/alesplll/opens3-rebac/wiki)

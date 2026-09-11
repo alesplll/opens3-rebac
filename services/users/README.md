@@ -1,147 +1,91 @@
-# UserServer
-Микросервис управления пользователями. Отвечает за создание, обновление, удаление пользователей и валидацию их учетных данных для auth.
+# Users Service
 
-## Функциональность
-- **Создание пользователя** - регистрация новых пользователей в системе
-- **Просмотр информации о пользователе** - получение профиля пользователя
-- **Удаление пользователя** - удаление собственной учетной записи (требует авторизации)
-- **Обновление пароля** - изменение пароля пользователя
-- **Валидация учетных данных** - проверка credentials для Auth Service
+Внутренний gRPC-сервис учётных записей. Хранит пользователей и password hashes в
+PostgreSQL; Auth вызывает `ValidateCredentials` при входе.
 
-## Технологический стек
-- **Go:** 1.24.1
-- **База данных:** PostgreSQL 16
-- **RPC:** gRPC
-- **Message Broker:** Kafka
-- **Мониторинг:** OpenTelemetry (OTEL)
+## API
 
-## Архитектура
-Сервис построен на основе **трёхслойной архитектуры**:
+Source of truth: `shared/api/user/v1/user.proto`.
+
+| RPC | Назначение |
+|---|---|
+| `Create` | создать пользователя, вернуть UUID |
+| `Get` | получить пользователя по UUID |
+| `Update` | изменить имя и/или email |
+| `UpdatePassword` | изменить пароль и записать audit history в транзакции |
+| `Delete` | удалить пользователя |
+| `ValidateCredentials` | проверить email/password для Auth |
+
+`Update` не меняет пароль: для этого есть отдельный `UpdatePassword`.
+
+## Граница доверия
+
+Текущая реализация предназначена для внутренней сети. gRPC server не извлекает
+JWT identity и не проверяет, что `user_id` принадлежит вызывающему. TLS credentials
+на server также не настроены. Поэтому self-only policy должна обеспечиваться
+будущим Gateway/межсервисной аутентификацией либо отдельным изменением Users.
+
+Сервис сейчас не публикует `user.created` и `user.deleted` в Kafka. Cascade после
+удаления пользователя остаётся проектируемым flow.
+
+## Структура
+
+```text
+cmd/server/                 entrypoint
+internal/app/               сборка gRPC server и зависимостей
+internal/handler/user/      transport layer
+internal/service/user/      validation и business logic
+internal/repository/user/   PostgreSQL access
+internal/config/            env configuration
+pkg/mocks/                  generated test mocks
+migrations/                 database migrations
 ```
-┌─────────────────────────────────────┐
-│         Handler Layer               │  ← gRPC handlers
-├─────────────────────────────────────┤
-│         Service Layer               │  ← Бизнес-логика
-├─────────────────────────────────────┤
-│        Repository Layer             │  ← Работа с PostgreSQL
-└─────────────────────────────────────┘
-```
-**Ключевые архитектурные решения:**
-- **Dependency Injection (DI) контейнер** - управление зависимостями между слоями
-- **Graceful Shutdown** - корректное завершение работы сервиса с закрытием всех соединений
-- **TLS** - защищённое соединение gRPC
 
 ## Конфигурация
-### Переменные окружения
-Создайте `.env` файл на основе примера ниже:
-```
-# gRPC
+
+Compose использует `services/users/.env`. Основные значения текущего локального
+стенда:
+
+```dotenv
 GRPC_HOST=0.0.0.0
-GRPC_PORT=50051
-
-# Postgres
-PG_HOST=pg-user
+GRPC_PORT=50054
+PG_HOST=postgres-users
 PG_PORT_INNER=5432
-PG_PORT_OUTER=5433
 PG_DATABASE_NAME=users_db
-PG_USER=user
-PG_PASSWORD=password
-MIGRATION_DIR=./migrations
-
-# Logger
-LOGGER_LEVEL=INFO
-LOGGER_AS_JSON=false
-LOGGER_ENABLE_OLTP=true
-
-# OpenTelemetry
+PG_USER=users_user
+PG_PASSWORD=users_password
 OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-OTEL_SERVICE_NAME=user_server
-OTEL_ENVIRONMENT=development
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_METRICS_PUSH_TIMEOUT=1s
-
-# Rate Limiter
-RATE_LIMITER_LIMIT=30
-RATE_LIMITER_PERIOD=1s
-
-# Kafka
-KAFKA_BROKERS=kafka:29092
-USER_CREATED_TOPIC_NAME=user.created
-USER_DELETED_TOPIC_NAME=user.deleted
-
-# JWT (для валидации токенов из Auth Service)
-REFRESH_TOKEN_SECRET=refresh_secret
-ACCESS_TOKEN_SECRET=access_secret
-```
-## API
-### gRPC Endpoints
-Сервис предоставляет следующие gRPC методы (описаны в `proto/user.proto`):
-- `Create` - создание нового пользователя (требует JWT)
-- `Get` - получение информации о пользователе 
-- `Delete` - удаление пользователя (требует JWT)
-- `Update` - обновление пароля (требует JWT)
-- `ValidateCredentials` - валидация учетных данных для [Auth Service](https://github.com/WithSoull/AuthService)
-
-## Авторизация
-Для операций, требующих авторизации (например, удаление пользователя), используется **JWT токен**. 
-- Токены выдаются [Auth Service](https://github.com/WithSoull/AuthService)
-- В UserServer используется **TokenVerifier** из [платформенной библиотеки](https://github.com/WithSoull/platform_common) для проверки подписи JWT
-- **Политика безопасности:** пользователь может обновить и удалить только свою учетную запись
-
-## Event-Driven
-Сервис публикует события в Kafka при изменении состояния пользователей:
-### Публикуемые события
-| Топик | Событие | Описание |
-|-------|---------|----------|
-| `user.created` | При создании пользователя | Уведомление других сервисов о новом пользователе |
-| `user.deleted` | При удалении пользователя | Каскадное удаление данных в других сервисах |
-
-**Реализация:** используется обёртка Kafka из [платформенной библиотеки](https://github.com/WithSoull/platform_common) с двумя продюсерами.
-
-## Отказоустойчивость
-### Rate Limiter
-Реализован **Rate Limiter** для защиты от перегрузки:
-- Лимит: 30 запросов/сек (конфигурируется через `RATE_LIMITER_LIMIT`)
-- Период: 1 секунда (конфигурируется через `RATE_LIMITER_PERIOD`)
-- Реализация находится в [платформенной библиотеке](https://github.com/WithSoull/platform_common)
-  
-## Мониторинг и Observability
-### OpenTelemetry (OTEL)
-Интегрирован мониторинг из [платформенной библиотеки](https://github.com/WithSoull/platform_common):
-- **Traces** - распределённая трассировка запросов
-- **Metrics** - метрики производительности
-- **Logs** - структурированное логирование
-
-Метрики экспортируются в **OTEL Collector** для дальнейшей обработки.
-
-### Health Check
-```
-grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 ```
 
-## Тестирование
-Проект является **учебным**, поэтому тестовое покрытие ограничено. Основной фокус - демонстрация подходов к тестированию:
-- Используется **minimock** для мокирования зависимостей между слоями
-- Написаны примеры unit-тестов для демонстрации изоляции слоёв (handler → service → repository)
-- Полное покрытие тестами не реализовано из-за ограничений по времени
+Не копируйте эти development credentials в production.
 
-## Безопасность
-- **TLS** - все gRPC соединения защищены TLS
-- **JWT валидация** - проверка подписи токенов из Auth Service
-- **Rate Limiting** - защита от DDoS и перегрузки
-- **SQL Injection** - использование prepared statements в repository layer
-- **Principle of Least Privilege** - пользователь может изменять только свои данные
+## Запуск
 
-## Зависимости
-### Внешние сервисы
-- PostgreSQL 16
-- Kafka (для event streaming)
-- OTEL Collector (для мониторинга)
-- Envoy Proxy (для маршрутизации)
+Из корня репозитория:
 
-### [Платформенная библиотека](https://github.com/WithSoull/platform_common)
-Сервис использует переиспользуемые компоненты из общей платформенной библиотеки:
-- TokenVerifier (JWT validation)
-- OTEL wrapper
-- Rate Limiter
-- Kafka wrapper
+```bash
+docker compose --profile services up --build -d users
+docker compose logs -f users
+```
+
+Полный локальный профиль поднимает `migrator-users` перед сервисом.
+
+## Health
+
+```bash
+grpcurl -plaintext localhost:50054 grpc.health.v1.Health/Check
+```
+
+Стандартный health status показывает состояние процесса, установленное при
+старте. Он не выполняет PostgreSQL query на каждый вызов.
+
+## Тесты
+
+```bash
+cd services/users
+go test ./...
+```
+
+Unit tests расположены рядом с handler/service packages и используют generated
+mocks из `pkg/mocks`. Текущий набор не является утверждением о полном e2e или
+security coverage.

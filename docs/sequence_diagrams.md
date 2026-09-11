@@ -1,6 +1,11 @@
 # Sequence Diagrams v3 — opens3-rebac
 # Activation boxes + русские подписи
 # Каждый блок @startuml...@enduml вставляй отдельно на plantuml.com
+# Проектные последовательности: Gateway и часть событий ещё не реализованы.
+# Внешний успех записи должен следовать после durable Storage commit и видимого
+# committed Metadata state. Login возвращает refresh token; access token выдаёт
+# отдельный RPC. Grant/revoke требует admin-check перед WriteTuple. Delete marker
+# не удаляет historical versions.
 
 ---
 

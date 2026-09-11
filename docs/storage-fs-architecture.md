@@ -1,184 +1,95 @@
-# Storage Service FS Architecture
+# Storage filesystem architecture
 
-Дата: 2026-04-08
+Статус: **текущее устройство single-node Storage и открытые ограничения**.
+Обновлено: 2026-09-11.
 
----
+Storage работает с `blob_id`, `upload_id` и multipart parts. Он не знает S3 bucket,
+key или permission. Metadata остаётся catalog authority.
 
-## Цель
+## Layout
 
-Storage Service должен оставаться **blob-хранилищем**, а не хранилищем S3-объектов.
-
-Это означает:
-- Storage **не знает** `bucket` и `key`
-- Storage **не хранит** объектные метаданные как источник истины
-- Storage работает только с:
-  - `blob_id`
-  - `upload_id`
-  - part-файлами multipart upload
-  - локальным staging / cleanup lifecycle
-
-Источник истины о существовании объекта находится в Metadata Service.
-
----
-
-## Основные принципы
-
-1. Данные, которые ещё не финализированы, не должны лежать вперемешку с финальными blob.
-2. Финальный blob должен быть immutable и адресоваться только по `blob_id`.
-3. Multipart и single-part upload должны проходить через staging-зону.
-4. Очистка orphan/stale данных должна быть штатной частью системы.
-5. Storage не должен зависеть от структуры object key вроде `photos/2026/cat.jpg`.
-
----
-
-## Рекомендуемая структура директорий
+Фактические пути строятся конфигурацией repository и шардируются по первым
+символам UUID. Концептуально:
 
 ```text
-/data/
-  blobs/
-    ab/
-      abcd1111-2222-3333-4444-555566667777
-    c4/
-      c4ef1111-2222-3333-4444-555566667777
-
-  staging/
-    uploads/
-      <upload_id>/
-        object.bin
-        manifest.json
-        part_00001
-        part_00002
-        part_00003
-
-  gc/
-    trash/
-      2026-04-08/
-        550e8400-e29b-41d4-a716-446655440000
+DATA_DIR/<shard>/<blob_id>                         final blobs
+MULTIPART_DIR/uploads/<upload_id>/                 session and parts
+MULTIPART_DIR/completed/<shard>/<upload_id>.json   completion metadata
 ```
 
----
+Single-part upload также использует temporary/staging file до final rename.
+`DATA_DIR` и staging path должны находиться на одной filesystem, иначе rename не
+имеет ожидаемой атомарности.
 
-## Назначение зон
+## Single-part write
 
-### `blobs/`
+1. Service создаёт blob UUID до repository write.
+2. Repository создаёт temporary file.
+3. Входной stream копируется в файл с подсчётом размера и MD5.
+4. Файл синхронизируется и закрывается.
+5. Проверяется ожидаемый размер, если он передан.
+6. Temporary file переименовывается в final path.
+7. Service возвращает blob ID и full-content MD5.
 
-Хранит только **финальные immutable blob**, уже опубликованные или готовые к публикации.
+Final path появляется только после rename. Пустой blob допустим.
 
-Формат пути:
+`fsync(file)` плюс rename обеспечивает атомарную видимость имени на одной
+filesystem, но текущий код не делает `fsync` каталога. Поэтому документ не обещает,
+что новое имя гарантированно переживёт power loss во всех filesystems.
 
-```text
-/data/blobs/{blob_id[0:2]}/{blob_id}
-```
+## Multipart
 
-Зачем шардирование:
-- не складывать сотни тысяч файлов в один каталог
-- упростить дальнейшее масштабирование и background scan
+Initiate создаёт session и upload ID. UploadPart сохраняет либо заменяет part по
+номеру. Complete принимает упорядоченный список `(part_number, checksum_md5)`,
+проверяет существование/checksum и собирает итоговый blob. В текущей реализации
+его blob ID совпадает с upload ID.
 
-### `staging/uploads/<upload_id>/`
+После commit Storage сохраняет completion metadata, затем best-effort удаляет
+session. Cleanup не ждёт Metadata finalize. Completion metadata нужна, чтобы retry
+Complete после потерянного ответа мог вернуть тот же результат.
 
-Хранит временные данные, которые ещё не стали опубликованным blob.
+Issue #36 может менять срок хранения marker только вместе с durable terminal
+result в Metadata или другом registry. Иначе клиентский retry после успешного
+finalize и потерянного ответа станет неразрешимым.
 
-Для single-part upload:
-- `object.bin`
-- `manifest.json`
+Внутренний MD5 итогового файла не является универсальным S3 multipart ETag.
+Внешний Gateway обязан реализовать выбранный checksum mode отдельно.
 
-Для multipart upload:
-- `part_00001`
-- `part_00002`
-- ...
-- `manifest.json`
+## Видимость Metadata
 
-`manifest.json` полезен для локальной диагностики и GC. Минимально в нём можно хранить:
-- `upload_id`
-- `created_at`
-- `content_type`
-- `expected_parts`
-- `state`
+Данные становятся final внутри Storage после успешного Complete/StoreObject.
+Будущий внешний PUT считается успешным только после регистрации committed version
+в Metadata. Если будет выбран pending/finalize protocol, он должен включать
+durable intent, точный version/operation ID, storage acknowledgement и атомарную
+смену current pointer.
 
-### `gc/trash/`
+Pending overwrite не скрывает прежнюю committed current version. Новый key без
+current version остаётся невидимым до commit.
 
-Опциональная промежуточная зона перед физическим удалением.
+## Cleanup
 
-Нужна если вы хотите:
-- отложенное удаление
-- мягкую защиту от ошибочного purge
-- более удобный reconcile/debug flow
+- abort удаляет multipart session;
+- stale sessions удаляются отдельной политикой по возрасту;
+- orphan final blobs требуют сверки с durable Metadata intent/event;
+- delete marker не удаляет historical version blobs;
+- permanent delete/GC должны адресовать конкретные blob/version IDs.
 
-Если такой режим не нужен, можно удалять blob сразу.
+Текущий сервис не содержит Kafka cleanup consumer. Topic names и event schemas
+нужно согласовать до реализации; `object-stored`, `object-deleted` и abort events
+не считаются готовым runtime только из-за описания в proto/comments.
 
----
+## Health
 
-## Жизненный цикл данных
+Custom `DataStorageService.HealthCheck` проверяет filesystem repository. Standard
+`grpc.health.v1.Health` получает SERVING при старте и не эквивалентен динамической
+проверке каталога.
 
-### Single-part PutObject
+## Требуемые тесты
 
-1. Gateway/Metadata создаёт upload intent.
-2. Storage пишет тело в `staging/uploads/<upload_id>/object.bin`.
-3. После успешной записи и валидации создаётся финальный `blob_id`.
-4. Blob атомарно переносится в `blobs/{shard}/{blob_id}`.
-5. Metadata выполняет finalize upload и публикует объект.
-6. Staging-директория удаляется.
-
-### Multipart Upload
-
-1. Создаётся `staging/uploads/<upload_id>/`.
-2. Части пишутся как `part_00001`, `part_00002`, ...
-3. На `CompleteMultipartUpload` части склеиваются в единый финальный blob.
-4. Финальный blob перемещается в `blobs/{shard}/{blob_id}`.
-5. После успешного finalize в Metadata staging очищается.
-
-### DeleteObject
-
-1. Metadata логически удаляет объект или создаёт delete marker.
-2. Когда blob больше ни на что не ссылается, Metadata публикует команду удаления.
-3. Storage удаляет файл сразу или через `gc/trash/`.
-
----
-
-## Что Storage не должен делать
-
-- Не строить пути по `bucket/key`
-- Не считать себя источником истины о существовании объекта
-- Не публиковать объект как доступный для чтения до finalize в Metadata
-- Не смешивать multipart parts и финальные blob в одном каталоге
-
----
-
-## Подводные камни
-
-### 1. Staging и final blob нельзя смешивать
-
-Если незавершённые upload лежат рядом с опубликованными blob, сложно:
-- чистить мусор
-- различать partially uploaded и committed data
-- безопасно делать reconcile
-
-### 2. Нужен TTL cleanup
-
-Если клиент начал upload и исчез, в `staging/uploads/` останется мусор.
-Нужен фоновый cleaner по `created_at` / `expires_at`.
-
-### 3. Нужна атомарность publish
-
-Переход из staging в final должен быть атомарным на уровне файловой системы:
-- запись во временный файл
-- `fsync`
-- `rename`
-
-### 4. Final blob лучше считать immutable
-
-Перезапись существующего `blob_id` запрещена.
-Новый PutObject должен порождать новый `blob_id`.
-
----
-
-## Практический вывод
-
-Целевая модель Storage:
-- локальная FS как blob store
-- staging для всех незавершённых загрузок
-- immutable final blobs
-- шардирование по первым символам `blob_id`
-- отдельный cleanup/reconcile lifecycle
-
-Эта схема хорошо сочетается с архитектурой `Metadata authoritative + pending/finalize`, где факт существования объекта определяется не наличием файла на диске, а успешным finalize в Metadata Service.
+- empty/large/cancelled stream и size mismatch;
+- cleanup temporary file после read/write error;
+- retry StoreObject/UploadPart/Complete;
+- atomic visibility до/после rename;
+- session cleanup failure после успешного commit;
+- power-loss tests для выбранной filesystem/durability policy;
+- orphan reconciliation и version-aware deletion после появления событий.

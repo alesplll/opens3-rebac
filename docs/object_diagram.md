@@ -1,3 +1,6 @@
+<!-- Проектная диаграмма, а не snapshot текущего Compose. Gateway и часть
+показанных событий ещё не реализованы. -->
+
 @startuml ObjectDiagram_opens3
 
 skinparam objectAttributeIconSize 0

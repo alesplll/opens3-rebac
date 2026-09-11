@@ -1,3 +1,6 @@
+<!-- Проектная диаграмма: Gateway, placement, репликация и часть Kafka flows ещё
+не реализованы. Актуальный состав сервисов и ограничения — в ../README.md. -->
+
 @startuml ClassDiagram_opens3
 
 skinparam classAttributeIconSize 0
