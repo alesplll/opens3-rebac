@@ -503,11 +503,7 @@ mod tests {
             flushed: Mutex::new(Vec::new()),
             fail_flush: true,
         });
-        let svc = QuotaService::new(
-            Arc::clone(&cache),
-            repo,
-            Arc::new(QuotaMetrics::new()),
-        );
+        let svc = QuotaService::new(Arc::clone(&cache), repo, Arc::new(QuotaMetrics::new()));
         svc.update_usage("user:alice", None, &delta(100, 1, 0))
             .unwrap();
 
