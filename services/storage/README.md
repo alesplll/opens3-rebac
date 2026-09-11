@@ -3,6 +3,31 @@
 Go gRPC-сервис immutable blob storage. Он работает с `blob_id` и не знает о S3
 buckets, object keys, users или правах доступа.
 
+## Архитектура
+
+```text
+gRPC handler → Storage service → filesystem repository
+                     ├── ID generation
+                     ├── stream validation
+                     └── multipart orchestration
+```
+
+Handler переводит protobuf streams в service calls. Service управляет IDs и
+последовательностью операций. Repository отвечает за temporary files, final
+paths, чтение ranges и cleanup.
+
+## Структура проекта
+
+```text
+cmd/server/                         entrypoint
+internal/app/                       wiring и lifecycle
+internal/handler/storage/           gRPC transport
+internal/service/storage/           single-part и multipart logic
+internal/repository/storage/        filesystem implementation
+internal/config/                    environment configuration
+pkg/mocks/                          generated mocks
+```
+
 ## API
 
 Source of truth: `shared/api/storage/v1/storage.proto`.
@@ -21,6 +46,10 @@ Source of truth: `shared/api/storage/v1/storage.proto`.
 Client-streaming StoreObject/UploadPart используют первое сообщение `header`,
 затем сообщения `chunk`. Пустой объект поддерживается.
 
+Handler отклоняет нарушенный порядок messages. `RetrieveObject` возвращает server
+stream; offset и length задают range, а точные edge cases определяются protobuf и
+service validation.
+
 ## Файловый commit
 
 Обычная запись получает blob ID в service до начала repository write. Repository
@@ -30,6 +59,17 @@ Final file появляется после rename, а не при первом c
 Atomic rename гарантируется только внутри одной filesystem. Текущий код не делает
 fsync каталога после rename, поэтому документация не обещает полную durability при
 аварийной потере питания.
+
+### Layout на диске
+
+```text
+DATA_DIR/<shard>/<blob_id>                         final blob
+MULTIPART_DIR/uploads/<upload_id>/                 session и parts
+MULTIPART_DIR/completed/<shard>/<upload_id>.json   completion marker
+```
+
+Sharding ограничивает число entries в одном каталоге. Metadata хранит blob IDs,
+но не строит filesystem paths самостоятельно.
 
 Multipart upload создаёт session заранее. В текущем repository итоговый blob ID
 совпадает с upload ID. Complete сохраняет completion metadata для retry и затем
@@ -46,6 +86,11 @@ S3 minimum part size проверяется на Complete для всех выб
 Storage валидирует свой внутренний контракт; полная S3-валидация относится к
 Gateway/Metadata orchestration.
 
+Multipart part можно загрузить повторно по тому же номеру; новая успешная запись
+заменяет прежнюю. `Complete` получает выбранный упорядоченный список, проверяет
+checksums и создаёт final blob. Completion marker хранит terminal result для retry
+после потерянного ответа.
+
 ## Что пока не реализовано
 
 - репликация blob на несколько Storage nodes;
@@ -56,6 +101,10 @@ Gateway/Metadata orchestration.
 
 Нельзя вызвать StoreObject на нескольких узлах и ожидать один blob ID: текущий
 request не принимает заранее выбранный ID, а каждый service сам создаёт UUID.
+
+Варианты будущего cleanup: синхронный вызов для простого стенда, Kafka consumer с
+at-least-once delivery либо reconciliation worker по durable catalog. Для
+асинхронных вариантов нужны точные blob/version IDs и идемпотентность.
 
 ## Конфигурация
 
@@ -69,6 +118,8 @@ MULTIPART_DIR=/data/multipart
 
 Для гарантированного rename staging/final paths должны находиться на одной
 filesystem.
+
+Полный набор параметров и validation rules находится в `internal/config`.
 
 ## Запуск
 
@@ -115,3 +166,27 @@ go test ./...
 Инвентаризация тестов: [tests.md](tests.md). Standard gRPC Health выставляется в
 SERVING при старте; custom `DataStorageService.HealthCheck` отдельно проверяет
 filesystem. Эти два endpoint нельзя считать одной и той же readiness-проверкой.
+
+## Observability и ошибки
+
+Сервис создаёт structured logs, traces и metrics через общий Go kit. Экспорт
+зависит от OTEL collector. Ошибки repository преобразуются в domain/gRPC errors;
+клиент должен различать invalid input, missing blob/session и internal I/O error.
+
+После cancellation или ошибки записи temporary file должен быть удалён. Ошибка
+cleanup после успешного rename требует logs/metrics и reconciliation, но не должна
+делать committed bytes неизвестными coordinator.
+
+Тестовый набор включает unit и filesystem/component scenarios: empty/large
+streams, size mismatch, range reads, delete, multipart overwrite/complete/abort и
+retry. Crash durability и multi-node replication требуют отдельных сред.
+
+## Варианты распределённого data path
+
+- Gateway/coordinator пишет replicas параллельно;
+- Storage nodes передают поток по chain;
+- fan-out выполняет отдельный data proxy.
+
+Текущий single-node API остаётся базовым blob interface. Изменения IDs, fencing,
+quorum и repair описаны в
+[`docs/distributed-storage-architecture.md`](../../docs/distributed-storage-architecture.md).

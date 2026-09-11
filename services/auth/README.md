@@ -3,6 +3,40 @@
 Внутренний gRPC-сервис аутентификации. Проверяет email/password через Users,
 выпускает JWT и валидирует токены.
 
+## Возможности
+
+- вход по email/password через Users Service;
+- выпуск access и refresh JWT;
+- проверка типа, срока и подписи токена;
+- защита Login счётчиком неуспешных попыток в Redis;
+- локальный rate limiter, gRPC health и OpenTelemetry instrumentation.
+
+## Архитектура
+
+```text
+gRPC handler
+    ↓
+Auth service ──gRPC──> Users.ValidateCredentials
+    ├── JWT service
+    ├── Redis login-attempts repository
+    └── metrics/tracing/logger
+```
+
+Handler отвечает за transport mapping. Service ведёт login/token flow. Проверка
+пароля остаётся в Users, а Auth не читает users database напрямую.
+
+## Структура проекта
+
+```text
+cmd/server/                  entrypoint
+internal/app/                wiring и lifecycle
+internal/handler/auth/       gRPC transport
+internal/service/auth/       login и token flow
+internal/repository/         Redis-backed login attempts
+internal/config/             env configuration
+pkg/mocks/                   generated mocks для тестов
+```
+
 ## API
 
 Source of truth: `shared/api/auth/v1/auth.proto`.
@@ -16,6 +50,18 @@ Source of truth: `shared/api/auth/v1/auth.proto`.
 
 `Login` не возвращает access token. Клиент получает его отдельным
 `GetAccessToken`.
+
+Типичный сценарий:
+
+```text
+Login(email, password) → refresh token
+GetAccessToken(refresh token) → access token
+ValidateToken(access token in metadata) → user_id
+```
+
+`GetRefreshToken` принимает refresh token. `ValidateToken` читает credentials из
+gRPC metadata в форме, заданной protobuf/handler; при интеграции лучше использовать
+generated client, а не переносить старые HTTP-примеры.
 
 ## JWT
 
@@ -44,6 +90,11 @@ Redis хранит счётчик неуспешных попыток для bru
 Rate limiter работает в памяти одного процесса. Значение 30 requests/second по
 умолчанию защищает отдельную реплику от локальной перегрузки, но не задаёт единый
 кластерный лимит и само по себе не заменяет edge DDoS protection.
+
+Если Redis недоступен, поведение Login зависит от ошибки repository и не должно
+описываться как полноценная fail-open/fail-closed security policy без отдельного
+теста. При нескольких Auth replicas счётчик попыток общий через Redis, а rate
+limiter остаётся локальным каждой replica.
 
 ## Взаимодействие
 
@@ -80,6 +131,9 @@ SECURITY_LOGIN_ATTEMPTS_WINDOW=30s
 
 Secrets из development `.env` нельзя использовать в production.
 
+Полный набор и значения по умолчанию смотрите в `internal/config` и
+`services/auth/.env`; README перечисляет только параметры основного flow.
+
 ## Запуск и health
 
 Из корня репозитория:
@@ -92,6 +146,24 @@ grpcurl -plaintext localhost:50050 grpc.health.v1.Health/Check
 
 Стандартный health service сообщает состояние процесса, установленное
 приложением, и не гарантирует успешный вызов Users/Redis на каждый probe.
+
+## Observability и lifecycle
+
+Сервис использует общий Go kit для structured logging, OpenTelemetry metrics и
+traces. Graceful shutdown останавливает gRPC server и зарегистрированные
+dependencies. Наличие instrumentation означает, что telemetry создаётся, но её
+доставка зависит от настроенного collector.
+
+В локальном Compose Auth слушает `50050`, Users — `50054`, Redis — по внутреннему
+адресу `redis:6379`. Внешний HTTP endpoint появится только вместе с Gateway.
+
+## Ошибки интеграции
+
+- неверные credentials не должны раскрывать, существует ли email;
+- access token нельзя использовать вместо refresh token и наоборот;
+- потерянный ответ `GetRefreshToken` сейчас нельзя разрешить через server-side
+  rotation state;
+- сетевой доступ к внутреннему gRPC API должен ограничиваться deployment policy.
 
 ## Тесты
 

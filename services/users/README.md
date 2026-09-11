@@ -3,6 +3,23 @@
 Внутренний gRPC-сервис учётных записей. Хранит пользователей и password hashes в
 PostgreSQL; Auth вызывает `ValidateCredentials` при входе.
 
+## Возможности и архитектура
+
+- CRUD учётной записи;
+- отдельное изменение пароля;
+- проверка email/password для Auth;
+- PostgreSQL repository и транзакции;
+- gRPC health, logging и OpenTelemetry instrumentation.
+
+```text
+gRPC handler → User service → repository → PostgreSQL
+                    └──────→ transaction manager
+Auth Service ──gRPC ValidateCredentials──┘
+```
+
+Service проверяет входные данные и управляет транзакционным сценарием. Repository
+скрывает SQL, handler переводит domain errors в gRPC status.
+
 ## API
 
 Source of truth: `shared/api/user/v1/user.proto`.
@@ -17,6 +34,10 @@ Source of truth: `shared/api/user/v1/user.proto`.
 | `ValidateCredentials` | проверить email/password для Auth |
 
 `Update` не меняет пароль: для этого есть отдельный `UpdatePassword`.
+
+`Create` возвращает UUID пользователя и не выпускает JWT. `UpdatePassword`
+записывает изменение через предусмотренный транзакционный flow; детали таблиц и
+ограничений задаются миграциями, а не README.
 
 ## Граница доверия
 
@@ -41,6 +62,13 @@ pkg/mocks/                  generated test mocks
 migrations/                 database migrations
 ```
 
+## Взаимодействие с другими сервисами
+
+Auth синхронно вызывает `ValidateCredentials`. Users не зависит от Auth и не
+валидирует JWT самостоятельно. Проектируемое удаление связей AuthZ, metadata и
+quota после удаления пользователя требует отдельного durable workflow; Kafka
+producer для `user.created`/`user.deleted` сейчас отсутствует.
+
 ## Конфигурация
 
 Compose использует `services/users/.env`. Основные значения текущего локального
@@ -58,6 +86,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
 ```
 
 Не копируйте эти development credentials в production.
+
+Полный перечень env и parsing rules находится в `internal/config`. При локальном
+запуске вне Compose адрес PostgreSQL нужно заменить с container DNS на доступный
+host address.
 
 ## Запуск
 
@@ -79,6 +111,16 @@ grpcurl -plaintext localhost:50054 grpc.health.v1.Health/Check
 Стандартный health status показывает состояние процесса, установленное при
 старте. Он не выполняет PostgreSQL query на каждый вызов.
 
+## Observability и отказоустойчивость
+
+Handler/service/repository создают telemetry через общий Go kit. Экспорт требует
+доступного OTEL Collector. Graceful shutdown завершает gRPC server и соединения.
+
+Локальный rate limiting, если включён в server middleware, относится к одной
+replica. Он не является глобальным лимитом и не заменяет защиту внешнего Gateway.
+PostgreSQL остаётся источником истины; гарантии backup/failover определяются его
+deployment, а не кодом Users.
+
 ## Тесты
 
 ```bash
@@ -89,3 +131,7 @@ go test ./...
 Unit tests расположены рядом с handler/service packages и используют generated
 mocks из `pkg/mocks`. Текущий набор не является утверждением о полном e2e или
 security coverage.
+
+При изменении методов рекомендуется отдельно проверять validation failure,
+repository errors, transaction rollback и отсутствие нежелательных вызовов
+repository. Интеграционные тесты с PostgreSQL относятся к отдельному e2e профилю.
