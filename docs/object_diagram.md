@@ -1,3 +1,12 @@
+# Пример объектов и версий
+
+**Иллюстративный снимок** после двух записей, не dump текущей БД. Короткие ID,
+checksums и JWT — условные обозначения; реальные идентификаторы — UUID.
+Object key задаётся относительно bucket. Байтами управляет Storage, версиями —
+Metadata; token показан как данные клиента, а не запись Redis session.
+Filesystem использует shard из первых двух символов blob ID без `.bin`.
+
+```plantuml
 @startuml ObjectDiagram_opens3
 
 skinparam objectAttributeIconSize 0
@@ -37,11 +46,14 @@ package "Доменная модель" {
   object "catObj : Object" as obj {
     id = "c1b2c3d4-0003"
     bucket_id = "b1b2c3d4-0002"
-    key = "photos/2026/cat.jpg"
+    key = "2026/cat.jpg"
     current_version_id = "v2b2c3d4-0005"
   }
 
   object "v1 : Version" as v1 {
+    version_number = 1
+    kind = "blob"
+    state = "committed"
     id = "v1b2c3d4-0004"
     object_id = "c1b2c3d4-0003"
     blob_id = "bl1b2c3d4-0006"
@@ -52,6 +64,9 @@ package "Доменная модель" {
   }
 
   object "v2 : Version" as v2 {
+    version_number = 2
+    kind = "blob"
+    state = "committed"
     id = "v2b2c3d4-0005"
     object_id = "c1b2c3d4-0003"
     blob_id = "bl2b2c3d4-0007"
@@ -63,16 +78,16 @@ package "Доменная модель" {
 
   object "blob1 : Blob" as blob1 {
     id = "bl1b2c3d4-0006"
-    path = "/data/bl1b2c3d4-0006.bin"
+    path = "DATA_DIR/bl/bl1b2c3d4-0006"
     size = 245760
-    checksum = "sha256:a1b2c3..."
+    checksum_md5 = "<full-content MD5>"
   }
 
   object "blob2 : Blob" as blob2 {
     id = "bl2b2c3d4-0007"
-    path = "/data/bl2b2c3d4-0007.bin"
+    path = "DATA_DIR/bl/bl2b2c3d4-0007"
     size = 258048
-    checksum = "sha256:d4e5f6..."
+    checksum_md5 = "<full-content MD5>"
   }
 
 }
@@ -90,3 +105,4 @@ v1 --> blob1
 v2 --> blob2
 
 @enduml
+```

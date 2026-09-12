@@ -13,6 +13,9 @@ use crate::{
 };
 
 // Include the generated proto code
+// tonic 0.12 generates client methods whose tonic::Status error triggers
+// result_large_err on Rust 1.98; this module is regenerated at build time.
+#[allow(clippy::result_large_err)]
 pub mod proto {
     tonic::include_proto!("opens3.quota.v1");
 

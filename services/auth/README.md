@@ -1,329 +1,267 @@
-# AuthService
+# Auth Service
 
-Микросервис аутентификации пользователей по токенам
+Внутренний gRPC-сервис аутентификации. Проверяет email/password через Users,
+выпускает JWT и валидирует токены.
 
-## Функциональность
-- **Login** - аутентификация пользователя с выдачей refresh токена
-- **GetRefreshToken** - обновление refresh токена
-- **GetAccessToken** - получение access токена по refresh токену
-- **ValidateToken** - валидация JWT токена для защищённых эндпоинтов
+## Назначение и возможности
 
-## Технологический стек
-- **Go:** 1.24+
-- **gRPC** - RPC API между сервисами
-- **Redis** - brute force protection
-- **OpenTelemetry (OTEL):**
-  - **Metrics:** Prometheus → Grafana
-  - **Logging:** uber-go/zap → Elasticsearch → Kibana
-  - **Tracing:** Jaeger
-- **JWT:** github.com/golang-jwt/jwt (алгоритм HS256)
+- вход по email/password через Users Service;
+- выпуск access и refresh JWT;
+- проверка типа, срока и подписи токена;
+- защита Login счётчиком неуспешных попыток в Redis;
+- локальный rate limiter, gRPC health и OpenTelemetry instrumentation.
 
-## Архитектура
+## Архитектура и зависимости
 
-Сервис построен на основе **трёхслойной архитектуры**:
+### Архитектура
 
-```
-┌─────────────────────────────────────┐
-│         Handler Layer               │  ← gRPC handlers
-├─────────────────────────────────────┤
-│         Service Layer               │  ← Бизнес-логика (JWT generation, validation)
-├─────────────────────────────────────┤
-│       Repository Layer              │  ← Работа с Redis (brute force protection)
-└─────────────────────────────────────┘
+```text
+gRPC handler
+    ↓
+Auth service ──gRPC──> Users.ValidateCredentials
+    ├── JWT service
+    ├── Redis login-attempts repository
+    └── metrics/tracing/logger
 ```
 
-**Ключевые архитектурные решения:**
+Handler отвечает за transport mapping. Service ведёт login/token flow. Проверка
+пароля остаётся в Users, а Auth не читает users database напрямую.
 
-- **Dependency Injection (DI) контейнер** - управление зависимостями между слоями
-- **Graceful Shutdown** - корректное завершение работы с закрытием соединений
+### Взаимодействие
+
+Auth обращается к Users по gRPC `ValidateCredentials`. В Compose используется
+`users:50054`.
+
+```text
+client → Auth.Login → Users.ValidateCredentials → PostgreSQL
+                       ↓ success
+                    refresh JWT
+client → Auth.GetAccessToken(refresh JWT) → access JWT
+```
+
+В текущем Compose нет Envoy и HTTP/JSON transcoding. Примеры вызовов должны
+использовать gRPC-клиент либо будущий Gateway; `curl localhost:8080/api/...` после
+обычного запуска работать не будет.
 
 ## Структура проекта
 
-```
-.
-├── cmd/
-│   └── server/
-│       └── main.go                    # Entry point
-├── internal/
-│   ├── app/
-│   │   ├── app.go                     # Application setup
-│   │   └── service_provider.go        # DI container
-│   ├── handler/
-│   │   └── auth/                      # gRPC handlers
-│   ├── service/
-│   │   └── auth/                      # Бизнес-логика
-│   ├── repository/
-│   │   └── auth/                      # Redis repository
-│   ├── client/
-│   │   ├── cache/redis/               # Redis client
-│   │   └── grpc/user/                 # UserServer gRPC client
-│   ├── config/                        # Конфигурация из .env
-│   ├── errors/domain/                 # Доменные ошибки
-│   ├── model/                         # Domain models
-│   ├── utils/                         # Утилиты (email validation)
-│   └── validator/                     # Валидация запросов
-├── api/auth/v1/
-│   └── auth.proto                     # Protocol Buffers
-├── pkg/auth/v1/                       # Сгенерированный Go код
-├── ca.cert                            # CA сертификат
-├── service.pem                        # TLS сертификат для похода в UserServer
-├── docker-compose.yaml
-├── Dockerfile
-└── Makefile
-```
-
-## Конфигурация
-
-### Переменные окружения
-
-Создайте `.env` файл на основе примера:
-
-```
-# ====== gRPC ======
-# Internal gRPC server
-GRPC_HOST=0.0.0.0
-GRPC_PORT=50050
-
-# External gRPC (UserServer)
-USER_SERVER_GRPC_HOST=user-server
-USER_SERVER_GRPC_PORT=50051
-
-# ======= JWT =======
-REFRESH_TOKEN_SECRET=refresh_secret
-ACCESS_TOKEN_SECRET=access_secret
-REFRESH_TOKEN_TTL=1h
-ACCESS_TOKEN_TTL=15m
-
-# ====== Redis ======
-CACHE_HOST=redis
-EXTERNAL_CACHE_PORT=6380
-INTERNAL_CACHE_PORT=6379
-CACHE_CONNECTION_TIMEOUT=5s
-CACHE_MAX_IDLE=10
-CACHE_IDLE_TIMEOUT=300s
-
-# Security (Brute Force Protection)
-SECURITY_MAX_LOGIN_ATTEMPTS=6
-SECURITY_LOGIN_ATTEMPTS_WINDOW=30s
-
-# ====== Logger ======
-LOGGER_LEVEL=debug
-LOGGER_AS_JSON=false
-LOGGER_ENABLE_OLTP=true
-
-# ======= OTEL ========
-OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-OTEL_SERVICE_NAME=auth_service
-OTEL_ENVIRONMENT=development
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_METRICS_PUSH_TIMEOUT=1s
-
-# ==== Rate Limiter ====
-RATE_LIMITER_LIMIT=30
-RATE_LIMITER_PERIOD=1s
+```text
+cmd/server/                  entrypoint
+internal/app/                wiring и lifecycle
+internal/handler/auth/       gRPC transport
+internal/service/auth/       login и token flow
+internal/repository/         Redis-backed login attempts
+internal/config/             env configuration
+pkg/mocks/                   generated mocks для тестов
 ```
 
 ## API
 
-### gRPC Endpoints
+Source of truth: `shared/api/auth/v1/auth.proto`.
 
-Сервис предоставляет следующие gRPC методы (описаны в `api/auth/v1/auth.proto`):
+| RPC | Результат |
+|---|---|
+| `Login` | refresh token после успешной проверки credentials |
+| `GetRefreshToken` | новый refresh token из валидного refresh token |
+| `GetAccessToken` | access token из валидного refresh token |
+| `ValidateToken` | проверка JWT из gRPC metadata |
 
-- **Login** - аутентификация пользователя с выдачей refresh токена
-- **GetRefreshToken** - обновление refresh токена (rotation)
-- **GetAccessToken** - получение access токена по refresh токену
-- **ValidateToken** - валидация JWT токена для других сервисов
+`Login` не возвращает access token. Клиент получает его отдельным
+`GetAccessToken`.
 
+Типичный сценарий:
 
-## JWT Токены
-### Типы токенов
-**Refresh Token**
-- **Назначение:** долгосрочная аутентификация, используется для получения access токенов
-- **TTL:** 1 час (конфигурируется через `REFRESH_TOKEN_TTL`)
-- **Хранение:** клиент (не хранится на сервере)
-- **Алгоритм:** HS256
-  
-**Access Token**
-- **Назначение:** краткосрочный доступ к защищённым ресурсам
-- **TTL:** 15 минут (конфигурируется через `ACCESS_TOKEN_TTL`)
-- **Хранение:** клиент (не хранится на сервере)
-- **Алгоритм:** HS256
-
-### JWT Claims
-
+```text
+Login(email, password) → refresh token
+GetAccessToken(refresh token) → access token
+ValidateToken(access token in metadata) → пустой ответ, gRPC OK
 ```
+
+`GetRefreshToken` принимает refresh token. `ValidateToken` читает credentials из
+gRPC metadata `authorization: Bearer <access_token>`. Ответ — `google.protobuf.Empty`: RPC проверяет токен, но не возвращает identity вызывающему.
+
+## Данные и основные сценарии
+
+### JWT
+
+Токены подписываются HS256. Claims текущей реализации (timestamps ниже иллюстративные, это не действующий токен):
+
+```json
 {
-  "user_id": 1234,
-  "email": "user@example.com",
-  "exp": 1699999999,  // expiration time
-  "iat": 1699999000   // issued at
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "token_type": "access",
+  "exp": 1699999999,
+  "iat": 1699999000,
+  "nbf": 1699999000
 }
 ```
 
-## Безопасность
+UUID находится в `user_id`, а не в `sub`. Refresh и access token хранятся у
+клиента. `GetRefreshToken` пока только выпускает новый JWT: предыдущий refresh
+token остаётся криптографически валидным до `exp`, потому что server-side
+revocation/rotation state не реализован.
 
-### Brute Force Protection
+### Redis и rate limiting
 
-Защита от перебора паролей на уровне Redis:
-- **Максимум попыток:** 6 (конфигурируется через `SECURITY_MAX_LOGIN_ATTEMPTS`)
-- **Временное окно:** 30 секунд (конфигурируется через `SECURITY_LOGIN_ATTEMPTS_WINDOW`)
-- **Блокировка:** временная блокировка после превышения лимита
+Redis хранит счётчик неуспешных попыток для brute-force protection. Он не является
+реестром активных JWT-сессий. После успешного входа счётчик сбрасывается.
 
-**Реализация:**
-- Счётчик попыток хранится в Redis с ключом `login_attempts:{email}`
-- TTL счётчика соответствует временному окну
-- После успешного входа счётчик сбрасывается
+Rate limiter работает в памяти одного процесса. Значение 30 requests/second в development `.env` (default кода — 100 за 1s) защищает отдельную реплику от локальной перегрузки, но не задаёт единый
+кластерный лимит и само по себе не заменяет edge DDoS protection.
 
-### Rate Limiting
+При ошибке чтения счётчика Login возвращает ошибку до обращения к Users.
+Ошибка сброса счётчика после успешного входа логируется и не блокирует выпуск JWT;
+ошибка инкремента сейчас не обрабатывается вызывающим кодом. При нескольких Auth replicas счётчик попыток общий через Redis, а rate
+limiter остаётся локальным каждой replica.
 
-Защита от DDoS и перегрузки:
-- **Лимит:** 30 запросов/сек (конфигурируется через `RATE_LIMITER_LIMIT`)
-- **Период:** 1 секунда
-- **Реализация:** middleware из платформенной библиотеки
+## Конфигурация
 
-## Взаимодействие с другими сервисами
+### Полный перечень переменных Go-конфигурации
 
-### UserServer (gRPC Client)
+Default ниже относится к коду, а не к development `.env`.
 
-AuthService вызывает UserServer для валидации credentials:
+| Переменная | Default / требование | Раздел конфигурации |
+|---|---|---|
+| `GRPC_HOST` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `GRPC_PORT` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `REFRESH_TOKEN_SECRET` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `ACCESS_TOKEN_SECRET` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `REFRESH_TOKEN_TTL` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `ACCESS_TOKEN_TTL` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `LOGGER_LEVEL` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_AS_JSON` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_ENABLE_OLTP` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_NAME` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_ENVIRONMENT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_VERSION` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `OTEL_METRICS_PUSH_TIMEOUT` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `RATE_LIMITER_LIMIT` | `100` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `RATE_LIMITER_PERIOD` | `1s` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `CACHE_HOST` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `INTERNAL_CACHE_PORT` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `EXTERNAL_CACHE_PORT` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `CACHE_MAX_IDLE` | `10` | [redis.go](internal/config/env/redis.go) |
+| `CACHE_CONNECTION_TIMEOUT` | `5s` | [redis.go](internal/config/env/redis.go) |
+| `CACHE_IDLE_TIMEOUT` | `240s` | [redis.go](internal/config/env/redis.go) |
+| `SECURITY_MAX_LOGIN_ATTEMPTS` | `5` | [security.go](internal/config/env/security.go) |
+| `SECURITY_LOGIN_ATTEMPTS_WINDOW` | `15m` | [security.go](internal/config/env/security.go) |
+| `USER_SERVER_GRPC_HOST` | задать явно | [user_grpc.go](internal/config/env/user_grpc.go) |
+| `USER_SERVER_GRPC_PORT` | задать явно | [user_grpc.go](internal/config/env/user_grpc.go) |
 
-**Метод:** `ValidateCredentials`
+JWT TTL задавайте явно: struct tags в `jwt.go` имеют некорректное оформление; указанные там defaults нельзя считать проверенным контрактом.
 
-**Процесс:**
-1. AuthService получает email/password от клиента
-2. Устанавливает gRPC соединение с UserServer
-3. Вызывает `ValidateCredentials` метод
-4. Получает подтверждение или ошибку
-5. Генерирует JWT токены при успехе
+Основные значения находятся в `services/auth/.env`:
 
-**Конфигурация:**
-- `USER_SERVER_GRPC_HOST` - хост UserServer
-- `USER_SERVER_GRPC_PORT` - порт UserServer (50051)
-
-## Мониторинг и Observability
-
-### OpenTelemetry (OTEL)
-
-Интегрирован мониторинг из [платформенной библиотеки](https://github.com/WithSoull/platform_common):
-
-**Traces**
-- Распределённая трассировка между AuthService и UserServer
-- Trace context propagation через gRPC metadata
-
-**Metrics**
-- RPS (requests per second)
-- Latency percentiles (p50, p95, p99)
-- Error rate по каждому методу
-
-**Logs**
-- Структурированное логирование (uber-go/zap)
-- Dual output: stdout + OTEL Collector → Elasticsearch → Kibana
-
-### Health Check
-
+```dotenv
+GRPC_HOST=0.0.0.0
+GRPC_PORT=50050
+USER_SERVER_GRPC_HOST=users
+USER_SERVER_GRPC_PORT=50054
+REFRESH_TOKEN_TTL=1h
+ACCESS_TOKEN_TTL=15m
+CACHE_HOST=redis
+INTERNAL_CACHE_PORT=6379
+SECURITY_MAX_LOGIN_ATTEMPTS=6
+SECURITY_LOGIN_ATTEMPTS_WINDOW=30s
 ```
-# gRPC health check
+
+Secrets из development `.env` нельзя использовать в production.
+
+Полный набор и значения по умолчанию смотрите в `internal/config` и
+`services/auth/.env`; README перечисляет только параметры основного flow.
+
+## Запуск
+
+### Локальный Go и зависимости в Docker
+
+Из корня репозитория:
+
+```bash
+docker compose --profile services up --build -d redis users
+docker compose --profile services stop auth
+cd services/auth
+CACHE_HOST=localhost USER_SERVER_GRPC_HOST=localhost OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 go run ./cmd/server
+```
+
+Go 1.24.1 читает сервисный `.env` относительно текущей папки; переменные shell
+переопределяют значения файла. Для Users дождитесь завершения мигратора с кодом 0.
+Экспорт телеметрии требует `make up-observability` в отдельном терминале.
+
+### Docker
+
+Из корня репозитория:
+
+```bash
+docker compose --profile services up --build -d users auth
+docker compose logs -f auth
 grpcurl -plaintext localhost:50050 grpc.health.v1.Health/Check
-
 ```
 
-## Отказоустойчивость
+Стандартный health service сообщает состояние процесса, установленное
+приложением, и не гарантирует успешный вызов Users/Redis на каждый probe.
 
-### Rate Limiter
+## Примеры использования
 
-- **Реализация:** middleware из платформенной библиотеки
-- **Защита:** 30 запросов/сек
-- **Ответ при превышении:** `RESOURCE_EXHAUSTED` (HTTP 429)
+Нужен `grpcurl`; Users должен содержать пользователя из примера [Users README](../users/README.md).
 
-### Graceful Shutdown
-
-При получении сигнала завершения (SIGINT/SIGTERM):
-1. Остановка приёма новых запросов
-2. Завершение обработки текущих запросов
-3. Закрытие соединений с Redis
-4. Закрытие gRPC клиента к UserServer
-5. Остановка gRPC сервера
-
-## Сетевое взаимодействие
-
-Все внешние запросы к сервису проходят через **Envoy proxy** (конфигурация в платформенной библиотеке):
-- gRPC-JSON transcoding
-- Load balancing
-- TLS termination
-- Rate limiting на уровне proxy
-
-## Типичные сценарии использования
-
-### 1. Полный flow аутентификации
-
-```
-# 1. Login - получение refresh токена
-curl -X POST http://localhost:8080/api/v1/auth \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "password123"}'
-
-# Response: {"refresh_token": "eyJhbGc..."}
-
-# 2. Получение access токена
-curl -X POST http://localhost:8080/api/v1/auth/access \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "eyJhbGc..."}'
-
-# Response: {"access_token": "eyJhbGc..."}
-
-# 3. Использование access токена для защищённых ресурсов
-curl -X GET http://localhost:8080/api/v1/protected \
-  -H "Authorization: Bearer eyJhbGc..."
+```bash
+grpcurl -plaintext -d '{"email":"docs@example.com","password":"Docs-example-123!"}' \
+  localhost:50050 auth_v1.AuthV1/Login
 ```
 
-### 2. Refresh token rotation
+Скопируйте `refreshToken` из ответа:
 
-```
-# Обновление refresh токена
-curl -X POST http://localhost:8080/api/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "old_token"}'
-
-# Response: {"refresh_token": "new_token"}
+```bash
+grpcurl -plaintext -d '{"refresh_token":"<refreshToken>"}' \
+  localhost:50050 auth_v1.AuthV1/GetAccessToken
+grpcurl -plaintext -H 'authorization: Bearer <accessToken>' -d '{}' \
+  localhost:50050 auth_v1.AuthV1/ValidateToken
 ```
 
-### 3. Валидация токена (для других сервисов)
+В последней команде подставьте полученный `accessToken`. Успех — `{}`, а не UUID.
+Refresh обновляется через `auth_v1.AuthV1/GetRefreshToken` с тем же форматом request;
+предыдущий JWT при этом не отзывается.
 
+## Наблюдаемость и диагностика
+
+### Observability и lifecycle
+
+Сервис использует общий Go kit для structured logging, OpenTelemetry metrics и
+traces. Graceful shutdown останавливает gRPC server и зарегистрированные
+dependencies. Наличие instrumentation означает, что telemetry создаётся, но её
+доставка зависит от настроенного collector.
+
+В локальном Compose Auth слушает `50050`, Users — `50054`, Redis — по внутреннему
+адресу `redis:6379`. Внешний HTTP endpoint появится только вместе с Gateway.
+
+### Ошибки интеграции
+
+- неверные credentials не должны раскрывать, существует ли email;
+- access token нельзя использовать вместо refresh token и наоборот;
+- потерянный ответ `GetRefreshToken` сейчас нельзя разрешить через server-side
+  rotation state;
+- сетевой доступ к внутреннему gRPC API должен ограничиваться deployment policy.
+
+## Разработка и тесты
+
+```bash
+cd services/auth
+go test ./...
 ```
-# Проверка валидности токена
-curl -X POST http://localhost:8080/api/v1/auth/validate \
-  -H "Authorization: Bearer eyJhbGc..."
 
-# Response: 200 OK или 401 Unauthorized
-```
+## Ограничения и дальнейшие работы
 
-## Обработка ошибок
+- gRPC transport в текущем локальном Compose plaintext;
+- rate limit локален одной реплике;
+- refresh revocation отсутствует;
+- общий S3/Gateway authentication flow ещё не реализован.
 
-Кастомные доменные ошибки с маппингом в gRPC статус коды:
+Эти ограничения нужно учитывать при проектировании Gateway и deployment, а не
+описывать как уже обеспеченные TLS, sessions или SigV4.
 
-| Доменная ошибка | gRPC Code | HTTP Code | Описание |
-|-----------------|-----------|-----------|----------|
-| `INVALID_CREDENTIALS` | `Unauthenticated` | 401 | Неверный email/password |
-| `TOKEN_EXPIRED` | `Unauthenticated` | 401 | Истёк срок действия токена |
-| `INVALID_TOKEN` | `Unauthenticated` | 401 | Невалидная подпись токена |
-| `TOO_MANY_ATTEMPTS` | `PermissionDenied` | 403 | Превышен лимит попыток входа |
-| `USER_NOT_FOUND` | `NotFound` | 404 | Пользователь не найден (от UserServer) |
-| `RATE_LIMIT_EXCEEDED` | `ResourceExhausted` | 429 | Превышен rate limit |
+## Связанные документы
 
-## Зависимости
-
-### Внешние сервисы
-
-- **UserServer** (gRPC) - валидация credentials
-- **Redis** - сессии, rate limiting, brute force protection
-- **OTEL Collector** - мониторинг и observability
-- **Envoy Proxy** - маршрутизация
-
-### [Платформенная библиотека](https://github.com/WithSoull/platform_common)
-
-Переиспользуемые компоненты:
-- JWT Generator/Verifier
-- OTEL instrumentation (traces, metrics, logs)
-- Rate Limiter middleware
-- Envoy configuration
-- Error handling utilities
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).

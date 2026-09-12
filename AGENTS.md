@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-This repository is a monorepo for several gRPC services. Main code lives under `services/`: Go services in `services/auth`, `services/users`, and `services/storage`, plus the Python ReBAC service in `services/authz`. Shared protobuf sources are in `shared/api`, generated clients/stubs live in `shared/pkg/go` and `shared/pkg/py`, infrastructure lives in `infra/`, and cross-service docs are in `docs/`.
+This repository is a monorepo for several gRPC services. Main code lives under `services/`: Go services in `services/auth`, `services/users`, `services/metadata`, and `services/storage`; the Python ReBAC service in `services/authz`; and the Rust quota service in `services/quota`. Shared protobuf sources are in `shared/api`, generated clients/stubs live in `shared/pkg/go` and `shared/pkg/py`, infrastructure lives in `infra/`, and cross-service docs are in `docs/`.
 
-Go services follow the same layout: `cmd/server` for entrypoints and `internal/` for app, config, handlers, services, and repositories. AuthZ keeps runtime code in `entrypoints/` and `internal/`, with tests in `services/authz/tests/{unit,integration}`.
+Go services follow the same layout: `cmd/server` for server entrypoints and `internal/` for app, config, handlers, services, and repositories. Additional maintenance binaries may live under `cmd/<name>`. AuthZ keeps runtime code in `entrypoints/` and `internal/`, with tests in `services/authz/tests/{unit,integration}`. Quota keeps Rust code in `services/quota/src`.
 
 ## Build, Test, and Development Commands
 
@@ -13,11 +13,12 @@ Go services follow the same layout: `cmd/server` for entrypoints and `internal/`
 - `make up-observability`: start Grafana, Prometheus, Jaeger, and related tooling.
 - `make down` / `make down-volumes`: stop containers; the latter also removes persisted data.
 - `make generate`: regenerate shared Go and Python protobuf bindings from `shared/api`.
-- `go test ./...` from `services/auth`, `services/users`, or `services/storage`: run tests for one Go service module.
+- `go test ./...` from `services/auth`, `services/users`, `services/metadata`, or `services/storage`: run tests for one Go service module.
 - `make test-metadata-integration`: run Metadata integration tests against the dedicated e2e PostgreSQL profile.
 - `make test-metadata-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata integration tests.
 - `python3 -m pytest tests/unit -v` from `services/authz`: run AuthZ unit tests.
 - `python3 -m pytest tests/integration -v -m integration` from `services/authz`: run Neo4j-backed integration tests.
+- `cargo test -p quota-service` from the repository root: run Quota tests.
 
 ## Coding Style & Naming Conventions
 
@@ -69,3 +70,23 @@ The rules below apply specifically to Go unit tests:
 ## Commit & Pull Request Guidelines
 
 Recent history uses short conventional-style messages such as `feat: ...` and `fix(proto): ...`. Follow `type(scope): summary` where possible. Keep PRs focused, describe service-level impact, list any new env vars or Docker requirements, and link the issue or task. For API changes, mention regenerated protobuf outputs and affected services explicitly.
+
+### Service README Structure and Preservation
+
+Every implemented service must have `services/<name>/README.md`. Use the same
+level-two sections, in this order: purpose and capabilities, architecture and
+dependencies, project structure, API, data and main flows, configuration, startup,
+usage examples, observability and troubleshooting, development and tests,
+limitations and future work, related documents. The current service READMEs use
+Russian headings; preserve those headings for consistency. Root, documentation
+index, and test-kit READMEs serve different purposes and need not mimic a service.
+
+When correcting facts, preserve useful explanations, runnable examples, design
+alternatives, and test guidance. Fix the inaccurate passage in place; do not
+replace a detailed document with only a list of limitations. Mark proposed flows
+and historical snapshots visibly. A general warning at the top does not fix an
+incorrect API example or a contradictory diagram inside the document.
+
+Keep shared development rules in this file. CLAUDE.md files add architecture,
+service-specific navigation, and testing context; avoid maintaining conflicting
+copies of commands/configuration. Link to service READMEs for full runbooks.
