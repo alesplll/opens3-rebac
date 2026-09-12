@@ -1,11 +1,15 @@
-# Sequence Diagrams v3 — opens3-rebac
-# Activation boxes + русские подписи
-# Каждый блок @startuml...@enduml вставляй отдельно на plantuml.com
-# Проектные последовательности: Gateway и часть событий ещё не реализованы.
-# Внешний успех записи должен следовать после durable Storage commit и видимого
-# committed Metadata state. Login возвращает refresh token; access token выдаёт
-# отдельный RPC. Grant/revoke требует admin-check перед WriteTuple. Delete marker
-# не удаляет historical versions.
+# Последовательности операций OpenS3-ReBAC
+
+Статус на 11 сентября 2026: **проект Gateway и межсервисных сценариев**.
+Gateway и Kafka cleanup consumers отсутствуют. SD-12 описывает текущий AuthZ Check;
+SD-16 — отдельный существующий invalidator с ограничениями. Для всех внешних запросов предполагается аутентификация в Gateway. Схемы показывают
+успешную ветвь; DENY/ошибки должны завершать запрос до защищённого действия.
+
+Каждый блок PlantUML можно открыть отдельно в локальном PlantUML renderer.
+[Политика доступа и события](gateway-contract-plan.md) задаёт проектные решения;
+[README сервисов](README.md#сервисы) — реально доступные RPC.
+Storage commit ниже означает текущий file sync + rename; power-loss durability
+требует дополнительных изменений. Внешний успех следует после видимости Metadata.
 
 ---
 
@@ -29,7 +33,7 @@ participant "Kafka"    as KF
 Client -> GW : Загрузить файл
 activate GW
 
-GW -> AZ : Проверить права на запись
+GW -> AZ : Check по policy bucket/new key или object/overwrite
 activate AZ
 AZ --> GW : Разрешено
 deactivate AZ
@@ -37,9 +41,6 @@ deactivate AZ
 GW -> DN : Передать байты файла
 activate DN
 DN --> GW : Файл сохранён (blob_id, контрольная сумма)
-DN -> KF : Файл записан на диск
-activate KF
-deactivate KF
 deactivate DN
 
 GW -> MD : Зафиксировать новую версию объекта
@@ -47,7 +48,7 @@ activate MD
 MD --> GW : Версия создана (object_id, version_id)
 deactivate MD
 
-GW -> AZ : Связать объект с бакетом в графе прав
+GW -> AZ : Записать direct HAS_PERMISSION по policy;\nPARENT_OF хранит структуру, не наследует права
 activate AZ
 AZ --> GW : Связь создана
 deactivate AZ
@@ -119,9 +120,9 @@ activate AZ
 AZ --> GW : Разрешено
 deactivate AZ
 
-GW -> MD : Пометить объект удалённым
+GW -> MD : Удалить объект без сохранения версий\n(проект permanent delete, не delete marker)
 activate MD
-MD -> KF : Объект удалён из БД
+MD -> KF : Проект: relay публикует outbox event\nс точными version/blob IDs
 activate KF
 MD --> GW : Успех
 deactivate MD
@@ -159,7 +160,7 @@ participant "Шлюз"     as GW
 participant "Метаданные" as MD
 participant "Авторизация" as AZ
 
-note over GW : Проверка прав перед\nсозданием не нужна —\nлюбой пользователь\nможет создать бакет
+note over GW : Проект: аутентифицировать пользователя,\nпроверить account policy и зарезервировать quota.\nAuthZ Check на ещё не существующий bucket не выполняется.
 
 Client -> GW : Создать бакет
 activate GW
@@ -169,7 +170,7 @@ activate MD
 MD --> GW : Бакет создан (bucket_id)
 deactivate MD
 
-GW -> AZ : Назначить создателя владельцем
+GW -> AZ : WriteTuple(user, HAS_PERMISSION, bucket, ADMIN)
 activate AZ
 AZ --> GW : Связь создана в графе
 deactivate AZ
@@ -209,7 +210,7 @@ alt Бакет не пустой
   MD --> GW : Ошибка — бакет не пуст
   GW --> Client : 409 Конфликт
 else Бакет пустой
-  MD -> KF : Бакет удалён из БД
+  MD -> KF : Проект: bucket delete через outbox relay
   activate KF
   MD --> GW : Успех
   deactivate MD
@@ -309,12 +310,9 @@ participant "Метаданные" as MD
 Client -> GW : Получить список своих бакетов
 activate GW
 
-GW -> AZ : Проверить права пользователя
-activate AZ
-AZ --> GW : Разрешено
-deactivate AZ
+GW -> GW : Аутентифицировать пользователя;\nowner_id взять из подтверждённой identity
 
-GW -> MD : Запросить список бакетов
+GW -> MD : ListBuckets(owner_id из identity)
 activate MD
 MD --> GW : Список бакетов (имя, дата создания)
 deactivate MD
@@ -344,7 +342,7 @@ participant "Kafka"    as KF
 
 Client -> GW : Начать составную загрузку
 activate GW
-GW -> AZ : Проверить права на запись
+GW -> AZ : Check по policy bucket/new key или object/overwrite
 activate AZ
 AZ --> GW : Разрешено
 deactivate AZ
@@ -352,6 +350,7 @@ GW -> DN : Открыть сессию загрузки
 activate DN
 DN --> GW : Идентификатор сессии (upload_id)
 deactivate DN
+GW -> GW : Сохранить durable связь upload_id → bucket/key/initiator
 GW --> Client : Сессия открыта (upload_id)
 deactivate GW
 
@@ -360,10 +359,11 @@ deactivate GW
 loop Каждая часть файла
   Client -> GW : Загрузить часть №N
   activate GW
-  GW -> AZ : Проверить права на запись
+  GW -> AZ : Check по policy bucket/new key или object/overwrite
   activate AZ
   AZ --> GW : Разрешено
   deactivate AZ
+  GW -> GW : Проверить upload owner, part number и размер
   GW -> DN : Сохранить часть №N
   activate DN
   DN --> GW : Часть сохранена (контрольная сумма)
@@ -376,25 +376,24 @@ end
 
 Client -> GW : Завершить загрузку (список частей)
 activate GW
-GW -> AZ : Проверить права на запись
+GW -> AZ : Check по policy bucket/new key или object/overwrite
 activate AZ
 AZ --> GW : Разрешено
 deactivate AZ
+GW -> GW : Проверить порядок/checksums, минимум частей\nкроме последней и reserve quota без двойного начисления
 GW -> DN : Собрать части в один файл
 activate DN
 DN --> GW : Файл готов (blob_id, контрольная сумма)
-DN -> KF : Файл записан на диск
-activate KF
-deactivate KF
 deactivate DN
 GW -> MD : Зафиксировать новую версию объекта
 activate MD
 MD --> GW : Версия создана
 deactivate MD
-GW -> AZ : Связать объект с бакетом в графе прав
+GW -> AZ : Записать direct HAS_PERMISSION по policy;\nPARENT_OF хранит структуру, не наследует права
 activate AZ
 AZ --> GW : Связь создана
 deactivate AZ
+GW -> GW : Рассчитать внешний multipart ETag отдельно от full-blob MD5
 GW --> Client : Загрузка завершена (ETag, version_id)
 deactivate GW
 
@@ -406,6 +405,7 @@ GW -> AZ : Проверить права
 activate AZ
 AZ --> GW : Разрешено
 deactivate AZ
+GW -> GW : Проверить initiator/upload state;\nне отменять уже committed результат
 GW -> DN : Удалить временные части
 activate DN
 DN --> GW : Части удалены
@@ -434,6 +434,12 @@ database    "Redis"    as RD
 Admin -> GW : Дать пользователю доступ к ресурсу
 activate GW
 
+GW -> GW : Аутентифицировать инициатора
+GW -> AZ : Check(initiator, ADMIN, target_resource)
+activate AZ
+AZ --> GW : ALLOW; при DENY завершить без mutation
+deactivate AZ
+
 GW -> AZ : Записать связь в граф прав
 activate AZ
 
@@ -445,7 +451,7 @@ deactivate N4
 AZ -> KF : Граф прав изменился
 activate KF
 
-note over KF : Асинхронно
+note over KF : Best-effort через отдельный consumer;\nне строгий барьер revoke
 KF -> AZ : Инвалидировать кэш
 activate AZ
 AZ -> RD : Удалить устаревшие решения из кэша
@@ -482,6 +488,12 @@ database    "Redis"    as RD
 Admin -> GW : Забрать доступ у пользователя
 activate GW
 
+GW -> GW : Аутентифицировать инициатора
+GW -> AZ : Check(initiator, ADMIN, target_resource)
+activate AZ
+AZ --> GW : ALLOW; при DENY завершить без mutation
+deactivate AZ
+
 GW -> AZ : Удалить связь из графа прав
 activate AZ
 
@@ -493,7 +505,7 @@ deactivate N4
 AZ -> KF : Граф прав изменился
 activate KF
 
-note over KF : Асинхронно
+note over KF : Best-effort через отдельный consumer;\nне строгий барьер revoke
 KF -> AZ : Инвалидировать кэш
 activate AZ
 AZ -> RD : Удалить устаревшие решения из кэша
@@ -503,7 +515,7 @@ deactivate RD
 deactivate AZ
 deactivate KF
 
-AZ --> GW : Права отозваны
+AZ --> GW : Связь удалена (кэш может содержать старый ALLOW)
 deactivate AZ
 
 GW --> Admin : Успех (204)
@@ -538,7 +550,7 @@ alt Кэш попал
 else Кэш промахнулся
   RD --> AZ : Не найдено
   deactivate RD
-  AZ -> N4 : Обойти граф прав\n(транзитивно через группы и иерархию)
+  AZ -> N4 : Обойти граф прав\n(MEMBER_OF → HAS_PERMISSION на точном ресурсе;\nбез обхода PARENT_OF)
   activate N4
   N4 --> AZ : Авторизован: да / нет
   deactivate N4
@@ -571,14 +583,14 @@ participant "Метаданные" as MD
 
 note over DN : Срабатывает после\nсохранения файла\nна диск
 
-DN -> KF : Файл полностью записан на диск\n(blob_id, контрольная сумма, размер)
+DN -> KF : Проект completion: operation_id, version_id,\nblob_id, checksum, size и подтверждение commit
 activate KF
 
-note over KF, MD : Асинхронный резервный путь.\nПо основному флоу Шлюз уже\nзафиксировал версию напрямую.\nЭто — страховка на случай\nпотери gRPC-вызова.
+note over KF, MD : Только проект, producer/consumer отсутствуют.\nДля recovery нужен durable intent с operation_id,\nbucket/key/version и ожидаемым blob.\nОдного blob_id/MD5/size недостаточно.
 
 KF -> MD : Проверить консистентность версии
 activate MD
-MD --> MD : Версия уже есть? — ничего не делать.\nНет? — восстановить из события.
+MD --> MD : Найти intent по operation_id; сверить payload;\nидемпотентно finalize конкретную version.\nНет intent — quarantine/reconciliation, не создавать по догадке.
 deactivate MD
 deactivate KF
 
@@ -598,12 +610,12 @@ participant "Kafka\nobject-deleted" as KF
 participant "Хранилище данных" as DN
 participant "Авторизация" as AZ
 
-note over MD : Объект помечен удалённым в БД
+note over MD : Проект permanent version delete:\nкаталог изменён и outbox создан в одной транзакции.\nТекущий DELETE не создаёт outbox.
 
-MD -> KF : Объект удалён\n(blob_id, object_id, ключ объекта)
+MD -> KF : Проект: event_id, generation, version_id, blob_id\nТекущий payload: только object_id и blob_id
 activate KF
 
-note over KF : Два независимых подписчика\nработают параллельно
+note over KF : Проект двух независимых подписчиков;\nсейчас эти consumers отсутствуют
 
 par
   KF -> DN : Удалить файл с диска
@@ -636,10 +648,10 @@ participant "Авторизация" as AZ
 
 note over MD : Бакет удалён из БД\n(был пустым)
 
-MD -> KF : Бакет удалён\n(bucket_id, имя бакета, владелец)
+MD -> KF : bucket-deleted (bucket_id, bucket_name)\nТекущая доставка best-effort, outbox планируется
 activate KF
 
-note over KF : Хранилище данных\nне уведомляется —\nбакет был пустым,\nфайлов на диске нет
+note over KF : Логическая пустота не доказывает отсутствие blobs.\nVersion-aware physical GC — отдельный flow;\nStorage не раскладывает файлы по bucket name.
 
 KF -> AZ : Очистить граф прав бакета
 activate AZ
@@ -680,7 +692,7 @@ deactivate AZ
 
 deactivate KF
 
-note over RD : Следующий Check по этому ресурсу\nпойдёт в Neo4j за свежим решением
+note over RD : Только удалённые cache keys станут miss.\nGroup-derived решения и гонка Check/set\nмогут сохранить устаревший ALLOW до истечения записи.
 
 @enduml
 ```

@@ -1,6 +1,12 @@
-<!-- Проектная диаграмма: Gateway, placement, репликация и часть Kafka flows ещё
-не реализованы. Актуальный состав сервисов и ограничения — в ../README.md. -->
+# Модель классов OpenS3-ReBAC
 
+**Концептуальная диаграмма**, не UML-генерация из кода. Gateway и его связи — проект;
+остальные сервисы существуют. Методы доменной модели иллюстрируют ответственность,
+а точные request/response задают [proto](../shared/api) и [README сервисов](README.md#сервисы).
+Metadata pending/delete_marker показаны как поля схемы, не как готовые lifecycle RPC.
+Users и Storage не имеют Kafka producer; Auth/Users используют standard Health.
+
+```plantuml
 @startuml ClassDiagram_opens3
 
 skinparam classAttributeIconSize 0
@@ -50,6 +56,8 @@ package "Доменная модель" {
     + bucket_id : UUID
     + key : String
     + current_version_id : UUID  <<nullable>>
+    + pending_version_id : UUID <<nullable>>
+    + status : String
     --
     + getCurrentVersion() : Version
     + listVersions() : Version[]
@@ -58,7 +66,10 @@ package "Доменная модель" {
   class Version {
     + id : UUID
     + object_id : UUID
-    + blob_id : UUID
+    + blob_id : UUID <<nullable for delete marker>>
+    + version_number : Int64
+    + kind : blob | delete_marker
+    + state : pending | committed | aborted
     + size : Int64
     + etag : String
     + content_type : String
@@ -103,23 +114,23 @@ package "Слой сервисов" {
     - cache : RedisClient
     - rateLimiter : RateLimiter
     --
-    + login(email, password) : Token
-    + getRefreshToken(refreshToken) : Token
+    + login(email, password) : RefreshToken
+    + getRefreshToken(refreshToken) : RefreshToken
     + getAccessToken(refreshToken) : String
-    + validateToken(token) : Boolean
-    + healthCheck() : Status
+    + validateToken(metadata.authorization) : Empty
+    + standardHealthCheck() : Status
   }
 
   class UsersService <<service>> {
     - db : PostgreSQLClient
-    - kafka : KafkaProducer
     --
-    + create(email, password) : User
+    + create(userInfo, password, passwordConfirm) : UUID
     + get(id) : User
-    + update(id, data) : User
+    + update(userId, optionalName, optionalEmail) : Empty
+    + updatePassword(userId, password, passwordConfirm) : Empty
     + delete(id) : void
-    + validateCredentials(email, password) : Boolean
-    + healthCheck() : Status
+    + validateCredentials(email, password) : valid + user_id
+    + standardHealthCheck() : Status
   }
 
   class AuthZService <<service>> {
@@ -130,7 +141,7 @@ package "Слой сервисов" {
     + check(subject, action, resource) : Boolean
     + writeTuple(subject, relation, resource) : void
     + deleteTuple(subject, relation, resource) : void
-    + read(resource) : Tuple[]
+    + read(subject) : Tuple[]
     + healthCheck() : Status
   }
 
@@ -140,16 +151,16 @@ package "Слой сервисов" {
     --
     + createBucket(name, ownerId) : Bucket
     + deleteBucket(bucketId) : void
-    + commitVersion(objectId, blobId, size, etag) : Version
-    + markDeleted(objectId) : void
+    + createObjectVersion(bucketName, key, blobId, size, etag) : Version
+    + deleteObjectMeta(bucketName, key) : object_id + blob_id
     + listObjects(bucketId, prefix, limit) : Object[]
-    + headObject(bucketId, key) : Version
+    + getObjectMeta(bucketName, key, versionId) : Version
     + healthCheck() : Status
   }
 
   class StorageService <<service>> {
     - dataDir : String
-    - kafka : KafkaProducer
+    - multipartDir : String
     --
     + storeBlob(data : Stream) : Blob
     + getBlob(blobId) : Stream
@@ -173,7 +184,7 @@ Bucket "1" *-- "0..*" Object : содержит >
 Object "1" *-- "0..*" Version : хранит >
 
 ' Ассоциация: Version ссылается на Blob (Blob живёт в Storage независимо)
-Version "0..*" --> "1" Blob : ссылается на >
+Version "0..*" --> "0..1" Blob : ссылается на >
 
 ' Зависимость: login порождает Token
 AuthService ..> Token : <<creates>>
@@ -190,9 +201,19 @@ GatewayService ..> AuthService    : <<uses>>
 GatewayService ..> AuthZService   : <<uses>>
 GatewayService ..> MetadataService : <<uses>>
 GatewayService ..> StorageService  : <<uses>>
+GatewayService ..> QuotaService : <<planned uses>>
 
 ' Auth зависит от Users для проверки credentials
 AuthService ..> UsersService : <<uses>>
+
+class QuotaService <<service>> {
+  + checkQuota(subject, bucket, delta) : CheckResult
+  + updateUsage(subject, bucket, delta) : Empty
+  + getUsage(subject) : Usage
+  + setQuota(subject, limits) : Boolean
+  + getQuota(subject) : Limits
+  + deleteSubject(subject) : Boolean
+}
 
 ' Сервисы управляют своими доменными классами
 UsersService ..> User    : <<manages>>
@@ -202,3 +223,4 @@ MetadataService ..> Version : <<manages>>
 StorageService ..> Blob     : <<manages>>
 
 @enduml
+```

@@ -110,3 +110,48 @@ Observability поднимается отдельным профилем:
 ```bash
 make up-observability
 ```
+
+## Разработка вне контейнера
+
+| Компонент | Нужные инструменты | Инструкция |
+|---|---|---|
+| Go services | Go 1.24.1; зависимости в Docker | [Auth](services/auth/README.md#запуск), [Users](services/users/README.md#запуск), [Metadata](services/metadata/README.md#запуск), [Storage](services/storage/README.md#запуск) |
+| AuthZ | Python 3.12, venv, pip | [Setup и отдельный invalidator](services/authz/README.md#запуск) |
+| Quota | Rust (Docker build использует 1.95), protoc, Redis | [Запуск и tests](services/quota/README.md#запуск) |
+| Ручные RPC | grpcurl | раздел «Примеры использования» каждого сервиса |
+| Генерация proto | protoc, Go, Python/pip, make | команды ниже |
+
+Go `.env` читается относительно папки запуска, Python Config — только из окружения,
+Rust использует dotenvy от текущей папки. Для local process адреса Docker DNS
+заменяются на localhost и опубликованные порты. Если контейнер сервиса уже запущен,
+остановите именно его, чтобы освободить порт; зависимости оставьте работающими.
+
+## Изменение protobuf
+
+Из корня:
+
+```bash
+make install-deps
+make generate
+```
+
+`install-deps` кладёт Go plugins и Python grpcio-tools в `bin/`; сам `protoc`
+нужно установить отдельно. Go/Python clients генерируются в `shared/pkg/go` и
+`shared/pkg/py`. Для отдельного сервиса есть targets `generate-<service>-go/py`;
+у Users имя target — `generate-user-go/py`. Rust Quota генерирует bindings через
+`build.rs` при сборке и также требует `protoc`.
+
+## Что проверять при первом запуске
+
+1. `docker compose ps -a`: миграторы должны завершиться с кодом 0; healthcheck
+   есть не у каждого приложения, отсутствие метки healthy не равно ошибке.
+2. Standard gRPC Health показывает статус процесса. Custom HealthCheck у Metadata
+   проверяет PostgreSQL/Kafka, AuthZ — Neo4j/Redis, Storage — filesystem, Quota — Redis.
+3. `make up-observability` поднимает Collector и UI. Ошибка экспорта telemetry
+   при отсутствии Collector не является доказательством ошибки бизнес-RPC.
+4. При ошибке credentials БД проверьте соответствие `.env` и существующего volume:
+   новые значения env не переинициализируют уже созданную БД. `down -v` удаляет данные.
+5. Проверьте реальный запрос из README сервиса. Успех health сам по себе не является
+   end-to-end проверкой записи объекта.
+
+[Карта документации](docs/README.md) связывает сервисы, архитектурные планы и аудиты.

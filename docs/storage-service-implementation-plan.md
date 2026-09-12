@@ -114,3 +114,26 @@ Storage nodes могут передавать поток по chain, либо fa
 - orphan reconciliation и version-aware cleanup;
 - filesystem-specific crash tests до заявления power-loss durability;
 - multi-node failure/partition tests до заявления replication guarantees.
+
+## Порядок работы и сохранённые альтернативы
+
+| Этап | Изменение | Проверяемый результат |
+|---|---|---|
+| Внутренний data path | существующие Store/Retrieve/Delete и multipart | component tests и `cmd/multipart-smoke` |
+| Первый Gateway flow | streaming без полного buffering, вызов Metadata после Storage | bytes совпадают; immediate GET/HEAD/LIST |
+| Recovery | operation ID, intent, terminal result | retry после потери ответа не создаёт новую операцию |
+| Lifecycle | outbox, abort, version-aware GC | позднее событие не удаляет новое поколение |
+| Несколько nodes | placement, logical/local IDs, fencing, repair | частичный отказ/partition не даёт ложный успех |
+
+Синхронный commit выбран здесь как простая отправная точка проектирования,
+а не как отказ от pending/finalize или event-driven варианта. У каждого варианта
+остаётся необходимость orphan reconciliation. Полностью асинхронный внешний API
+потребовал бы отдельного статуса «операция принята» вместо окончательного PUT success.
+
+Для backlog сохраняются Content-MD5/checksum policy, TTL незавершённых uploads,
+срок хранения completion markers и quota reconciliation. Нельзя добавлять cleanup,
+который удаляет завершённый blob только по возрасту staging session.
+
+[Таблица политики и событий](gateway-contract-plan.md) описывает текущие payload,
+проектируемый abort и условия идемпотентности. Варианты `gc/trash` и marker recovery
+сохранены в [filesystem architecture](storage-fs-architecture.md).

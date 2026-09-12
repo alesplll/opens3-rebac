@@ -54,7 +54,7 @@ make test-metadata-integration
 make test-metadata-integration-local
 make up-observability
 make down
-make down-volumes
+make down-volumes  # удаляет локальные данные volumes
 make generate
 ```
 
@@ -113,7 +113,7 @@ shared/api/              # исходные protobuf-контракты
 shared/pkg/go/           # сгенерированный Go-код
 shared/pkg/py/           # сгенерированный Python-код
 shared/pkg/go-kit/       # общие Go-компоненты
-shared/pkg/py-kit/       # общие Python-компоненты
+shared/pkg/py_kit/       # общие Python-компоненты
 shared/pkg/rust-kit/     # общие Rust-компоненты
 infra/                   # observability и инфраструктурные настройки
 e2e/                     # общая инфраструктура интеграционных тестов
@@ -150,10 +150,25 @@ checkout. Ближайшая цель — реализовать Gateway и со
 
 ## Документация
 
+- [Карта всей документации](docs/README.md)
 - [Первый запуск](GETTING_STARTED.md)
 - [Auth](services/auth/README.md)
 - [Users](services/users/README.md)
 - [AuthZ](services/authz/README.md)
+- [Metadata](services/metadata/README.md)
 - [Storage](services/storage/README.md)
 - [Quota](services/quota/README.md)
 - [GitHub Wiki](https://github.com/alesplll/opens3-rebac/wiki)
+
+## Разработка и вклад
+
+[AGENTS.md](AGENTS.md) фиксирует структуру слоёв, стиль тестов и правила изменения
+документации. Service README содержит полный локальный сценарий, env и gRPC examples.
+Go modules запускаются отдельно; repository tests Metadata используют отдельную
+PostgreSQL из `e2e/`. Для генерации нужен `protoc`, затем `make install-deps` и
+`make generate`; Rust генерирует свои bindings при Cargo build.
+
+Цель следующих этапов — связать сервисы в объектное хранилище с управляемым доступом,
+версиями и восстановлением после сбоев. [Планы](docs/README.md#проектируемая-архитектура)
+содержат варианты реализации и критерии готовности, а не показатели уже достигнутой
+S3-совместимости, производительности или production availability.

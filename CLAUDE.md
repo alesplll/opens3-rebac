@@ -24,7 +24,7 @@ event-driven cleanup находятся на уровне проекта/backlog
 - protobuf source of truth: `shared/api/<service>/v1/*.proto`;
 - generated Go: `shared/pkg/go`;
 - generated Python: `shared/pkg/py`;
-- общие библиотеки: `shared/pkg/go-kit`, `shared/pkg/py-kit`,
+- общие библиотеки: `shared/pkg/go-kit`, `shared/pkg/py_kit`,
   `shared/pkg/rust-kit`;
 - Go-сервисы: `services/{auth,users,metadata,storage}`;
 - Python AuthZ: `services/authz`;
@@ -131,3 +131,67 @@ make down
 1. уже реализованный runtime;
 2. утверждённый внешний контракт;
 3. проектируемую архитектуру и acceptance criteria.
+
+## Карта чтения перед изменением
+
+1. [AGENTS.md](AGENTS.md): стиль Go/Python, minimock, документация и scope изменений.
+2. [Карта документации](docs/README.md): README нужного сервиса и связанные планы.
+3. Wire fields в `shared/api`, затем handler/service/repository: комментарии proto
+   тоже могут быть устаревшими. Наличие комментария о Kafka consumer не доказывает,
+   что consumer подключён в runtime.
+4. `docker-compose.yml`, сервисный `.env` и config parser: отличайте defaults кода,
+   значения development и host overrides.
+
+## Пакеты и границы API
+
+| Сервис | Полное имя gRPC service | Основной контекст |
+|---|---|---|
+| Auth | `auth_v1.AuthV1` | [README](services/auth/README.md) |
+| Users | `user_v1.UserV1` | [README](services/users/README.md) |
+| AuthZ | `opens3.authz.v1.PermissionService` | [README](services/authz/README.md), [CLAUDE](services/authz/CLAUDE.md) |
+| Metadata | `opens3.metadata.v1.MetadataService` | [README](services/metadata/README.md) |
+| Storage | `opens3.storage.v1.DataStorageService` | [README](services/storage/README.md) |
+| Quota | `opens3.quota.v1.QuotaService` | [README](services/quota/README.md), [CLAUDE](services/quota/CLAUDE.md) |
+
+Auth ValidateToken возвращает Empty, а не identity. Users Get принимает `id`,
+Update/Delete — `user_id`. AuthZ WriteTuple не аутентифицирует инициатора: будущий
+Gateway обязан проверять его полномочия отдельно от создаваемого отношения.
+
+## Архитектура и сценарии
+
+```text
+Текущий runtime:
+Auth → Users → PostgreSQL Users
+  └── Redis login counters
+AuthZ → Neo4j + Redis + Kafka producer
+Metadata → PostgreSQL Metadata + Kafka delete producers
+Storage → локальная filesystem
+Quota → память + периодический Redis flush
+
+Целевой flow (Gateway отсутствует):
+Client → Gateway → authentication / AuthZ / Quota
+                  → Storage commit → Metadata commit → внешний успех
+```
+
+Metadata model: `Bucket → Object → Version`; current/pending pointers относятся к
+конкретным версиям. Схема поддерживает pending/delete_marker, но текущий RPC create
+сразу делает committed blob version. SQL source of truth — `services/metadata/migrations`.
+Не подменяйте миграции упрощённым SQL из старых заметок.
+
+Подробные проекты PUT/GET/multipart, ошибки и policy находятся в
+[sequence diagrams](docs/sequence_diagrams.md) и
+[Gateway contract plan](docs/gateway-contract-plan.md). Изменения Wire API,
+policy и событий должны быть согласованы между этими документами и README.
+
+## Проверки перед завершением
+
+- Go: форматирование затронутых файлов и tests нужного service module; repository
+  integration Metadata запускается отдельным Make target на e2e PostgreSQL.
+- Python: unit tests, при изменении graph queries — Neo4j integration tests.
+- Rust: fmt/clippy/test; Redis integration — отдельный ignored suite.
+- Proto: `make install-deps` при первом запуске, `make generate`; Rust использует
+  `build.rs` и требует `protoc` при сборке.
+- Документы: проверить относительные ссылки, команды, поля примеров и подписи схем.
+  Не удалять полезный контекст ради краткости и не менять датированные планы так,
+  будто проектируемые возможности уже существовали на исходную дату.
+- Указывать реально выполненные проверки, skipped suites и ограничения среды.

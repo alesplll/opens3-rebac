@@ -3,7 +3,11 @@
 Python 3.12 gRPC-сервис Relationship-Based Access Control. Хранит graph в Neo4j,
 кэширует решения в Redis и публикует audit/tuple events в Kafka.
 
-## Архитектура
+## Назначение и возможности
+
+Проверка доступа, запись/удаление отношений, чтение прямых связей и диагностика зависимостей. Аутентификацию клиента и авторизацию инициатора изменения прав должен выполнять вызывающий компонент.
+
+## Архитектура и зависимости
 
 ```text
 gRPC PermissionService
@@ -37,7 +41,7 @@ tests/integration/                          Neo4j-backed tests
 
 Generated Python protobuf находится в `shared/pkg/py`; его не редактируют вручную.
 
-## Реализованный API
+## API
 
 Source of truth: `shared/api/authz/v1/authz.proto`, package
 `opens3.authz.v1`, service `PermissionService`.
@@ -61,10 +65,13 @@ Source of truth: `shared/api/authz/v1/authz.proto`, package
 4. Решение записывается в Redis с TTL.
 5. Audit event отправляется через Kafka producer.
 
-Публикация audit event не входит в атомарную транзакцию graph read. Ошибка Kafka
-не должна менять сам результат авторизации, но влияет на полноту audit trail.
+Публикация audit event не входит в атомарную транзакцию graph read. Ошибка callback доставки Kafka логируется. Синхронное исключение из `produce()`
+не перехватывается в Check и может прервать RPC; гарантии независимости ответа от
+ошибок аудита пока нет.
 
-## Модель отношений
+## Данные и основные сценарии
+
+### Модель отношений
 
 Публичный protobuf принимает:
 
@@ -104,7 +111,7 @@ Servicer валидирует protobuf enums. Полная проверка вс
 разрешает автоматически действие на `object:logs/app.log`, пока в query явно не
 реализована семантика `PARENT_OF`.
 
-## Кэш и отзыв доступа
+### Кэш и отзыв доступа
 
 Решения сохраняются в Redis на 30 секунд. Основной Docker entrypoint запускает
 только gRPC server; `entrypoints/cache_invalidator.py` нужно разворачивать
@@ -113,8 +120,9 @@ Servicer валидирует protobuf enums. Полная проверка вс
 Даже с consumer текущая инвалидация best-effort. Удаление group membership не
 перечисляет все resource decisions, полученные через группу, а конкурентный
 graph-check способен записать старый ALLOW после очистки. Поэтому нельзя обещать
-немедленный отзыв: верхняя практическая граница задаётся TTL, пока не реализованы
-dependency-aware invalidation либо versioned epochs.
+немедленный отзыв: TTL ограничивает срок жизни отдельной записи с момента её сохранения,
+но не задаёт строгие 30 секунд с момента отзыва: старый graph-check может
+закончиться позже. Для SLA нужны dependency-aware invalidation либо versioned epochs.
 
 Не увеличивайте/sliding-extend ALLOW TTL без независимого hard deadline: потеря
 invalidation тогда может продлевать уже отозванный доступ неограниченно.
@@ -123,12 +131,13 @@ invalidation тогда может продлевать уже отозванн�
 решений, epochs/generations в cache key либо короткий bounded TTL как временная
 граница stale access. Выбор и race tests зафиксированы в issue #67.
 
-## Kafka
+### Kafka
 
 Текущая конфигурация использует один producer с topic `auth-changes` по умолчанию.
 Туда отправляются tuple events и authorization decisions. Payload решения содержит
-`event_type`, `subject`, `action`, `object`, `allowed` и `timestamp`; он не содержит
-документированные ранее `from_cache`, `level` или `timestamp_ms`.
+`event_type`, `subject`, `action`, `object` и `timestamp` (миллисекунды); он не содержит
+документированные ранее `from_cache`, `level` или `timestamp_ms`; отдельного
+`allowed` тоже нет — решение закодировано в `ACCESS_GRANTED` / `ACCESS_DENIED`.
 
 Изменение Neo4j и отправка Kafka не атомарны. Ошибка async producer callback
 логируется; durable outbox отсутствует. Раздельные `auth-audit`/`auth-changes`
@@ -158,6 +167,22 @@ GRPC_PORT=50051
 При запуске Python process с хоста container names `neo4j`, `redis` и `kafka`
 нужно заменить адресами, доступными с host, либо опубликованными портами.
 
+### Telemetry и defaults
+
+| Переменная | Default кода |
+|---|---|
+| `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | `bolt://localhost:7687`, `neo4j`, `password123` (только dev) |
+| `REDIS_HOST`, `REDIS_PORT` | `localhost`, `6379` |
+| `KAFKA_BOOTSTRAP`, `GRPC_PORT` | `localhost:9092`, `50051` |
+| `LOGGER_LEVEL`, `LOGGER_AS_JSON`, `LOGGER_ENABLE_OTLP` | `info`, `true`, `false` |
+| `OTEL_METRICS_PUSH_INTERVAL`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `60` секунд, `localhost:4317` |
+| `OTEL_ENVIRONMENT`, `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION` | `development`, `authz`, `0.1.0` |
+
+В Python переменная logger называется `LOGGER_ENABLE_OTLP`; в Go —
+`LOGGER_ENABLE_OLTP`. Не унифицируйте написание в документации без изменения parser.
+Decision cache использует Redis DB 0 и prefix `auth_decision` по constructor defaults;
+TTL задан в service, отдельной env для него сейчас нет.
+
 ## Запуск
 
 Полностью в Docker, из корня репозитория:
@@ -167,17 +192,37 @@ docker compose --profile services up --build -d authz
 docker compose logs -f authz
 ```
 
-Локальный процесс при уже запущенном Docker AuthZ конфликтует за порт. Для local
-run сначала остановите именно контейнер `authz`, оставив зависимости:
+### Локальный Python и зависимости в Docker
+
+Из корня репозитория (Python 3.12; `pip` устанавливает зависимости из pyproject):
 
 ```bash
+docker compose up -d neo4j redis kafka
 docker compose --profile services stop authz
 cd services/authz
-python3 -m entrypoints.server.main
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[test]'
+NEO4J_URI=bolt://localhost:7687 REDIS_HOST=localhost KAFKA_BOOTSTRAP=localhost:9092 \
+  OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 python -m entrypoints.server.main
 ```
 
-Отдельный invalidation process запускается entrypoint
-`entrypoints/cache_invalidator.py` с теми же доступными Redis/Kafka addresses.
+Дождитесь готовности зависимостей в `docker compose ps`. Пароль Neo4j по умолчанию
+`password123`; при изменении стенда задайте `NEO4J_PASSWORD` в окружении. Python
+config не загружает `.env` автоматически. Entry point сам добавляет корень для
+импортов `shared`; editable install обеспечивает импорты `internal`/`entrypoints`.
+
+В другом терминале, из `services/authz`, с активированной той же `.venv`:
+
+```bash
+python -m entrypoints.cache_invalidator
+```
+
+Этот entrypoint создаёт зависимости с constructor defaults: Redis
+`localhost:6379`, Kafka `localhost:9092`, topic `auth-changes`. Он **не читает**
+`REDIS_HOST`/`KAFKA_BOOTSTRAP` из `Config`; произвольные container addresses требуют
+изменения wiring. Поэтому команда подходит именно для зависимостей, доступных
+по локальным портам, а не является готовым отдельным Compose deployment.
 
 Docker image нужно собирать с root context:
 
@@ -197,13 +242,46 @@ grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 Для `Check`/`WriteTuple` поля и enum values нужно брать из
 `shared/api/authz/v1/authz.proto`, чтобы примеры не расходились с generated API.
 
-## Observability
+## Примеры использования
+
+Команды изменяют только демонстрационное отношение в локальном графе. В публичном
+API перед изменением прав потребуется аутентификация инициатора и ADMIN-check.
+
+```bash
+grpcurl -plaintext -d '{"subject":"user:550e8400-e29b-41d4-a716-446655440000","relation":"RELATION_HAS_PERMISSION","object":"bucket:docs-demo","level":"PERMISSION_LEVEL_ADMIN"}' \
+  localhost:50051 opens3.authz.v1.PermissionService/WriteTuple
+grpcurl -plaintext -d '{"subject":"user:550e8400-e29b-41d4-a716-446655440000","action":"ACTION_READ","object":"bucket:docs-demo"}' \
+  localhost:50051 opens3.authz.v1.PermissionService/Check
+grpcurl -plaintext -d '{"subject":"user:550e8400-e29b-41d4-a716-446655440000"}' \
+  localhost:50051 opens3.authz.v1.PermissionService/Read
+grpcurl -plaintext -d '{"subject":"user:550e8400-e29b-41d4-a716-446655440000","relation":"RELATION_HAS_PERMISSION","object":"bucket:docs-demo"}' \
+  localhost:50051 opens3.authz.v1.PermissionService/DeleteTuple
+```
+
+После удаления прежнее решение может оставаться в кэше. `allowed=false` — нормальный
+ответ Check, а не gRPC `PERMISSION_DENIED`. Неизвестный/нулевой action или relation,
+а также отсутствующий level для HAS_PERMISSION дают `INVALID_ARGUMENT`.
+Остальные исключения не имеют общего явного mapping в servicer; не полагайтесь
+на обещанный `UNAVAILABLE` для каждой ошибки инфраструктуры.
+
+## Наблюдаемость и диагностика
 
 Сервис создаёт traces, metrics и structured logs для transport и repository
 operations. Их доставка зависит от OTEL endpoint и запущенного collector. Custom
 HealthCheck проверяет Neo4j/Redis, standard health отражает lifecycle process.
 
-## Тесты
+## Разработка и тесты
+
+Coverage (из каталога сервиса, после установки `.[test]`):
+
+```bash
+python -m pytest tests/unit -v --cov=internal --cov=entrypoints --cov-report=term-missing
+```
+
+Конфигурация integration fixtures находится в [tests/integration/conftest.py](tests/integration/conftest.py).
+Недоступный Neo4j может приводить к skip: проверяйте summary тестов.
+
+### Тесты
 
 ```bash
 cd services/authz
@@ -214,7 +292,7 @@ python3 -m pytest tests/integration -v -m integration
 Integration tests требуют Neo4j. Python-каталог `internal` является соглашением
 структуры, а не языковым запретом импорта.
 
-## Proto regeneration
+### Proto regeneration
 
 Общие bindings генерируются из корня:
 
@@ -225,7 +303,7 @@ make generate
 После изменения proto нужно обновить generated Go/Python outputs и проверить все
 сервисы, которые импортируют `PermissionService`.
 
-## Ограничения и дальнейшие варианты
+## Ограничения и дальнейшие работы
 
 - текущая модель не наследует permission через `PARENT_OF`;
 - cache invalidation не гарантирует мгновенный revoke;
@@ -236,3 +314,9 @@ make generate
 Варианты наследования ресурсов: materialized direct tuples, traversal
 `PARENT_OF` во время Check или предварительно вычисленные permissions. Выбор
 зависит от глубины graph, стоимости revoke и допустимой latency.
+
+## Связанные документы
+
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).

@@ -3,7 +3,7 @@
 Внутренний gRPC-сервис аутентификации. Проверяет email/password через Users,
 выпускает JWT и валидирует токены.
 
-## Возможности
+## Назначение и возможности
 
 - вход по email/password через Users Service;
 - выпуск access и refresh JWT;
@@ -11,7 +11,9 @@
 - защита Login счётчиком неуспешных попыток в Redis;
 - локальный rate limiter, gRPC health и OpenTelemetry instrumentation.
 
-## Архитектура
+## Архитектура и зависимости
+
+### Архитектура
 
 ```text
 gRPC handler
@@ -24,6 +26,22 @@ Auth service ──gRPC──> Users.ValidateCredentials
 
 Handler отвечает за transport mapping. Service ведёт login/token flow. Проверка
 пароля остаётся в Users, а Auth не читает users database напрямую.
+
+### Взаимодействие
+
+Auth обращается к Users по gRPC `ValidateCredentials`. В Compose используется
+`users:50054`.
+
+```text
+client → Auth.Login → Users.ValidateCredentials → PostgreSQL
+                       ↓ success
+                    refresh JWT
+client → Auth.GetAccessToken(refresh JWT) → access JWT
+```
+
+В текущем Compose нет Envoy и HTTP/JSON transcoding. Примеры вызовов должны
+использовать gRPC-клиент либо будущий Gateway; `curl localhost:8080/api/...` после
+обычного запуска работать не будет.
 
 ## Структура проекта
 
@@ -56,16 +74,17 @@ Source of truth: `shared/api/auth/v1/auth.proto`.
 ```text
 Login(email, password) → refresh token
 GetAccessToken(refresh token) → access token
-ValidateToken(access token in metadata) → user_id
+ValidateToken(access token in metadata) → пустой ответ, gRPC OK
 ```
 
 `GetRefreshToken` принимает refresh token. `ValidateToken` читает credentials из
-gRPC metadata в форме, заданной protobuf/handler; при интеграции лучше использовать
-generated client, а не переносить старые HTTP-примеры.
+gRPC metadata `authorization: Bearer <access_token>`. Ответ — `google.protobuf.Empty`: RPC проверяет токен, но не возвращает identity вызывающему.
 
-## JWT
+## Данные и основные сценарии
 
-Токены подписываются HS256. Claims текущей реализации:
+### JWT
+
+Токены подписываются HS256. Claims текущей реализации (timestamps ниже иллюстративные, это не действующий токен):
 
 ```json
 {
@@ -82,37 +101,55 @@ UUID находится в `user_id`, а не в `sub`. Refresh и access token 
 token остаётся криптографически валидным до `exp`, потому что server-side
 revocation/rotation state не реализован.
 
-## Redis и rate limiting
+### Redis и rate limiting
 
 Redis хранит счётчик неуспешных попыток для brute-force protection. Он не является
 реестром активных JWT-сессий. После успешного входа счётчик сбрасывается.
 
-Rate limiter работает в памяти одного процесса. Значение 30 requests/second по
-умолчанию защищает отдельную реплику от локальной перегрузки, но не задаёт единый
+Rate limiter работает в памяти одного процесса. Значение 30 requests/second в development `.env` (default кода — 100 за 1s) защищает отдельную реплику от локальной перегрузки, но не задаёт единый
 кластерный лимит и само по себе не заменяет edge DDoS protection.
 
-Если Redis недоступен, поведение Login зависит от ошибки repository и не должно
-описываться как полноценная fail-open/fail-closed security policy без отдельного
-теста. При нескольких Auth replicas счётчик попыток общий через Redis, а rate
+При ошибке чтения счётчика Login возвращает ошибку до обращения к Users.
+Ошибка сброса счётчика после успешного входа логируется и не блокирует выпуск JWT;
+ошибка инкремента сейчас не обрабатывается вызывающим кодом. При нескольких Auth replicas счётчик попыток общий через Redis, а rate
 limiter остаётся локальным каждой replica.
 
-## Взаимодействие
-
-Auth обращается к Users по gRPC `ValidateCredentials`. В Compose используется
-`users:50054`.
-
-```text
-client → Auth.Login → Users.ValidateCredentials → PostgreSQL
-                       ↓ success
-                    refresh JWT
-client → Auth.GetAccessToken(refresh JWT) → access JWT
-```
-
-В текущем Compose нет Envoy и HTTP/JSON transcoding. Примеры вызовов должны
-использовать gRPC-клиент либо будущий Gateway; `curl localhost:8080/api/...` после
-обычного запуска работать не будет.
-
 ## Конфигурация
+
+### Полный перечень переменных Go-конфигурации
+
+Default ниже относится к коду, а не к development `.env`.
+
+| Переменная | Default / требование | Раздел конфигурации |
+|---|---|---|
+| `GRPC_HOST` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `GRPC_PORT` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `REFRESH_TOKEN_SECRET` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `ACCESS_TOKEN_SECRET` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `REFRESH_TOKEN_TTL` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `ACCESS_TOKEN_TTL` | задать явно | [jwt.go](internal/config/env/jwt.go) |
+| `LOGGER_LEVEL` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_AS_JSON` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_ENABLE_OLTP` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_NAME` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_ENVIRONMENT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_VERSION` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `OTEL_METRICS_PUSH_TIMEOUT` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `RATE_LIMITER_LIMIT` | `100` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `RATE_LIMITER_PERIOD` | `1s` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `CACHE_HOST` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `INTERNAL_CACHE_PORT` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `EXTERNAL_CACHE_PORT` | задать явно | [redis.go](internal/config/env/redis.go) |
+| `CACHE_MAX_IDLE` | `10` | [redis.go](internal/config/env/redis.go) |
+| `CACHE_CONNECTION_TIMEOUT` | `5s` | [redis.go](internal/config/env/redis.go) |
+| `CACHE_IDLE_TIMEOUT` | `240s` | [redis.go](internal/config/env/redis.go) |
+| `SECURITY_MAX_LOGIN_ATTEMPTS` | `5` | [security.go](internal/config/env/security.go) |
+| `SECURITY_LOGIN_ATTEMPTS_WINDOW` | `15m` | [security.go](internal/config/env/security.go) |
+| `USER_SERVER_GRPC_HOST` | задать явно | [user_grpc.go](internal/config/env/user_grpc.go) |
+| `USER_SERVER_GRPC_PORT` | задать явно | [user_grpc.go](internal/config/env/user_grpc.go) |
+
+JWT TTL задавайте явно: struct tags в `jwt.go` имеют некорректное оформление; указанные там defaults нельзя считать проверенным контрактом.
 
 Основные значения находятся в `services/auth/.env`:
 
@@ -134,7 +171,24 @@ Secrets из development `.env` нельзя использовать в product
 Полный набор и значения по умолчанию смотрите в `internal/config` и
 `services/auth/.env`; README перечисляет только параметры основного flow.
 
-## Запуск и health
+## Запуск
+
+### Локальный Go и зависимости в Docker
+
+Из корня репозитория:
+
+```bash
+docker compose --profile services up --build -d redis users
+docker compose --profile services stop auth
+cd services/auth
+CACHE_HOST=localhost USER_SERVER_GRPC_HOST=localhost OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 go run ./cmd/server
+```
+
+Go 1.24.1 читает сервисный `.env` относительно текущей папки; переменные shell
+переопределяют значения файла. Для Users дождитесь завершения мигратора с кодом 0.
+Экспорт телеметрии требует `make up-observability` в отдельном терминале.
+
+### Docker
 
 Из корня репозитория:
 
@@ -147,7 +201,31 @@ grpcurl -plaintext localhost:50050 grpc.health.v1.Health/Check
 Стандартный health service сообщает состояние процесса, установленное
 приложением, и не гарантирует успешный вызов Users/Redis на каждый probe.
 
-## Observability и lifecycle
+## Примеры использования
+
+Нужен `grpcurl`; Users должен содержать пользователя из примера [Users README](../users/README.md).
+
+```bash
+grpcurl -plaintext -d '{"email":"docs@example.com","password":"Docs-example-123!"}' \
+  localhost:50050 auth_v1.AuthV1/Login
+```
+
+Скопируйте `refreshToken` из ответа:
+
+```bash
+grpcurl -plaintext -d '{"refresh_token":"<refreshToken>"}' \
+  localhost:50050 auth_v1.AuthV1/GetAccessToken
+grpcurl -plaintext -H 'authorization: Bearer <accessToken>' -d '{}' \
+  localhost:50050 auth_v1.AuthV1/ValidateToken
+```
+
+В последней команде подставьте полученный `accessToken`. Успех — `{}`, а не UUID.
+Refresh обновляется через `auth_v1.AuthV1/GetRefreshToken` с тем же форматом request;
+предыдущий JWT при этом не отзывается.
+
+## Наблюдаемость и диагностика
+
+### Observability и lifecycle
 
 Сервис использует общий Go kit для structured logging, OpenTelemetry metrics и
 traces. Graceful shutdown останавливает gRPC server и зарегистрированные
@@ -157,7 +235,7 @@ dependencies. Наличие instrumentation означает, что telemetry 
 В локальном Compose Auth слушает `50050`, Users — `50054`, Redis — по внутреннему
 адресу `redis:6379`. Внешний HTTP endpoint появится только вместе с Gateway.
 
-## Ошибки интеграции
+### Ошибки интеграции
 
 - неверные credentials не должны раскрывать, существует ли email;
 - access token нельзя использовать вместо refresh token и наоборот;
@@ -165,14 +243,14 @@ dependencies. Наличие instrumentation означает, что telemetry 
   rotation state;
 - сетевой доступ к внутреннему gRPC API должен ограничиваться deployment policy.
 
-## Тесты
+## Разработка и тесты
 
 ```bash
 cd services/auth
 go test ./...
 ```
 
-## Ограничения текущей безопасности
+## Ограничения и дальнейшие работы
 
 - gRPC transport в текущем локальном Compose plaintext;
 - rate limit локален одной реплике;
@@ -181,3 +259,9 @@ go test ./...
 
 Эти ограничения нужно учитывать при проектировании Gateway и deployment, а не
 описывать как уже обеспеченные TLS, sessions или SigV4.
+
+## Связанные документы
+
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).

@@ -142,3 +142,58 @@ calculator вместе с выбранными instance/storage types. Spot dis
 [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/),
 [Pod disruptions](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/),
 [Bitnami postgresql-ha](https://github.com/bitnami/charts/tree/main/bitnami/postgresql-ha).
+
+## Эскиз структуры Helm chart
+
+Сохранённый вариант организации будущего deployment (каталог пока не создан):
+
+```text
+infra/helm/opens3/
+  Chart.yaml
+  values.yaml                    общие имена/порты, image digests
+  values-dev.yaml                одна replica, локальные зависимости
+  values-ha.yaml                 topology и измеренные requests/limits
+  templates/
+    deployments.yaml             stateless services; Quota с одним writer
+    storage-statefulset.yaml     identity, selector/labels, PVC templates
+    services.yaml                gRPC Services и headless Storage Service
+    configmaps.yaml              несекретные env
+    serviceaccounts.yaml         минимальные права
+    networkpolicies.yaml         разрешённые межсервисные соединения
+    pdb.yaml                     budgets для добровольных disruption
+```
+
+Это decomposition проекта, не обещание совместимого рабочего chart. Secrets
+поступают через выбранный secret manager; пароли из локального `.env` не должны
+становиться содержимым production values. Миграции Metadata/Users выполняются
+отдельным контролируемым шагом до переключения приложений.
+
+## Пример размещения по failure domains
+
+Для исследования отказа одного домена можно взять три независимых домена A/B/C:
+
+| Компонент | A | B | C |
+|---|---|---|---|
+| Storage при N=3 | replica 1 | replica 2 | replica 3 |
+| Kafka при трёх members | member 1 | member 2 | member 3 |
+| Neo4j при выбранной трёхголосной topology | voter 1 | voter 2 | voter 3 |
+| PostgreSQL | primary | standby | место для восстановления/другой конфигурации |
+| Redis при выбранном Sentinel deployment | primary + sentinel 1 | replica + sentinel 2 | sentinel 3 |
+
+Таблица не задаёт число Kubernetes nodes или production sizing. Домен может быть
+зоной с несколькими узлами; каждую зависимость нужно конфигурировать согласно её
+реальному replication/failover протоколу. Наличие трёх pods само по себе не
+включает репликацию, quorum или failover. Quota остаётся single writer даже при HA Redis.
+
+## Последовательность delivery
+
+```text
+CI: checkout → tests → build из нужного context → registry push с immutable digest
+Deploy: получить credentials → render/validate chart → migrations
+        → rollout → dependency/readiness checks → smoke → зафиксировать результат
+```
+
+При неудачной migration откат image не гарантирует откат схемы. Rollback должен
+быть описан отдельно для совместимых schema changes и для восстановления из backup.
+В smoke входит внутренняя gRPC-проверка; внешний S3 smoke добавляется только после
+появления Gateway. Сначала такой pipeline проверяется в dev namespace.

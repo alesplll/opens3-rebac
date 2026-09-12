@@ -3,7 +3,11 @@
 Rust 1.95 gRPC-сервис учёта лимитов пользователей и buckets. Горячее состояние
 находится в памяти (`DashMap`), Redis используется для периодического сохранения.
 
-## Архитектура
+## Назначение и возможности
+
+Учёт bytes/objects/buckets, резервирование квоты, компенсация расхода, настройка лимитов и удаление subject. Сервис не хранит байты и не проверяет права AuthZ.
+
+## Архитектура и зависимости
 
 ```text
 gRPC handler → QuotaService → MemoryCache (DashMap)
@@ -31,7 +35,7 @@ src/metrics.rs              OpenTelemetry metrics
 tests/                      gRPC и Redis integration tests
 ```
 
-## API и семантика
+## API
 
 Source of truth: `shared/api/quota/v1/quota.proto`.
 
@@ -71,7 +75,9 @@ DeleteObject: UpdateUsage(bytes=-size, objects=-1)
 Если после allowed reserve операция завершилась успешно, положительный
 `UpdateUsage` для той же дельты не вызывается.
 
-## Границы консистентности
+## Данные и основные сценарии
+
+### Границы консистентности
 
 Операция над одной записью DashMap синхронизирована внутри одного процесса.
 Резерв пользователя и bucket — два шага с компенсацией user при отказе bucket.
@@ -83,7 +89,13 @@ deployment должен иметь одного active writer.
 lock-free структура. Оценки nanoseconds для map operation нельзя переносить на
 полный gRPC request без benchmark.
 
-## Persistence
+### Persistence
+
+При старте service загружает usage и limits из Redis в память; ошибка загрузки
+останавливает startup. SetQuota меняет cache и синхронно сохраняет limits в Redis;
+если сохранение не удалось, cache уже изменён. GetUsage неизвестного subject
+возвращает нули. GetQuota возвращает сохранённый limit или отсутствие записи;
+defaults при CheckQuota и отсутствие настроенного limit — разные ситуации.
 
 Фоновый task вызывает flush с интервалом `REDIS_FLUSH_INTERVAL_MS`. В текущем
 development `.env` это 500 ms, default кода — 1000 ms. Интервал не является
@@ -125,45 +137,90 @@ Dockerfile устанавливает его через `protobuf-dev`.
 используется container address Redis; при запуске с хоста — опубликованный host
 address.
 
-## Запуск и тесты
+### Дополнительные переменные
 
-```bash
-cargo test -p quota-service
-cargo run -p quota-service
-```
+| Переменная | Default кода / назначение |
+|---|---|
+| `REDIS_PASSWORD` | не задан; используется при формировании URL |
+| `SERVICE_NAME`, `ENVIRONMENT` | `quota`, `development` |
+| `LOG_LEVEL`, `LOG_JSON` | `info`, `true` |
+| `ENABLE_OTLP`, `OTLP_ENDPOINT` | `false`, `http://otel-collector:4317` |
 
-В Docker из корня:
+Все лимиты перечислены выше; `-1` означает unlimited. Redis DB 1 отделяет Quota
+от AuthZ DB 0. Параметры загружаются один раз в `OnceLock`.
 
-```bash
-docker compose --profile services up --build -d quota
-docker compose logs -f quota
-```
+## Запуск
 
-`DeleteSubject` уже подключён в proto и gRPC handler. Одновременный delete и ранее
-начатый flush требуют координации: удаление dirty mark само по себе не гарантирует,
-что старый snapshot никогда не будет записан позже.
+### Локально
 
-## Варианты запуска
-
-Только Redis и локальный process:
+Из корня репозитория, с установленным Rust toolchain и `protoc`:
 
 ```bash
 docker compose up -d redis
+docker compose --profile services stop quota
 cargo run -p quota-service
 ```
 
-Полный container profile:
+Запуск из корня использует defaults и окружение корня: Redis localhost, DB 1,
+flush 1000 ms. Чтобы читать сервисный `.env`, запускайте Cargo из `services/quota`;
+в нём flush 500 ms. Не запускайте контейнер и local process одновременно на 50055.
+
+### Docker
+
+Из корня:
 
 ```bash
 docker compose --profile services up --build -d quota
 docker compose logs -f quota
 ```
 
-OTLP traces/metrics появляются только при доступном collector и корректном
-endpoint. `HealthCheck` проверяет repository, но не доказывает отсутствие потерь
-между in-memory reserve и следующим flush.
+Compose переопределяет Redis address на `redis`, включает OTLP и задаёт
+`http://otel-collector:4317`. Collector запускается через `make up-observability`.
 
-## Проверки
+## Примеры использования
+
+Пример резервирует 3 байта и один объект, затем освобождает резерв без записи файла.
+Выполняйте компенсацию только после `allowed=true`:
+
+```bash
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo","bucket_id":"bucket:docs-demo","delta":{"bytes":"3","objects":"1"}}' \
+  localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo"}' \
+  localhost:50055 opens3.quota.v1.QuotaService/GetUsage
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo","bucket_id":"bucket:docs-demo","delta":{"bytes":"-3","objects":"-1"}}' \
+  localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
+```
+
+`allowed=false` и `code` описывают отказ квоты в обычном ответе. При timeout нельзя
+вслепую повторить reserve или compensation: результат первой мутации неизвестен.
+В SetQuota указывайте все три лимита; пропущенный числовой protobuf field равен
+нулю, для unlimited нужен `-1`.
+
+## Наблюдаемость и диагностика
+
+```bash
+grpcurl -plaintext localhost:50055 opens3.quota.v1.QuotaService/HealthCheck
+```
+
+RPC проверяет Redis. При сбое flush смотрите `quota_redis_flush_errors_total`,
+`quota_redis_flush_total`, `quota_redis_flush_entries` и `quota_redis_flush_duration_seconds`
+из [src/metrics.rs](src/metrics.rs). Dashboard: [quota.json](../../infra/otel/grafana/dashboards/quota.json).
+После неуспешного flush dirty keys сохраняются для повтора; это не защищает от падения процесса до сохранения памяти.
+
+## Разработка и тесты
+
+Отдельные suites (из корня; Redis DB 15 должен быть выделен для тестов):
+
+```bash
+cargo test -p quota-service --test grpc
+TEST_REDIS_URL=redis://localhost:6379/15 cargo test -p quota-service --test redis -- --include-ignored
+```
+
+Redis tests помечены `#[ignore]`; обычный `cargo test` их не запускает. Даже с
+`--include-ignored` они возвращаются без проверки, если подключение не удалось:
+проверяйте доступность Redis, а не только итоговый exit code.
+Rust stubs создаёт `build.rs` при Cargo build; shared Go/Python clients обновляются
+через `make generate-quota-go` / `make generate-quota-py` после `make install-deps`.
 
 ```bash
 cargo fmt -p quota-service -- --check
@@ -174,7 +231,7 @@ cargo test -p quota-service
 Redis integration tests запускаются согласно `.github/workflows/quota-ci.yml` и
 требуют доступный Redis. gRPC tests поднимают in-process Tonic server.
 
-## Варианты дальнейшей консистентности
+## Ограничения и дальнейшие работы
 
 - **Один active writer:** текущий простой вариант для стенда.
 - **Redis atomic reserve:** общий state для replicas, но Redis входит в hot path.
@@ -182,3 +239,9 @@ Redis integration tests запускаются согласно `.github/workflo
   но требуют cleanup/reconciliation.
 
 Выбор зависит от допустимой latency и требуемой строгости лимита.
+
+## Связанные документы
+
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).
