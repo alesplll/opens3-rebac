@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>OpenS3-ReBAC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="deck-stage.js"></script>
+<style>
+  :root {
+    --bg: #0F0F1A;
+    --bg-2: #1A1A2E;
+    --panel: rgba(255,255,255,0.04);
+    --panel-2: rgba(255,255,255,0.07);
+    --border: rgba(255,255,255,0.08);
+    --border-2: rgba(255,255,255,0.14);
+    --text: #FFFFFF;
+    --muted: #B0B0C0;
+    --dim: #6E6E85;
+    --orange: #FF6B35;
+    --teal: #4ECDC4;
+    --purple: #7B68EE;
+    --red-bg: #2A1A1A;
+    --green-bg: #1A2A1A;
+  }
+
+  html, body { margin:0; padding:0; background:#000; color:var(--text); font-family:'Inter',sans-serif; -webkit-font-smoothing:antialiased; }
+
+  deck-stage { background:#000; }
+
+  section.slide {
+    position:relative;
+    width:1920px;
+    height:1080px;
+    background:var(--bg);
+    color:var(--text);
+    overflow:hidden;
+    font-family:'Inter',sans-serif;
+    font-weight:400;
+  }
+
+  /* Background decorations */
+  .grid-bg {
+    position:absolute; inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 64px 64px;
+    pointer-events:none;
+  }
+  .glow-orange {
+    position:absolute;
+    width:900px; height:900px;
+    background: radial-gradient(circle at center, rgba(255,107,53,0.22), transparent 65%);
+    filter: blur(20px);
+    pointer-events:none;
+  }
+  .glow-teal {
+    position:absolute;
+    width:900px; height:900px;
+    background: radial-gradient(circle at center, rgba(78,205,196,0.18), transparent 65%);
+    filter: blur(20px);
+    pointer-events:none;
+  }
+  .glow-purple {
+    position:absolute;
+    width:700px; height:700px;
+    background: radial-gradient(circle at center, rgba(123,104,238,0.18), transparent 65%);
+    filter: blur(20px);
+    pointer-events:none;
+  }
+
+  /* Page chrome */
+  .page-num {
+    position:absolute;
+    right:48px; bottom:36px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+    color:var(--dim);
+    letter-spacing:0.08em;
+    z-index:10;
+  }
+  .page-tag {
+    position:absolute;
+    left:64px; top:48px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    color:var(--dim);
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    z-index:10;
+  }
+  .page-tag::before {
+    content:""; display:inline-block;
+    width:8px; height:8px; border-radius:50%;
+    background:var(--orange);
+    margin-right:12px;
+    vertical-align:middle;
+    box-shadow: 0 0 12px var(--orange);
+  }
+
+  /* Reusable */
+  .h1 { font-weight:800; font-size:64px; line-height:1.05; letter-spacing:-0.02em; }
+  .h2 { font-weight:700; font-size:44px; line-height:1.1; letter-spacing:-0.015em; }
+  .eyebrow { font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--orange); letter-spacing:0.2em; text-transform:uppercase; }
+  .muted { color:var(--muted); font-weight:300; }
+  .mono { font-family:'JetBrains Mono',monospace; }
+
+  .card {
+    background: var(--panel);
+    border:1px solid var(--border);
+    border-radius:18px;
+    padding:32px;
+    backdrop-filter: blur(8px);
+  }
+
+  .stat-num { font-weight:800; font-size:88px; line-height:1; letter-spacing:-0.04em; color:var(--orange); }
+  .stat-label { color:var(--muted); font-size:16px; font-weight:400; margin-top:12px; }
+
+  .pill {
+    display:inline-flex; align-items:center; gap:8px;
+    padding: 6px 14px;
+    border-radius:999px;
+    border:1px solid var(--border-2);
+    background:rgba(255,255,255,0.04);
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    color:var(--muted);
+  }
+
+  /* ---- Slide 1: Title ---- */
+  .s-title {
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    text-align:center;
+  }
+  .s-title .glow-1 { left:-280px; top:-280px; }
+  .s-title .glow-2 { right:-280px; bottom:-280px; }
+  .s-title h1 {
+    font-weight:900;
+    font-size:200px;
+    line-height:0.95;
+    letter-spacing:-0.05em;
+    margin:0;
+    background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 55%, #FF6B35 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    position:relative;
+    z-index:2;
+  }
+  .s-title .sub {
+    margin-top:36px;
+    font-size:30px;
+    font-weight:300;
+    color:var(--muted);
+    max-width:1200px;
+    line-height:1.4;
+    position:relative; z-index:2;
+  }
+  .s-title .meta {
+    position:absolute;
+    bottom:80px;
+    left:50%;
+    transform:translateX(-50%);
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+    color:var(--dim);
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+  }
+  .s-title .corner-l, .s-title .corner-r {
+    position:absolute;
+    width:120px; height:120px;
+    border:1px solid rgba(255,255,255,0.15);
+  }
+  .s-title .corner-l { top:64px; left:64px; border-right:none; border-bottom:none; }
+  .s-title .corner-r { bottom:64px; right:64px; border-left:none; border-top:none; }
+
+  /* Section heading common */
+  .body { padding: 130px 96px 96px; box-sizing:border-box; height:100%; display:flex; flex-direction:column; }
+  .head-row { display:flex; align-items:flex-end; justify-content:space-between; gap:32px; margin-bottom:48px; }
+  .head-row .h2 { max-width: 1300px; }
+
+  /* ---- Slide 2 ---- */
+  .bullets-row { display:grid; grid-template-columns: repeat(3, 1fr); gap:24px; margin-bottom:56px; }
+  .bullet {
+    border-left:2px solid var(--orange);
+    padding:6px 0 6px 20px;
+    color:var(--text);
+    font-size:20px;
+    line-height:1.5;
+    font-weight:400;
+  }
+  .bullet:nth-child(2) { border-left-color: var(--teal); }
+  .bullet:nth-child(3) { border-left-color: var(--purple); }
+  .stats-row { display:grid; grid-template-columns: repeat(4, 1fr); gap:28px; flex:1; }
+  .stat-card {
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-radius:24px;
+    padding: 56px 40px;
+    display:flex; flex-direction:column; justify-content:center;
+    position:relative;
+    overflow:hidden;
+  }
+  .stat-card::before {
+    content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--orange), transparent);
+    opacity:0.6;
+  }
+  .stat-card:nth-child(2)::before { background: linear-gradient(90deg, transparent, var(--teal), transparent); }
+  .stat-card:nth-child(3)::before { background: linear-gradient(90deg, transparent, var(--purple), transparent); }
+  .stat-card .num { font-weight:800; font-size:120px; line-height:1; letter-spacing:-0.04em; color:var(--orange); }
+  .stat-card:nth-child(2) .num { color: var(--teal); }
+  .stat-card:nth-child(3) .num { color: var(--purple); }
+  .stat-card:nth-child(4) .num { color: var(--orange); }
+  .stat-card .lbl { color:var(--muted); font-size:18px; margin-top:16px; line-height:1.4; }
+
+  /* ---- Slide 3 architecture ---- */
+  .arch-canvas {
+    flex:1;
+    position:relative;
+    border:1px solid var(--border);
+    border-radius:24px;
+    background:
+      radial-gradient(ellipse at top, rgba(255,107,53,0.05), transparent 60%),
+      radial-gradient(ellipse at bottom, rgba(78,205,196,0.05), transparent 60%),
+      rgba(255,255,255,0.02);
+    overflow:hidden;
+  }
+  .arch-canvas .grid-bg { background-size: 32px 32px; opacity:0.4; }
+  .node {
+    position:absolute;
+    background: rgba(255,255,255,0.06);
+    border:1.5px solid var(--border-2);
+    border-radius:14px;
+    padding:14px 20px;
+    text-align:center;
+    backdrop-filter: blur(6px);
+  }
+  .node .n-name { font-weight:600; font-size:18px; }
+  .node .n-meta { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); margin-top:4px; }
+  .node.go { border-color: rgba(78,205,196,0.5); box-shadow: 0 0 24px rgba(78,205,196,0.12); }
+  .node.py { border-color: rgba(255,107,53,0.5); box-shadow: 0 0 24px rgba(255,107,53,0.12); }
+  .node.rs { border-color: rgba(123,104,238,0.55); box-shadow: 0 0 24px rgba(123,104,238,0.14); }
+  .node.db { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+  .node.client { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.08); }
+
+  .legend {
+    position:absolute; left:24px; bottom:20px;
+    display:flex; gap:24px; align-items:center;
+    font-family:'JetBrains Mono',monospace; font-size:12px;
+    color:var(--muted);
+  }
+  .legend .lg-line { display:inline-block; width:36px; height:2px; vertical-align:middle; margin-right:8px; }
+  .legend .lg-grpc { background:var(--teal); }
+  .legend .lg-kafka { border-top: 2px dashed var(--orange); height:0; }
+
+  /* ---- Slide 4 services ---- */
+  .svc-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:22px; flex:1; }
+  .svc {
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-top: 3px solid var(--teal);
+    border-radius:16px;
+    padding:24px 24px 22px;
+    display:flex; flex-direction:column; gap:10px;
+    position:relative;
+  }
+  .svc.go { border-top-color: var(--teal); }
+  .svc.py { border-top-color: var(--orange); }
+  .svc.rs { border-top-color: var(--purple); }
+  .svc .lang-tag {
+    position:absolute; top:18px; right:20px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    padding:3px 8px;
+    border-radius:4px;
+    background: rgba(78,205,196,0.15);
+    color:var(--teal);
+    letter-spacing:0.05em;
+  }
+  .svc.py .lang-tag { background:rgba(255,107,53,0.15); color:var(--orange); }
+  .svc.rs .lang-tag { background:rgba(123,104,238,0.18); color:var(--purple); }
+  .svc .name { font-weight:700; font-size:22px; }
+  .svc .port { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--muted); }
+  .svc .desc { font-size:14px; color:var(--muted); line-height:1.5; font-weight:300; }
+
+  /* ---- Slide 5 infra ---- */
+  .infra-list { display:flex; flex-direction:column; gap:20px; flex:1; }
+  .infra-row {
+    display:grid;
+    grid-template-columns: 280px 1fr 200px;
+    gap:32px;
+    align-items:center;
+    padding:28px 36px;
+    background:rgba(255,255,255,0.03);
+    border:1px solid var(--border);
+    border-radius:16px;
+  }
+  .infra-row .ir-title { font-weight:600; font-size:24px; }
+  .infra-row .ir-tech { display:flex; flex-wrap:wrap; gap:10px; }
+  .infra-row .ir-num { text-align:right; }
+  .infra-row .ir-num .v { font-weight:800; font-size:48px; color:var(--orange); letter-spacing:-0.02em; line-height:1; }
+  .infra-row .ir-num .l { font-size:13px; color:var(--muted); margin-top:6px; }
+  .infra-row:nth-child(1) .v { color: var(--orange); }
+  .infra-row:nth-child(2) .v { color: var(--teal); }
+  .infra-row:nth-child(3) .v { color: var(--purple); }
+  .infra-row:nth-child(4) .v { color: var(--orange); }
+
+  /* ---- Slide 6 proto ---- */
+  .proto-wrap { display:grid; grid-template-columns: 1.1fr 0.9fr; gap:48px; flex:1; }
+  .proto-tree { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .proto-file {
+    padding: 20px 36px;
+    border:1.5px solid var(--orange);
+    background: rgba(255,107,53,0.1);
+    border-radius:12px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;
+    color:var(--orange);
+  }
+  .proto-stubs { display:grid; grid-template-columns: repeat(3, 1fr); gap:18px; margin-top:80px; width:100%; }
+  .stub-box {
+    border:1.5px solid var(--teal);
+    background: rgba(78,205,196,0.06);
+    border-radius:12px;
+    padding:18px;
+    text-align:center;
+  }
+  .stub-box.py { border-color:var(--orange); background: rgba(255,107,53,0.06); }
+  .stub-box.rs { border-color:var(--purple); background: rgba(123,104,238,0.06); }
+  .stub-box .lang { font-weight:700; font-size:18px; }
+  .stub-box .gen { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-top:4px; }
+  .proto-info { display:flex; flex-direction:column; justify-content:center; gap:18px; }
+  .proto-info .item {
+    display:flex; gap:18px; align-items:flex-start;
+    padding:14px 0;
+    border-bottom:1px solid var(--border);
+  }
+  .proto-info .item:last-of-type { border-bottom:none; }
+  .proto-info .num { font-family:'JetBrains Mono',monospace; color:var(--orange); font-size:14px; min-width:32px; padding-top:4px; }
+  .proto-info .txt { font-size:18px; line-height:1.4; }
+  .entity-pills { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+  .entity-pills .pill { font-size:14px; padding:8px 14px; }
+
+  /* ---- Slide 7 ACL vs ReBAC ---- */
+  .vs-wrap { display:grid; grid-template-columns: 1fr 1fr; flex:1; gap:0; position:relative; }
+  .vs-side { padding: 36px 56px; display:flex; flex-direction:column; gap:24px; border-radius:20px; }
+  .vs-side.l { background: rgba(170, 60, 60, 0.06); border:1px solid rgba(170,60,60,0.25); margin-right:30px; }
+  .vs-side.r { background: rgba(78,205,196, 0.05); border:1px solid rgba(78,205,196,0.3); margin-left:30px; }
+  .vs-divider {
+    position:absolute; left:50%; top:0; bottom:0;
+    transform:translateX(-50%);
+    width:60px; display:flex; align-items:center; justify-content:center;
+    z-index:5;
+  }
+  .vs-divider .vs {
+    width:60px; height:60px; border-radius:50%;
+    background:var(--bg);
+    border:1px solid var(--border-2);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:18px;
+    color:var(--muted);
+    font-family:'JetBrains Mono',monospace;
+  }
+  .vs-title { font-weight:700; font-size:32px; }
+  .vs-side.l .vs-title { color: #E07A7A; }
+  .vs-side.r .vs-title { color: var(--teal); }
+  .vs-side ul { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:14px; }
+  .vs-side li { font-size:17px; line-height:1.5; padding-left:24px; position:relative; color:var(--text); font-weight:300; }
+  .vs-side li::before { content:""; position:absolute; left:0; top:11px; width:8px; height:8px; border-radius:50%; }
+  .vs-side.l li::before { background:#E07A7A; }
+  .vs-side.r li::before { background:var(--teal); }
+  .vs-side .punch { font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--muted); padding:14px 16px; border:1px dashed var(--border-2); border-radius:8px; }
+  .vs-side .mini { flex:1; min-height:160px; display:flex; align-items:center; justify-content:center; }
+
+  /* ---- Slide 8 graph ---- */
+  .graph-wrap { display:grid; grid-template-columns: 1fr 280px; gap:48px; flex:1; }
+  .graph-canvas { position:relative; border:1px solid var(--border); border-radius:20px; background: rgba(255,255,255,0.02); overflow:hidden; }
+  .gnode {
+    position:absolute;
+    border-radius:50%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center;
+    border:2px solid;
+    font-size:13px;
+  }
+  .gnode .label { font-family:'JetBrains Mono',monospace; padding: 0 8px; }
+  .gnode.user { background: rgba(78,205,196,0.18); border-color: var(--teal); color:var(--teal); }
+  .gnode.group { background: rgba(123,232,123,0.18); border-color: #7BE87B; color:#7BE87B; }
+  .gnode.bucket { background: rgba(255,107,53,0.18); border-color: var(--orange); color:var(--orange); }
+  .gnode.object { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.4); color:#DDD; }
+
+  .perm-scale {
+    display:flex; flex-direction:column;
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:24px;
+    background: rgba(255,255,255,0.02);
+  }
+  .perm-scale .ps-title { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:18px; }
+  .perm-scale .row { display:flex; align-items:center; gap:12px; padding:10px 0; }
+  .perm-scale .row .name { font-weight:600; width:64px; font-size:15px; font-family:'JetBrains Mono',monospace; }
+  .perm-scale .row .bar { flex:1; height:14px; border-radius:4px; }
+  .perm-scale .row .desc { font-size:12px; color:var(--muted); position:absolute; }
+
+  .latency-banner {
+    margin-top:24px;
+    padding: 22px 32px;
+    background: linear-gradient(90deg, rgba(255,107,53,0.12), rgba(255,107,53,0.02));
+    border:1px solid rgba(255,107,53,0.4);
+    border-radius:14px;
+    display:flex; align-items:center; justify-content:space-between; gap:32px;
+  }
+  .latency-banner .big { font-weight:800; font-size:36px; color:var(--orange); letter-spacing:-0.02em; }
+  .latency-banner .lbl { color:var(--muted); font-size:15px; }
+
+  /* ---- Slide 9 cache ---- */
+  .cache-flow { flex:1; display:flex; flex-direction:column; gap:40px; }
+  .flow-line { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .flow-line .step {
+    padding:18px 24px;
+    border-radius:14px;
+    background: rgba(255,255,255,0.05);
+    border:1px solid var(--border-2);
+    font-weight:500;
+    font-size:15px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .flow-line .step.hit { border-color: var(--teal); background:rgba(78,205,196,0.08); }
+  .flow-line .step.miss { border-color: rgba(255,107,53,0.6); background:rgba(255,107,53,0.06); }
+  .flow-line .step.invalidate { border-color: var(--purple); background:rgba(123,104,238,0.08); }
+  .flow-line .arrow { color:var(--muted); font-size:20px; font-family:'JetBrains Mono',monospace; }
+  .flow-line .arrow .tag { font-size:11px; color:var(--orange); margin-right:6px; }
+  .flow-line .arrow .tag.t { color:var(--teal); }
+  .cache-metrics { display:grid; grid-template-columns: repeat(3, 1fr); gap:24px; }
+  .cache-metrics .card { padding: 32px 36px; }
+  .cache-metrics .v { font-weight:800; font-size:64px; letter-spacing:-0.03em; line-height:1; }
+  .cache-metrics .l { color:var(--muted); font-size:15px; margin-top:10px; }
+  .cache-metrics .card:nth-child(1) .v { color:var(--orange); }
+  .cache-metrics .card:nth-child(2) .v { color:var(--teal); }
+  .cache-metrics .card:nth-child(3) .v { color:var(--teal); }
+
+  /* ---- Slide 10 quota ---- */
+  .quota-wrap { display:grid; grid-template-columns: 1.4fr 1fr; gap:40px; flex:1; }
+  .quota-flow { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:18px; padding:32px; }
+  .qstep {
+    padding:14px 20px;
+    background: rgba(123,104,238,0.06);
+    border:1px solid rgba(123,104,238,0.4);
+    border-radius:10px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+    color:#DDD;
+    display:inline-flex;
+  }
+  .qstep.fail { border-color: rgba(255,107,53,0.5); background: rgba(255,107,53,0.06); color:#FFB89C; }
+  .qstep.commit { border-color: var(--teal); background: rgba(78,205,196,0.1); color:var(--teal); }
+  .qarrow { width:2px; background:var(--border-2); margin: 6px 0 6px 28px; height:22px; }
+  .qhoriz { display:flex; align-items:center; gap:14px; }
+  .qhoriz .arr { color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:13px; }
+  .quota-metrics { display:flex; flex-direction:column; gap:16px; }
+  .qm-card {
+    background: rgba(123,104,238,0.05);
+    border:1px solid rgba(123,104,238,0.25);
+    border-radius:14px;
+    padding:22px 26px;
+  }
+  .qm-card .v { font-weight:800; font-size:44px; color:var(--purple); letter-spacing:-0.02em; line-height:1; }
+  .qm-card .l { color:var(--muted); font-size:14px; margin-top:8px; }
+
+  /* ---- Slide 11 kafka ---- */
+  .kafka-wrap { display:grid; grid-template-columns: 1fr 1.2fr 1fr; gap:24px; flex:1; align-items:stretch; }
+  .producers, .consumers { display:flex; flex-direction:column; gap:14px; padding-top:60px; }
+  .producers .ph, .consumers .ph { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:8px; }
+  .pchip {
+    padding:10px 16px;
+    border-radius:10px;
+    background:rgba(78,205,196,0.07);
+    border:1px solid rgba(78,205,196,0.3);
+    font-size:14px;
+    text-align:center;
+  }
+  .cchip {
+    padding:10px 16px;
+    border-radius:10px;
+    background:rgba(255,107,53,0.07);
+    border:1px solid rgba(255,107,53,0.3);
+    font-size:14px;
+    text-align:center;
+  }
+  .kbroker {
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border:1.5px solid var(--border-2);
+    border-radius:18px;
+    padding:24px 18px;
+    display:flex; flex-direction:column; gap:10px;
+    position:relative;
+  }
+  .kbroker::before {
+    content:"KAFKA"; position:absolute; top:14px; left:50%; transform:translateX(-50%);
+    font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.3em; color:var(--orange);
+  }
+  .kbroker { padding-top:42px; }
+  .ktopic {
+    padding:14px 18px;
+    border-radius:8px;
+    background:rgba(0,0,0,0.3);
+    border:1px solid var(--border);
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;
+    color:#DDD;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  /* ---- Slide 12 s3 mapping ---- */
+  .s3-table { display:flex; flex-direction:column; gap:14px; }
+  .s3-row { display:grid; grid-template-columns: 320px 60px 1fr; gap:20px; align-items:center; padding: 14px 24px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:12px; }
+  .s3-op { font-family:'JetBrains Mono',monospace; font-size:18px; color:var(--teal); }
+  .s3-arrow { font-family:'JetBrains Mono',monospace; color:var(--orange); font-size:18px; text-align:center; }
+  .s3-rebac { font-family:'JetBrains Mono',monospace; font-size:15px; color:#DDD; }
+  .s3-rebac .ok { color:#7BE87B; }
+  .s3-flow {
+    margin-top:24px;
+    padding:18px 24px;
+    background: rgba(255,255,255,0.03);
+    border:1px solid var(--border);
+    border-radius:14px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    color:var(--muted);
+    text-align:center;
+  }
+  .s3-flow .b { color:#FFF; }
+  .s3-flow .t { color:var(--teal); }
+  .s3-flow .o { color:var(--orange); }
+
+  /* ---- Slide 13 observability ---- */
+  .obs-cols { display:grid; grid-template-columns: repeat(3, 1fr); gap:0; flex:1; }
+  .obs-col { padding: 0 36px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:18px; }
+  .obs-col:last-child { border-right:none; }
+  .obs-col:first-child { padding-left:0; }
+  .obs-icon { width:64px; height:64px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:30px; }
+  .obs-icon.t { background: rgba(78,205,196,0.12); color:var(--teal); }
+  .obs-icon.m { background: rgba(255,107,53,0.12); color:var(--orange); }
+  .obs-icon.l { background: rgba(123,104,238,0.12); color:var(--purple); }
+  .obs-col h3 { font-weight:700; font-size:28px; margin:0; }
+  .obs-col ul { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:14px; }
+  .obs-col li { font-size:16px; line-height:1.5; color:#DDD; padding-left:18px; position:relative; font-weight:300; }
+  .obs-col li::before { content:""; position:absolute; left:0; top:9px; width:6px; height:6px; border-radius:50%; background:var(--muted); }
+
+  .obs-strip {
+    margin-top:32px;
+    padding: 22px 36px;
+    background: linear-gradient(90deg, rgba(78,205,196,0.06), rgba(255,107,53,0.06), rgba(123,104,238,0.06));
+    border:1px solid var(--border-2);
+    border-radius:14px;
+    display:flex; align-items:center; justify-content:space-around; gap:24px;
+  }
+  .obs-strip .item { text-align:center; }
+  .obs-strip .v { font-weight:700; font-size:28px; letter-spacing:-0.02em; }
+  .obs-strip .v.o { color:var(--orange); }
+  .obs-strip .v.t { color:var(--teal); }
+  .obs-strip .v.p { color:var(--purple); }
+  .obs-strip .l { color:var(--muted); font-size:13px; margin-top:4px; }
+
+  /* ---- Slide 14 results ---- */
+  .res-grid { display:grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap:24px; flex:1; }
+  .res-card {
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-radius:18px;
+    padding:36px 36px 30px;
+    display:flex; flex-direction:column;
+    position:relative; overflow:hidden;
+  }
+  .res-card .v { font-weight:800; font-size:88px; color:var(--orange); letter-spacing:-0.04em; line-height:1; }
+  .res-card .lbl { font-size:18px; font-weight:500; margin-top:14px; }
+  .res-card .sub { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--muted); margin-top:6px; }
+  .res-card .bar { height:6px; border-radius:3px; background:rgba(255,255,255,0.08); overflow:hidden; margin-top:auto; }
+  .res-card .bar .fill { height:100%; background:var(--orange); }
+  .res-card.t .v, .res-card.t .bar .fill { color:var(--teal); background:var(--teal); }
+  .res-card.t .v { background:none; color:var(--teal); }
+  .res-card.p .v, .res-card.p .bar .fill { color:var(--purple); background:var(--purple); }
+  .res-card.p .v { background:none; color:var(--purple); }
+  .res-card.t .bar { background:rgba(255,255,255,0.08); }
+  .res-card.t .bar .fill { background:var(--teal); }
+  .res-card.p .bar { background:rgba(255,255,255,0.08); }
+  .res-card.p .bar .fill { background:var(--purple); }
+
+  /* ---- Slide 15 conclusions ---- */
+  .concl-list { display:flex; flex-direction:column; gap:36px; flex:1; justify-content:center; max-width:1500px; }
+  .concl-item { display:flex; gap:28px; align-items:flex-start; }
+  .concl-dot { width:20px; height:20px; border-radius:50%; flex-shrink:0; margin-top:10px; }
+  .concl-dot.o { background:var(--orange); box-shadow: 0 0 18px rgba(255,107,53,0.5); }
+  .concl-dot.t { background:var(--teal); box-shadow: 0 0 18px rgba(78,205,196,0.5); }
+  .concl-dot.p { background:var(--purple); box-shadow: 0 0 18px rgba(123,104,238,0.5); }
+  .concl-text { font-size:32px; line-height:1.4; font-weight:400; }
+  .concl-text b { font-weight:700; }
+  .concl-text .em-o { color:var(--orange); font-weight:600; }
+  .concl-text .em-t { color:var(--teal); font-weight:600; }
+  .concl-text .em-p { color:var(--purple); font-weight:600; }
+
+  /* ---- Slide 16 thanks ---- */
+  .s-thanks { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .s-thanks h1 { font-weight:900; font-size:160px; line-height:0.95; letter-spacing:-0.04em; margin:0;
+    background: linear-gradient(135deg, #FFFFFF 0%, #4ECDC4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    position:relative; z-index:2;
+  }
+  .s-thanks .sub { margin-top:32px; font-size:48px; font-weight:300; color:#FFF; position:relative; z-index:2; }
+  .s-thanks .repo {
+    margin-top:80px;
+    padding:18px 36px;
+    border:1px solid var(--border-2);
+    border-radius:999px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:20px;
+    color:var(--orange);
+    background:rgba(255,107,53,0.06);
+    position:relative; z-index:2;
+  }
+  .s-thanks .repo::before { content:"↗ "; color:var(--muted); }
+
+</style>
+</head>
+<body>
+
+<script type="application/json" id="speaker-notes">[]</script>
+
+<deck-stage>
+
+  <!-- ============ SLIDE 1: TITLE ============ -->
+  <section class="slide s-title" data-screen-label="01 Title">
+    <div class="grid-bg"></div>
+    <div class="glow-orange glow-1"></div>
+    <div class="glow-teal glow-2"></div>
+    <div class="corner-l"></div>
+    <div class="corner-r"></div>
+    <h1>OpenS3<span style="color:var(--orange); -webkit-text-fill-color: var(--orange);">·</span>ReBAC</h1>
+    <div class="sub">Распределённое объектное хранилище<br>с авторизацией на графе отношений</div>
+    <div class="meta">КОМАНДА ИЗ 4 ЧЕЛОВЕК  ·  2026</div>
+  </section>
+
+  <!-- ============ SLIDE 2: WHAT WE BUILT ============ -->
+  <section class="slide" data-screen-label="02 Что мы построили">
+    <div class="grid-bg"></div>
+    <div class="page-tag">02 — Что мы построили</div>
+    <div class="page-num">02 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Overview</div>
+          <div class="h2">Полноценное S3-совместимое<br>хранилище с ReBAC-авторизацией</div>
+        </div>
+      </div>
+      <div class="bullets-row">
+        <div class="bullet">S3-wire-совместимое хранилище — собственная модель авторизации вместо IAM</div>
+        <div class="bullet">Модель доступа ReBAC: граф отношений вместо статических списков</div>
+        <div class="bullet">Production-grade: observability, квотирование, event-driven архитектура</div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><div class="num">7</div><div class="lbl">микросервисов</div></div>
+        <div class="stat-card"><div class="num">3</div><div class="lbl">языка<br><span class="mono" style="font-size:13px;color:var(--dim)">Go · Python · Rust</span></div></div>
+        <div class="stat-card"><div class="num">6</div><div class="lbl">баз данных<br>и брокеров</div></div>
+        <div class="stat-card"><div class="num">~24K</div><div class="lbl">строк кода</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 3: ARCHITECTURE ============ -->
+  <section class="slide" data-screen-label="03 Архитектура">
+    <div class="grid-bg"></div>
+    <div class="page-tag">03 — Архитектура: общий вид</div>
+    <div class="page-num">03 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Architecture</div>
+          <div class="h2">Микросервисная архитектура, максимальная изоляция</div>
+        </div>
+        <div class="muted" style="font-size:16px; max-width:420px; text-align:right;">7 микросервисов, gRPC между ними,<br>Kafka для асинхронных событий</div>
+      </div>
+
+      <div class="arch-canvas">
+
+        <!--
+          Grid plan (viewBox 1700 x 720, preserveAspectRatio=none)
+          Reserved Kafka strip: x = 1600..1680
+          Working area: x = 40..1580 (1540px)
+          Services centers (6 cols): 168, 416, 664, 912, 1160, 1408
+          Rows: Client y=40-100 | Gateway y=155-235 | Services y=320-400 | DBs y=510-590
+        -->
+        <svg style="position:absolute; inset:0; width:100%; height:100%;" viewBox="0 0 1726 721" preserveAspectRatio="none">
+          <defs>
+            <marker id="arrT" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#4ECDC4"/>
+            </marker>
+            <marker id="arrO" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#FF6B35"/>
+            </marker>
+            <marker id="arrW" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#FFFFFF"/>
+            </marker>
+          </defs>
+
+          <!-- Client -> Gateway (white, vertical) -->
+          <line x1="788" y1="100" x2="788" y2="155" stroke="#FFFFFF" stroke-width="2" opacity="0.7"/>
+
+          <!-- Gateway bottom-edge center (788, 235) -> each service top-edge center (cx, 320) -->
+          <line x1="788" y1="235" x2="168"  y2="320" stroke="#4ECDC4" stroke-width="2"/>
+          <line x1="788" y1="235" x2="416"  y2="320" stroke="#4ECDC4" stroke-width="2"/>
+          <line x1="788" y1="235" x2="664"  y2="320" stroke="#4ECDC4" stroke-width="2"/>
+          <line x1="788" y1="235" x2="912"  y2="320" stroke="#4ECDC4" stroke-width="2"/>
+          <line x1="788" y1="235" x2="1160" y2="320" stroke="#4ECDC4" stroke-width="2"/>
+          <line x1="788" y1="235" x2="1408" y2="320" stroke="#4ECDC4" stroke-width="2"/>
+
+          <!-- Auth right-edge center -> Users left-edge center -->
+          <line x1="268" y1="360" x2="316" y2="360" stroke="#4ECDC4" stroke-width="1.5"/>
+
+          <!-- Service bottom-edge center -> DB top-edge center -->
+          <line x1="168"  y1="400" x2="168"  y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <line x1="416"  y1="400" x2="416"  y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <!-- AuthZ bottom-edge center (664,400) -> Neo4j (604,510) and Redis (724,510) -->
+          <line x1="664"  y1="400" x2="604"  y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <line x1="664"  y1="400" x2="724"  y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <line x1="912"  y1="400" x2="912"  y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <line x1="1160" y1="400" x2="1160" y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+          <line x1="1408" y1="400" x2="1408" y2="510" stroke="#4ECDC4" stroke-width="1.5"/>
+
+          <!-- Kafka bus: producer top-edge centers -> bus -> Kafka strip left-edge center (1600, 290) -->
+          <line x1="416"  y1="320" x2="416"  y2="290" stroke="#FF6B35" stroke-width="1.5" stroke-dasharray="7 5" opacity="0.55"/>
+          <line x1="664"  y1="320" x2="664"  y2="290" stroke="#FF6B35" stroke-width="1.5" stroke-dasharray="7 5" opacity="0.55"/>
+          <line x1="912"  y1="320" x2="912"  y2="290" stroke="#FF6B35" stroke-width="1.5" stroke-dasharray="7 5" opacity="0.55"/>
+          <line x1="1160" y1="320" x2="1160" y2="290" stroke="#FF6B35" stroke-width="1.5" stroke-dasharray="7 5" opacity="0.55"/>
+          <line x1="416"  y1="290" x2="1600" y2="290" stroke="#FF6B35" stroke-width="1.5" stroke-dasharray="7 5" opacity="0.55"/>
+        </svg>
+
+        <!-- Row 1: Client -->
+        <div class="node client" style="left:688px; top:40px; width:200px; height:60px; box-sizing:border-box; padding:10px 16px;">
+          <div class="n-name">Client</div>
+          <div class="n-meta">S3 API · HTTP</div>
+        </div>
+
+        <!-- Row 2: Gateway -->
+        <div class="node go" style="left:520px; top:155px; width:536px; height:80px; box-sizing:border-box; padding:18px 16px;">
+          <div class="n-name" style="font-size:22px;">Gateway</div>
+          <div class="n-meta">единая точка входа · S3 API → gRPC</div>
+        </div>
+
+        <!-- Row 3: Services (6 columns, centers at 168,416,664,912,1160,1408; width 200) -->
+        <div class="node go" style="left:68px;   top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">Auth</div><div class="n-meta">JWT · rate limit</div></div>
+        <div class="node go" style="left:316px;  top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">Users</div><div class="n-meta">identity store · credentials</div></div>
+        <div class="node py" style="left:564px;  top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">AuthZ</div><div class="n-meta">ReBAC · graph</div></div>
+        <div class="node go" style="left:812px;  top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">Metadata</div><div class="n-meta">objects · buckets</div></div>
+        <div class="node go" style="left:1060px; top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">Storage</div><div class="n-meta">blobs · sharded FS</div></div>
+        <div class="node rs" style="left:1308px; top:320px; width:200px; height:80px; box-sizing:border-box; padding:18px 12px;"><div class="n-name">Quota</div><div class="n-meta">in-memory · DashMap</div></div>
+
+        <!-- Row 4: Databases (each strictly under its service; AuthZ has two) -->
+        <!-- Auth: Redis (rate limit) center 168 -->
+        <div class="node db" style="left:108px;  top:510px; width:120px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">Redis</div><div class="n-meta">rate limit</div></div>
+        <!-- Users: Postgres center 416 -->
+        <div class="node db" style="left:356px;  top:510px; width:120px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">PostgreSQL</div><div class="n-meta">users</div></div>
+        <!-- AuthZ: Neo4j (center 604) + Redis cache (center 724) -->
+        <div class="node db" style="left:548px;  top:510px; width:112px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">Neo4j</div><div class="n-meta">graph</div></div>
+        <div class="node db" style="left:668px;  top:510px; width:112px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">Redis</div><div class="n-meta">cache</div></div>
+        <!-- Metadata: Postgres center 912 -->
+        <div class="node db" style="left:852px;  top:510px; width:120px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">PostgreSQL</div><div class="n-meta">metadata</div></div>
+        <!-- Storage: FS center 1160 -->
+        <div class="node db" style="left:1100px; top:510px; width:120px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">FS</div><div class="n-meta">blobs</div></div>
+        <!-- Quota: Redis center 1408 -->
+        <div class="node db" style="left:1348px; top:510px; width:120px; height:80px; box-sizing:border-box; padding:14px 10px;"><div class="n-name" style="font-size:15px;">Redis</div><div class="n-meta">persistence</div></div>
+
+        <!-- Kafka strip (right edge, vertical bar) -->
+        <div style="position:absolute; right:24px; top:40px; bottom:60px; width:78px;
+                    border:1px solid rgba(255,107,53,0.6);
+                    background: linear-gradient(180deg, rgba(255,107,53,0.14), rgba(255,107,53,0.04));
+                    border-radius:14px;
+                    display:flex; flex-direction:column; align-items:center; justify-content:center;
+                    gap:14px;">
+          <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-family:'JetBrains Mono',monospace; font-size:18px; letter-spacing:0.3em; color:var(--orange); font-weight:700;">KAFKA</div>
+          <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.18em; color:var(--muted);">5 topics</div>
+        </div>
+
+        <div class="legend" style="display:flex; flex-direction:column; gap:8px; align-items:flex-start;">
+          <div style="display:flex; gap:24px; align-items:center;">
+            <span><span class="lg-line lg-grpc"></span>gRPC</span>
+            <span><span class="lg-line lg-kafka"></span>Kafka events</span>
+          </div>
+          <div style="display:flex; gap:18px; align-items:center;">
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#4ECDC4; margin-right:8px; vertical-align:middle;"></span>Go</span>
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#FF6B35; margin-right:8px; vertical-align:middle;"></span>Python</span>
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#7B68EE; margin-right:8px; vertical-align:middle;"></span>Rust</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 4: SERVICES ============ -->
+  <section class="slide" data-screen-label="04 Сервисы">
+    <div class="grid-bg"></div>
+    <div class="page-tag">04 — Сервисы и ответственности</div>
+    <div class="page-num">04 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Services</div>
+          <div class="h2">Каждый сервис не знает о внутренностях соседей</div>
+        </div>
+        <div class="muted" style="font-size:16px; text-align:right;">7 сервисов · 3 языка<br>Go · Python · Rust</div>
+      </div>
+
+      <div class="svc-grid" style="grid-template-rows: 1fr 1fr;">
+        <div class="svc go"><span class="lang-tag">GO</span><div class="name">Gateway</div><div class="port">:8080</div><div class="desc">Единая точка входа, трансляция S3 API → gRPC, оркестрация вызовов</div></div>
+        <div class="svc go"><span class="lang-tag">GO</span><div class="name">Auth</div><div class="port">:50050</div><div class="desc">JWT access/refresh токены, rate limiting, защита от брутфорса</div></div>
+        <div class="svc go"><span class="lang-tag">GO</span><div class="name">Users</div><div class="port">:50054</div><div class="desc">CRUD пользователей, bcrypt, валидация credentials</div></div>
+        <div class="svc py"><span class="lang-tag">PY</span><div class="name">AuthZ</div><div class="port">:50051</div><div class="desc">ReBAC на Neo4j, Redis-кэш, аудит в Kafka</div></div>
+        <div class="svc go"><span class="lang-tag">GO</span><div class="name">Metadata</div><div class="port">:50052</div><div class="desc">Реестр объектов и бакетов, PostgreSQL, события жизненного цикла в Kafka</div></div>
+        <div class="svc go"><span class="lang-tag">GO</span><div class="name">Storage</div><div class="port">:50053</div><div class="desc">Blob-хранилище на файловой системе, шардирование директорий</div></div>
+        <div class="svc rs"><span class="lang-tag">RS</span><div class="name">Quota</div><div class="port">:50055</div><div class="desc">In-memory квотирование, DashMap, reserve-and-rollback</div></div>
+        <div class="svc" style="border-top-color:rgba(255,255,255,0.2); background:rgba(255,255,255,0.02); display:flex; align-items:center; justify-content:center;">
+          <div style="text-align:center;">
+            <div class="mono" style="color:var(--dim); font-size:12px; letter-spacing:0.2em; margin-bottom:8px;">PRINCIPLE</div>
+            <div style="font-size:18px; font-weight:500; line-height:1.4;">Service boundaries<br>through Protobuf</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 5: INFRA ============ -->
+  <section class="slide" data-screen-label="05 Инфраструктура">
+    <div class="grid-bg"></div>
+    <div class="page-tag">05 — Инфраструктура</div>
+    <div class="page-num">05 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Infrastructure</div>
+          <div class="h2">Инфраструктура одной командой <span class="mono" style="font-size:32px;color:var(--muted)">docker compose up</span></div>
+        </div>
+      </div>
+
+      <div class="infra-list">
+        <div class="infra-row">
+          <div class="ir-title">Хранение данных</div>
+          <div class="ir-tech">
+            <span class="pill">PostgreSQL ×2</span>
+            <span class="pill">Neo4j 5.21</span>
+            <span class="pill">Redis 7.4</span>
+          </div>
+          <div class="ir-num"><div class="v">4</div><div class="l">движка хранения</div></div>
+        </div>
+        <div class="infra-row">
+          <div class="ir-title">Коммуникация</div>
+          <div class="ir-tech">
+            <span class="pill">gRPC + Protobuf</span>
+            <span class="pill">Apache Kafka 7.7</span>
+          </div>
+          <div class="ir-num"><div class="v">6</div><div class="l">Kafka-топиков</div></div>
+        </div>
+        <div class="infra-row">
+          <div class="ir-title">Observability</div>
+          <div class="ir-tech">
+            <span class="pill">OpenTelemetry</span>
+            <span class="pill">Jaeger</span>
+            <span class="pill">Prometheus</span>
+            <span class="pill">Grafana</span>
+            <span class="pill">Elasticsearch</span>
+            <span class="pill">Kibana</span>
+          </div>
+          <div class="ir-num"><div class="v">100%</div><div class="l">покрытие трейсингом</div></div>
+        </div>
+        <div class="infra-row">
+          <div class="ir-title">Деплой</div>
+          <div class="ir-tech">
+            <span class="pill">Docker Compose</span>
+            <span class="pill">multi-stage builds</span>
+          </div>
+          <div class="ir-num"><div class="v">20</div><div class="l">контейнеров · ~45 сек cold start</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 6: PROTO-DRIVEN ============ -->
+  <section class="slide" data-screen-label="06 Proto-driven">
+    <div class="grid-bg"></div>
+    <div class="page-tag">06 — Proto-driven разработка</div>
+    <div class="page-num">06 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Contracts</div>
+          <div class="h2">Один .proto — три языка</div>
+        </div>
+      </div>
+
+      <div class="proto-wrap">
+        <div class="proto-tree">
+          <div class="proto-file">shared/api/*.proto</div>
+          <svg width="100%" height="100" viewBox="0 0 500 100" preserveAspectRatio="none" style="margin-top:10px;">
+            <line x1="250" y1="0" x2="250" y2="30" stroke="#FF6B35" stroke-width="2"/>
+            <line x1="80" y1="30" x2="420" y2="30" stroke="#FF6B35" stroke-width="2"/>
+            <line x1="80" y1="30" x2="80" y2="80" stroke="#FF6B35" stroke-width="2" marker-end="url(#orangeArr)"/>
+            <line x1="250" y1="30" x2="250" y2="80" stroke="#FF6B35" stroke-width="2" marker-end="url(#orangeArr)"/>
+            <line x1="420" y1="30" x2="420" y2="80" stroke="#FF6B35" stroke-width="2" marker-end="url(#orangeArr)"/>
+            <defs>
+              <marker id="orangeArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#FF6B35"/>
+              </marker>
+            </defs>
+          </svg>
+          <div class="proto-stubs">
+            <div class="stub-box"><div class="lang">Go stub</div><div class="gen">protoc-gen-go</div></div>
+            <div class="stub-box py"><div class="lang">Python stub</div><div class="gen">grpcio-tools</div></div>
+            <div class="stub-box rs"><div class="lang">Rust stub</div><div class="gen">tonic-build</div></div>
+          </div>
+        </div>
+
+        <div class="proto-info">
+          <div class="item">
+            <div class="num">01</div>
+            <div class="txt">Единый источник истины: все API описаны в <b>Protobuf</b></div>
+          </div>
+          <div class="item">
+            <div class="num">02</div>
+            <div class="txt">Автогенерация стабов на этапе билда</div>
+          </div>
+          <div class="item">
+            <div class="num">03</div>
+            <div class="txt">Обратная совместимость через версионирование <span class="mono" style="color:var(--orange)">v1/</span></div>
+          </div>
+          <div class="item">
+            <div class="num">04</div>
+            <div class="txt">Три языка — ноль проблем совместимости</div>
+          </div>
+          <div style="margin-top:8px;">
+            <div class="mono" style="font-size:12px; color:var(--dim); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:12px;">Entity ID</div>
+            <div class="entity-pills">
+              <span class="pill" style="color:var(--teal); border-color:rgba(78,205,196,0.4);">user:alice</span>
+              <span class="pill" style="color:#7BE87B; border-color:rgba(123,232,123,0.4);">group:editors</span>
+              <span class="pill" style="color:var(--orange); border-color:rgba(255,107,53,0.4);">bucket:photos</span>
+              <span class="pill" style="color:#DDD; border-color:var(--border-2);">object:photos/cat.jpg</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 7: ACL vs ReBAC ============ -->
+  <section class="slide" data-screen-label="07 ACL vs ReBAC">
+    <div class="grid-bg"></div>
+    <div class="page-tag">07 — Почему ReBAC, а не ACL</div>
+    <div class="page-num">07 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Authorization model</div>
+          <div class="h2">Граф вместо плоского списка</div>
+        </div>
+      </div>
+
+      <div class="vs-wrap">
+        <div class="vs-side l">
+          <div class="vs-title">ACL</div>
+          <div class="mini">
+            <svg width="380" height="180" viewBox="0 0 380 180">
+              <g font-family="JetBrains Mono" font-size="11" fill="#E07A7A">
+                <rect x="10" y="10" width="360" height="22" fill="rgba(224,122,122,0.1)" stroke="rgba(224,122,122,0.3)"/>
+                <text x="20" y="26">user · resource · permission</text>
+                <rect x="10" y="36" width="360" height="20" fill="rgba(224,122,122,0.06)"/>
+                <text x="20" y="50" fill="#bbb">alice · /photos/cat.jpg · read</text>
+                <rect x="10" y="58" width="360" height="20" fill="rgba(224,122,122,0.06)"/>
+                <text x="20" y="72" fill="#bbb">alice · /photos/dog.jpg · read</text>
+                <rect x="10" y="80" width="360" height="20" fill="rgba(224,122,122,0.06)"/>
+                <text x="20" y="94" fill="#bbb">alice · /photos/trip.jpg · read</text>
+                <rect x="10" y="102" width="360" height="20" fill="rgba(224,122,122,0.06)"/>
+                <text x="20" y="116" fill="#bbb">bob · /photos/cat.jpg · read</text>
+                <rect x="10" y="124" width="360" height="20" fill="rgba(224,122,122,0.06)"/>
+                <text x="20" y="138" fill="#bbb">bob · /photos/dog.jpg · write</text>
+                <text x="20" y="160" fill="#888" font-size="10">… ×N тысяч строк</text>
+              </g>
+            </svg>
+          </div>
+          <ul>
+            <li>Плоский список правил, O(n) при масштабировании</li>
+            <li>Нет транзитивности — группы реализуются руками</li>
+            <li>Дублирование при наследовании прав</li>
+          </ul>
+          <div class="punch">10 000 пользователей × 1 000 ресурсов = миллионы записей</div>
+        </div>
+
+        <div class="vs-side r">
+          <div class="vs-title">ReBAC <span style="color:var(--muted); font-size:18px; font-weight:400;">(наш подход)</span></div>
+          <div class="mini">
+            <svg width="380" height="180" viewBox="0 0 380 180">
+              <defs>
+                <marker id="grnArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#4ECDC4"/>
+                </marker>
+              </defs>
+              <line x1="60" y1="90" x2="160" y2="50" stroke="#4ECDC4" stroke-width="1.5" marker-end="url(#grnArr)"/>
+              <line x1="60" y1="90" x2="160" y2="130" stroke="#4ECDC4" stroke-width="1.5" marker-end="url(#grnArr)"/>
+              <line x1="200" y1="50" x2="290" y2="50" stroke="#4ECDC4" stroke-width="1.5" marker-end="url(#grnArr)"/>
+              <line x1="200" y1="130" x2="290" y2="130" stroke="#4ECDC4" stroke-width="1.5" marker-end="url(#grnArr)"/>
+              <line x1="320" y1="65" x2="320" y2="115" stroke="#4ECDC4" stroke-width="1.5" stroke-dasharray="3 3"/>
+
+              <circle cx="50" cy="90" r="22" fill="rgba(78,205,196,0.18)" stroke="#4ECDC4"/>
+              <text x="50" y="94" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#4ECDC4">user</text>
+
+              <circle cx="180" cy="50" r="22" fill="rgba(123,232,123,0.18)" stroke="#7BE87B"/>
+              <text x="180" y="54" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#7BE87B">group</text>
+
+              <circle cx="180" cy="130" r="22" fill="rgba(123,232,123,0.18)" stroke="#7BE87B"/>
+              <text x="180" y="134" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#7BE87B">group</text>
+
+              <circle cx="320" cy="50" r="22" fill="rgba(255,107,53,0.18)" stroke="#FF6B35"/>
+              <text x="320" y="54" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#FF6B35">bucket</text>
+
+              <circle cx="320" cy="130" r="22" fill="rgba(255,107,53,0.18)" stroke="#FF6B35"/>
+              <text x="320" y="134" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#FF6B35">bucket</text>
+            </svg>
+          </div>
+          <ul>
+            <li>Граф отношений, O(depth) проверка</li>
+            <li>Транзитивность из коробки через MEMBER_OF</li>
+            <li>Иерархия ресурсов: bucket → object автоматически</li>
+          </ul>
+          <div class="punch" style="border-color: rgba(78,205,196,0.4); color:var(--teal);">10 000 пользователей + 50 групп + 1 000 ресурсов = тысячи рёбер</div>
+        </div>
+
+        <div class="vs-divider"><div class="vs">VS</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 8: GRAPH DETAILS ============ -->
+  <section class="slide" data-screen-label="08 Граф авторизации">
+    <div class="grid-bg"></div>
+    <div class="page-tag">08 — Граф авторизации в деталях</div>
+    <div class="page-num">08 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Graph anatomy</div>
+          <div class="h2">Узлы, рёбра, иерархия прав</div>
+        </div>
+      </div>
+
+      <div class="graph-wrap">
+        <div class="graph-canvas">
+          <svg style="position:absolute; inset:0; width:100%; height:100%;" viewBox="0 0 1100 720" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="g8a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#FFFFFF" opacity="0.7"/>
+              </marker>
+            </defs>
+
+            <!-- ============================================== -->
+            <!-- Layout coordinates (all in viewBox 1100x720)   -->
+            <!-- Row 1 (y=140): user @ x=350, group @ x=750     -->
+            <!-- Row 2 (y=380): bucket @ x=550                  -->
+            <!-- Row 3 (y=590): obj @ x=240/550/860             -->
+            <!-- Circle radius = 60                              -->
+            <!-- ============================================== -->
+
+            <!-- ROW 1 -> ROW 1: user -> group (horizontal) -->
+            <!-- user right edge: (350+60, 140)=(410,140); group left edge: (750-60,140)=(690,140) -->
+            <line x1="410" y1="140" x2="690" y2="140"
+                  stroke="#FFFFFF" stroke-width="2" opacity="0.6"
+                  marker-end="url(#g8a)"/>
+            <text x="550" y="118" text-anchor="middle"
+                  font-family="JetBrains Mono, monospace" font-size="15" fill="#B0B0C0">MEMBER_OF</text>
+
+            <!-- ROW 1 -> ROW 2: group bottom -> bucket top (vertical) -->
+            <!-- group is at (750,140); bucket is at (550,380). Bend down then left. -->
+            <!-- Use a slight curve. Start at group bottom (750,200), end at bucket top-right (550+42, 380-42)=(592,338) -->
+            <!-- Simpler: vertical drop from group to a turning point at (750, 380), then approach bucket. Use polyline path that ENDS at bucket edge. -->
+            <!-- Bucket center (550,380), radius 60. The line's last segment should point INTO the bucket center. -->
+            <!-- Use a path: M 750,200 V 290 H 600 (curve into bucket from upper-right). -->
+            <!-- Last segment direction: from (600,290) to (550+cos(225°)*60, 380+sin(225°)*60) = (550-42.4, 380-42.4) = (507.6, 337.6). Hmm complex. -->
+            <!-- Simplest clean: straight line group bottom -> bucket top. -->
+            <!-- group bottom-left edge ~ (750-42, 140+42)=(708, 182). bucket top-right edge ~ (550+42, 380-42)=(592, 338). -->
+            <line x1="708" y1="182" x2="592" y2="338"
+                  stroke="#FFFFFF" stroke-width="2" opacity="0.6"
+                  marker-end="url(#g8a)"/>
+            <!-- HAS_PERMISSION label: along the line, offset to the right -->
+            <text x="680" y="240" font-family="JetBrains Mono, monospace" font-size="14" fill="#FF6B35">HAS_PERMISSION</text>
+            <text x="680" y="262" font-family="JetBrains Mono, monospace" font-size="13" fill="#B0B0C0">level: write</text>
+
+            <!-- ROW 2 -> ROW 3: bucket -> 3 objects -->
+            <!-- bucket bottom: (550, 440). objects top-center: (240, 590-h/2)... actually objects are rect with top at y=560, height=60, so top-center at y=560 -->
+            <!-- left object top-center: (240, 560); middle: (550, 560); right: (860, 560) -->
+
+            <!-- bucket -> left object (diagonal down-left) -->
+            <!-- start at bucket bottom-left edge ~ (550-42, 380+42)=(508, 422); end at left object top: (240, 560) -->
+            <line x1="508" y1="422" x2="280" y2="560"
+                  stroke="#FFFFFF" stroke-width="2" opacity="0.6"
+                  marker-end="url(#g8a)"/>
+
+            <!-- bucket -> middle object (vertical) -->
+            <line x1="550" y1="440" x2="550" y2="560"
+                  stroke="#FFFFFF" stroke-width="2" opacity="0.6"
+                  marker-end="url(#g8a)"/>
+
+            <!-- bucket -> right object (diagonal down-right) -->
+            <line x1="592" y1="422" x2="820" y2="560"
+                  stroke="#FFFFFF" stroke-width="2" opacity="0.6"
+                  marker-end="url(#g8a)"/>
+
+            <!-- PARENT_OF label, between bucket and middle object, slightly right of vertical -->
+            <text x="565" y="500" font-family="JetBrains Mono, monospace" font-size="14" fill="#B0B0C0">PARENT_OF</text>
+
+            <!-- =========== NODES =========== -->
+
+            <!-- user circle @ (350, 140) r=60 -->
+            <g>
+              <circle cx="350" cy="140" r="60"
+                      fill="rgba(78,205,196,0.18)" stroke="#4ECDC4" stroke-width="2"/>
+              <text x="350" y="135" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-weight="700" font-size="16" fill="#4ECDC4">user</text>
+              <text x="350" y="158" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="13" fill="#4ECDC4">alice</text>
+            </g>
+
+            <!-- group circle @ (750, 140) r=60 -->
+            <g>
+              <circle cx="750" cy="140" r="60"
+                      fill="rgba(123,232,123,0.18)" stroke="#7BE87B" stroke-width="2"/>
+              <text x="750" y="135" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-weight="700" font-size="16" fill="#7BE87B">group</text>
+              <text x="750" y="158" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="13" fill="#7BE87B">editors</text>
+            </g>
+
+            <!-- bucket circle @ (550, 380) r=60 -->
+            <g>
+              <circle cx="550" cy="380" r="60"
+                      fill="rgba(255,107,53,0.18)" stroke="#FF6B35" stroke-width="2"/>
+              <text x="550" y="375" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-weight="700" font-size="16" fill="#FF6B35">bucket</text>
+              <text x="550" y="398" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="13" fill="#FF6B35">photos</text>
+            </g>
+
+            <!-- object rectangles, all 160w x 60h, top y=560, centered at x=240/550/860 -->
+            <g>
+              <rect x="160" y="560" width="160" height="60" rx="12"
+                    fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+              <text x="240" y="585" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-size="12" fill="#888">object</text>
+              <text x="240" y="606" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="12" fill="#DDD">photos/cat.jpg</text>
+            </g>
+            <g>
+              <rect x="470" y="560" width="160" height="60" rx="12"
+                    fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+              <text x="550" y="585" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-size="12" fill="#888">object</text>
+              <text x="550" y="606" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="12" fill="#DDD">photos/dog.jpg</text>
+            </g>
+            <g>
+              <rect x="780" y="560" width="160" height="60" rx="12"
+                    fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+              <text x="860" y="585" text-anchor="middle"
+                    font-family="Inter, sans-serif" font-size="12" fill="#888">object</text>
+              <text x="860" y="606" text-anchor="middle"
+                    font-family="JetBrains Mono, monospace" font-size="12" fill="#DDD">photos/trip.jpg</text>
+            </g>
+          </svg>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:18px;">
+          <div class="perm-scale">
+            <div class="ps-title">Уровни прав</div>
+            <div class="row"><div class="name">admin</div><div class="bar" style="background:linear-gradient(90deg, #E55B2B, #FF6B35); width:100%;"></div></div>
+            <div class="row"><div class="name">delete</div><div class="bar" style="background:linear-gradient(90deg, #E55B2B, #FF6B35); width:84%;"></div></div>
+            <div class="row"><div class="name">create</div><div class="bar" style="background:linear-gradient(90deg, #D4A035, #FFD23F); width:64%;"></div></div>
+            <div class="row"><div class="name">write</div><div class="bar" style="background:linear-gradient(90deg, #4EB69E, #4ECDC4); width:44%;"></div></div>
+            <div class="row"><div class="name">read</div><div class="bar" style="background:linear-gradient(90deg, #4ECDC4, #7BE87B); width:24%;"></div></div>
+            <div style="margin-top:14px; font-size:11px; color:var(--dim); font-family:'JetBrains Mono',monospace;">верхние права включают нижние</div>
+          </div>
+
+          <div class="card" style="padding:20px; border-color:rgba(78,205,196,0.35); background:rgba(78,205,196,0.05);">
+            <div class="mono" style="font-size:11px; color:var(--muted); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:8px;">Cypher</div>
+            <div class="mono" style="font-size:13px; color:#DDD; line-height:1.5;">
+              MATCH (u:User)<br>
+              <span style="color:var(--teal)">-[*1..6]-&gt;</span><br>
+              (r:Resource)<br>
+              WHERE u.id = $uid
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="latency-banner">
+        <div><span class="big">3 мс</span> <span class="lbl">&nbsp;&nbsp;p95 проверки доступа</span></div>
+        <div><span class="big" style="color:var(--teal)">6</span> <span class="lbl">&nbsp;&nbsp;уровней — макс. глубина графа</span></div>
+        <div><span class="big" style="color:var(--purple)">50K+</span> <span class="lbl">&nbsp;&nbsp;связей в Neo4j</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 9: CACHE ============ -->
+  <section class="slide" data-screen-label="09 Кэш">
+    <div class="grid-bg"></div>
+    <div class="page-tag">09 — Кэширование авторизации</div>
+    <div class="page-num">09 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Cache</div>
+          <div class="h2">Read-through кэш + точечная инвалидация</div>
+        </div>
+      </div>
+
+      <div class="cache-flow">
+        <div>
+          <div class="mono" style="color:var(--dim); font-size:12px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px;">Read path</div>
+          <div class="flow-line">
+            <div class="step">Запрос</div>
+            <div class="arrow">→</div>
+            <div class="step">Redis кэш</div>
+            <div class="arrow"><span class="tag t">hit</span>→</div>
+            <div class="step hit">Ответ 0.2&nbsp;мс</div>
+          </div>
+          <div class="flow-line" style="margin-top:14px; padding-left:230px;">
+            <div class="arrow"><span class="tag">miss</span>↓</div>
+          </div>
+          <div class="flow-line" style="padding-left:90px;">
+            <div class="step miss">Neo4j запрос</div>
+            <div class="arrow">→</div>
+            <div class="step">Ответ + запись в кэш</div>
+            <span class="mono" style="color:var(--orange); font-size:13px;">TTL 30 сек</span>
+          </div>
+        </div>
+
+        <div style="height:1px; background:var(--border); margin:8px 0;"></div>
+
+        <div>
+          <div class="mono" style="color:var(--dim); font-size:12px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px;">Invalidation path</div>
+          <div class="flow-line">
+            <div class="step">Изменение графа</div>
+            <div class="arrow">→</div>
+            <div class="step" style="border-color:var(--orange); background:rgba(255,107,53,0.08);">Kafka <span class="mono" style="color:var(--orange); font-size:13px;">auth-changes</span></div>
+            <div class="arrow">→</div>
+            <div class="step invalidate">Cache Invalidator</div>
+            <div class="arrow">→</div>
+            <div class="step" style="font-family:'JetBrains Mono',monospace;">SCAN + DEL pattern</div>
+            <div class="arrow">→</div>
+            <div class="step">Redis</div>
+          </div>
+        </div>
+
+        <div class="cache-metrics" style="margin-top:auto;">
+          <div class="card"><div class="v">94%</div><div class="l">cache hit rate</div></div>
+          <div class="card"><div class="v">0.4 мс</div><div class="l">p99 с кэшем</div></div>
+          <div class="card"><div class="v">8 мс</div><div class="l">p99 без кэша (cold)</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 10: QUOTA / RUST ============ -->
+  <section class="slide" data-screen-label="10 Quota Rust">
+    <div class="grid-bg"></div>
+    <div class="page-tag">10 — Quota Service: горячий путь на Rust</div>
+    <div class="page-num">10 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px; color:var(--purple);">Hot path</div>
+          <div class="h2">Reserve-and-rollback на in-memory shards</div>
+        </div>
+        <div class="muted" style="font-size:16px; text-align:right;">DashMap: lock-free concurrent hashmap<br>256 шардов · zero-copy</div>
+      </div>
+
+      <div class="quota-wrap">
+        <div class="quota-flow">
+          <div style="display:flex; flex-direction:column; align-items:flex-start; gap:0;">
+            <div class="qstep" style="background:rgba(78,205,196,0.08); border-color:rgba(78,205,196,0.4); color:var(--teal);">[Запрос на запись]</div>
+            <div class="qarrow"></div>
+
+            <div class="qhoriz">
+              <div class="qstep">Check user quota</div>
+              <span class="arr">— fail →</span>
+              <div class="qstep fail">Reject</div>
+            </div>
+            <div class="qarrow"></div>
+            <div style="margin-left:6px; color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:13px;">pass · reserve</div>
+            <div class="qarrow"></div>
+
+            <div class="qhoriz">
+              <div class="qstep">Check bucket quota</div>
+              <span class="arr">— fail →</span>
+              <div class="qstep fail">Rollback user</div>
+              <span class="arr">→</span>
+              <div class="qstep fail">Reject</div>
+            </div>
+            <div class="qarrow"></div>
+            <div style="margin-left:6px; color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:13px;">pass · reserve</div>
+            <div class="qarrow"></div>
+
+            <div class="qstep commit">Commit</div>
+            <div class="qarrow"></div>
+            <div style="margin-left:6px; color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:13px;">background flush</div>
+            <div class="qarrow"></div>
+
+            <div class="qstep" style="background:rgba(255,255,255,0.04); border-color:var(--border-2); color:#DDD;">Flush to Redis · every 1s · only dirty</div>
+          </div>
+        </div>
+
+        <div class="quota-metrics">
+          <div class="qm-card"><div class="v">~100 нс</div><div class="l">латентность проверки <span class="mono" style="color:var(--dim); font-size:12px;">in-memory, без I/O</span></div></div>
+          <div class="qm-card"><div class="v">&gt; 500K</div><div class="l">ops/sec на одно ядро</div></div>
+          <div class="qm-card"><div class="v">13 МБ</div><div class="l">Docker-образ <span class="mono" style="color:var(--dim); font-size:12px;">Alpine + static</span></div></div>
+          <div class="qm-card"><div class="v">~4 МБ</div><div class="l">RAM на 100K записей квот</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 11: STORAGE ============ -->
+  <section class="slide" data-screen-label="11 Storage">
+    <div class="grid-bg"></div>
+    <div class="glow-teal" style="left:-200px; top:-200px; opacity:0.35;"></div>
+    <div class="page-tag">11 — Storage: filesystem и streaming</div>
+    <div class="page-num">11 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px; color:var(--teal);">Storage Service</div>
+          <div class="h2">gRPC streaming без буферизации — байты напрямую на диск</div>
+        </div>
+        <div class="muted" style="font-size:16px; text-align:right;">Go · :50053<br>только blob_id · нет знания о ключах</div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 0.85fr 1.15fr; gap:36px; flex:1;">
+
+        <!-- LEFT: filesystem layout -->
+        <div style="display:flex; flex-direction:column; gap:18px;">
+
+          <div class="card" style="flex:1; padding:26px 30px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:18px;">Файловая структура</div>
+            <div class="mono" style="font-size:15px; line-height:2; color:#DDD;">
+              <div><span style="color:var(--orange);">/data/blobs/</span></div>
+              <div style="padding-left:20px;"><span style="color:var(--dim);">├─ </span><span style="color:var(--teal);">3a</span><span style="color:var(--dim);">/</span><span style="font-size:12px; color:var(--dim); margin-left:14px;">← hex shard</span></div>
+              <div style="padding-left:40px;"><span style="color:var(--dim);">└─ </span>3a7f2b4e-…uuid…</div>
+              <div style="padding-left:20px;"><span style="color:var(--dim);">└─ </span><span style="color:var(--teal);">ff</span><span style="color:var(--dim);">/</span></div>
+              <div style="padding-left:40px;"><span style="color:var(--dim);">└─ </span>ff0012a3-…</div>
+              <div style="margin-top:6px;"><span style="color:var(--purple);">/data/staging/uploads/</span></div>
+              <div style="padding-left:20px;"><span style="color:var(--dim);">└─ </span>{blobID}/</div>
+              <div style="padding-left:40px;"><span style="color:var(--dim);">├─ </span><span style="color:var(--purple);">object.bin</span></div>
+              <div style="padding-left:40px;"><span style="color:var(--dim);">└─ </span><span style="color:var(--muted);">manifest.json</span></div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="background:rgba(255,107,53,0.05); border:1px solid rgba(255,107,53,0.25); border-radius:14px; padding:20px 22px;">
+              <div style="font-weight:800; font-size:44px; color:var(--orange); letter-spacing:-0.03em; line-height:1;">256</div>
+              <div style="color:var(--muted); font-size:13px; margin-top:8px;">шардов<br><span class="mono" style="font-size:11px; color:var(--dim);">blobID[:2]</span></div>
+            </div>
+            <div style="background:rgba(78,205,196,0.05); border:1px solid rgba(78,205,196,0.25); border-radius:14px; padding:20px 22px;">
+              <div style="font-weight:800; font-size:30px; color:var(--teal); letter-spacing:-0.02em; line-height:1.2;">atomic</div>
+              <div style="color:var(--muted); font-size:13px; margin-top:8px;">запись<br><span class="mono" style="font-size:11px; color:var(--dim);">staging → Rename</span></div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: streaming flows -->
+        <div style="display:flex; flex-direction:column; gap:18px;">
+
+          <!-- Write path -->
+          <div class="card" style="padding:22px 26px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px;">Write · client-streaming gRPC</div>
+            <div class="flow-line">
+              <div class="step" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">header</span>
+                <span class="mono" style="font-size:11px; color:var(--muted);">size · content_type</span>
+              </div>
+              <div class="arrow">+</div>
+              <div class="step" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">chunks[]</span>
+                <span class="mono" style="font-size:11px; color:var(--orange);">по 8 MB</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="step hit" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">io.Reader</span>
+                <span class="mono" style="font-size:11px;">pipeline</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="step" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px; color:var(--orange);">os.Rename</span>
+                <span class="mono" style="font-size:11px; color:var(--muted);">atomic commit</span>
+              </div>
+            </div>
+            <div style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted);">Response: blob_id + checksum_md5</div>
+          </div>
+
+          <!-- Read path -->
+          <div class="card" style="padding:22px 26px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px;">Read · server-streaming gRPC</div>
+            <div class="flow-line">
+              <div class="step" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">blob_id</span>
+                <span class="mono" style="font-size:11px; color:var(--muted);">offset · length</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="step miss" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">os.Open</span>
+                <span class="mono" style="font-size:11px;">range seek</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="step hit" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px;">io.Reader</span>
+                <span class="mono" style="font-size:11px;">8 MB buf</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="step" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                <span class="mono" style="font-size:13px; color:var(--teal);">stream</span>
+                <span class="mono" style="font-size:11px; color:var(--teal);">.Send()</span>
+              </div>
+            </div>
+            <div style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted);">Первый чанк несёт total_size · Range reads → byte range запросы</div>
+          </div>
+
+          <!-- Multipart -->
+          <div class="card" style="padding:22px 26px; background:rgba(123,104,238,0.04); border-color:rgba(123,104,238,0.22); flex:1;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px;">Multipart upload · файлы 5 GB+</div>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+              <span class="pill" style="color:var(--purple); border-color:rgba(123,104,238,0.4);">Initiate</span>
+              <span class="mono" style="color:var(--muted);">→</span>
+              <span class="pill" style="color:var(--purple); border-color:rgba(123,104,238,0.4);">UploadPart ×N</span>
+              <span class="mono" style="color:var(--muted);">→</span>
+              <span class="pill" style="color:var(--teal); border-color:rgba(78,205,196,0.4);">Complete → AssembleParts</span>
+            </div>
+            <div style="font-size:14px; color:var(--muted); line-height:1.8;">
+              <div>· MD5 checksum на каждую часть · проверка при сборке</div>
+              <div>· Atomic assembly: temp file → <span class="mono" style="color:var(--purple); font-size:12px;">os.Rename</span></div>
+              <div>· Идемпотентный CompleteMultipart — completed marker предотвращает повторную сборку</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 12: KAFKA ============ -->
+  <section class="slide" data-screen-label="12 Kafka">
+    <div class="grid-bg"></div>
+    <div class="page-tag">12 — Kafka: Outbox · Finalize · Async Cascade</div>
+    <div class="page-num">12 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Events</div>
+          <div class="h2">Kafka как транзакционный bus: объект виден только после <span class="mono" style="font-size:36px; color:var(--teal);">committed</span></div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1.35fr; gap:36px; flex:1;">
+
+        <!-- LEFT: Outbox pattern -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+
+          <div class="card" style="flex:1; padding:24px 28px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:18px;">Transactional Outbox</div>
+
+            <!-- TX box -->
+            <div style="border:1px solid rgba(78,205,196,0.35); border-radius:12px; padding:14px 18px; background:rgba(78,205,196,0.04);">
+              <div class="mono" style="font-size:11px; color:var(--teal); letter-spacing:0.12em; margin-bottom:10px;">METADATA TX</div>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <div style="padding:7px 14px; background:rgba(255,255,255,0.06); border-radius:7px; font-size:13px;">business logic</div>
+                <span class="mono" style="color:var(--muted);">+</span>
+                <div style="padding:7px 14px; background:rgba(255,107,53,0.1); border:1px solid rgba(255,107,53,0.3); border-radius:7px; font-size:13px; color:var(--orange);">outbox_events</div>
+              </div>
+              <div style="margin-top:8px; font-size:12px; color:var(--dim);">атомарно в одной транзакции</div>
+            </div>
+
+            <div style="width:2px; height:14px; background:var(--border-2); margin:2px 0 2px 24px;"></div>
+
+            <div style="padding:10px 18px; background:rgba(255,107,53,0.07); border:1px solid rgba(255,107,53,0.28); border-radius:10px; display:flex; align-items:center; gap:10px;">
+              <span class="mono" style="color:var(--orange); font-size:14px;">Kafka Publisher</span>
+              <span style="color:var(--muted); font-size:12px;">читает outbox, публикует, ставит published_at</span>
+            </div>
+
+            <div style="width:2px; height:14px; background:var(--border-2); margin:2px 0 2px 24px;"></div>
+
+            <div style="padding:11px 18px; background:rgba(255,107,53,0.12); border:1.5px solid rgba(255,107,53,0.5); border-radius:10px; text-align:center; font-family:'JetBrains Mono',monospace; font-size:15px; color:var(--orange); letter-spacing:0.1em;">
+              KAFKA BROKER
+            </div>
+
+            <div style="width:2px; height:14px; background:var(--border-2); margin:2px 0 2px 24px;"></div>
+
+            <!-- Consumer + inbox -->
+            <div style="border:1px solid rgba(123,104,238,0.35); border-radius:12px; padding:14px 18px; background:rgba(123,104,238,0.04);">
+              <div class="mono" style="font-size:11px; color:var(--purple); letter-spacing:0.12em; margin-bottom:10px;">CONSUMER</div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div style="padding:6px 12px; background:rgba(255,255,255,0.06); border-radius:6px; font-size:12px;">check inbox</div>
+                <span class="mono" style="color:var(--muted); font-size:13px;">→</span>
+                <div style="padding:6px 12px; background:rgba(255,255,255,0.06); border-radius:6px; font-size:12px;">process</div>
+                <span class="mono" style="color:var(--muted); font-size:13px;">→</span>
+                <div style="padding:6px 12px; background:rgba(123,104,238,0.1); border:1px solid rgba(123,104,238,0.3); border-radius:6px; font-size:12px; color:var(--purple);">inbox_processed</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Guarantee pills -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div style="background:rgba(78,205,196,0.05); border:1px solid rgba(78,205,196,0.25); border-radius:12px; padding:14px 16px;">
+              <div style="font-weight:700; font-size:14px; color:var(--teal);">at-least-once</div>
+              <div style="color:var(--muted); font-size:12px; margin-top:4px; line-height:1.4;">событие дойдёт, даже если Kafka недоступен во время TX</div>
+            </div>
+            <div style="background:rgba(123,104,238,0.05); border:1px solid rgba(123,104,238,0.25); border-radius:12px; padding:14px 16px;">
+              <div style="font-weight:700; font-size:14px; color:var(--purple);">idempotent</div>
+              <div style="color:var(--muted); font-size:12px; margin-top:4px; line-height:1.4;">inbox_processed дедуплицирует повторные доставки</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: flows + topics -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+
+          <!-- PutObject Finalize flow -->
+          <div class="card" style="padding:20px 24px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:12px;">PutObject · Finalize Flow</div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-family:'JetBrains Mono',monospace; font-size:13px;">
+              <span style="color:var(--teal);">Storage</span>
+              <span style="color:var(--dim);">──</span><span style="color:var(--orange); font-size:12px;">object-stored</span><span style="color:var(--dim);">──▶</span>
+              <span style="color:var(--orange);">Metadata.FinalizeUpload</span>
+              <span style="color:var(--dim);">TX:</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+              <span style="padding:6px 14px; border:1px solid rgba(123,104,238,0.4); background:rgba(123,104,238,0.07); border-radius:7px; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--purple);">pending</span>
+              <span class="mono" style="color:var(--muted);">→</span>
+              <span style="padding:6px 14px; border:1px solid rgba(78,205,196,0.5); background:rgba(78,205,196,0.09); border-radius:7px; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--teal);">committed</span>
+              <span class="mono" style="color:var(--muted); font-size:12px;">→ set current_version_id</span>
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:var(--dim);">Объект появляется в GET · LIST только после <span class="mono" style="color:var(--teal);">committed</span></div>
+          </div>
+
+          <!-- Delete cascade -->
+          <div class="card" style="padding:20px 24px;">
+            <div class="mono" style="color:var(--dim); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; margin-bottom:12px;">DeleteObject · Async Cascade</div>
+            <div style="display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',monospace; font-size:13px; flex-wrap:wrap;">
+              <span style="color:var(--orange);">Metadata</span>
+              <span style="color:var(--dim);">──</span><span style="color:var(--orange); font-size:12px;">object-deleted</span><span style="color:var(--dim);">──▶</span>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+              <div style="padding:7px 16px; background:rgba(78,205,196,0.07); border:1px solid rgba(78,205,196,0.3); border-radius:8px; font-size:13px;">
+                <span style="color:var(--teal);">Storage</span> <span style="color:var(--muted); font-size:12px;">— удаляет blob + уменьшает ref_count</span>
+              </div>
+              <div style="padding:7px 16px; background:rgba(255,107,53,0.07); border:1px solid rgba(255,107,53,0.3); border-radius:8px; font-size:13px;">
+                <span style="color:var(--orange);">AuthZ</span> <span style="color:var(--muted); font-size:12px;">— удаляет узел из графа</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Topics table -->
+          <div class="card" style="padding:20px 24px; flex:1;">
+            <div style="display:grid; grid-template-columns:200px 140px 1fr; gap:0; font-family:'JetBrains Mono',monospace; font-size:12px;">
+              <div style="color:var(--dim); padding:0 0 10px; letter-spacing:0.1em;">TOPIC</div>
+              <div style="color:var(--dim); padding:0 0 10px; letter-spacing:0.1em;">PRODUCER</div>
+              <div style="color:var(--dim); padding:0 0 10px; letter-spacing:0.1em;">CONSUMERS</div>
+
+              <div style="color:var(--teal); padding:9px 0; border-top:1px solid var(--border);">object-stored</div>
+              <div style="color:var(--muted); padding:9px 0; border-top:1px solid var(--border);">Storage</div>
+              <div style="color:#DDD; padding:9px 0; border-top:1px solid var(--border);">Metadata → finalize</div>
+
+              <div style="color:var(--teal); padding:9px 0; border-top:1px solid var(--border);">object-deleted</div>
+              <div style="color:var(--muted); padding:9px 0; border-top:1px solid var(--border);">Metadata</div>
+              <div style="color:#DDD; padding:9px 0; border-top:1px solid var(--border);">Storage · AuthZ · Quota</div>
+
+              <div style="color:var(--teal); padding:9px 0; border-top:1px solid var(--border);">bucket-deleted</div>
+              <div style="color:var(--muted); padding:9px 0; border-top:1px solid var(--border);">Metadata</div>
+              <div style="color:#DDD; padding:9px 0; border-top:1px solid var(--border);">AuthZ · Quota</div>
+
+              <div style="color:var(--teal); padding:9px 0; border-top:1px solid var(--border);">auth-changes</div>
+              <div style="color:var(--muted); padding:9px 0; border-top:1px solid var(--border);">AuthZ</div>
+              <div style="color:#DDD; padding:9px 0; border-top:1px solid var(--border);">Cache Invalidator</div>
+
+              <div style="color:var(--teal); padding:9px 0; border-top:1px solid var(--border);">user-events</div>
+              <div style="color:var(--muted); padding:9px 0; border-top:1px solid var(--border);">Users</div>
+              <div style="color:#DDD; padding:9px 0; border-top:1px solid var(--border);">AuthZ · Quota</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 13: S3 mapping ============ -->
+  <section class="slide" data-screen-label="13 S3 API">
+    <div class="grid-bg"></div>
+    <div class="page-tag">13 — S3 API маппинг</div>
+    <div class="page-num">13 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">S3 → ReBAC</div>
+          <div class="h2">Каждая S3-операция = один <span class="mono" style="color:var(--teal); font-size:36px;">AuthZ.Check()</span></div>
+        </div>
+      </div>
+
+      <div class="s3-table">
+        <div class="s3-row"><div class="s3-op">GetObject</div><div class="s3-arrow">→</div><div class="s3-rebac">Check(<span style="color:var(--orange)">read</span>, object:{bucket}/{key})</div></div>
+        <div class="s3-row"><div class="s3-op">PutObject</div><div class="s3-arrow">→</div><div class="s3-rebac">Check(<span style="color:var(--orange)">write</span>, bucket:{bucket})</div></div>
+        <div class="s3-row"><div class="s3-op">DeleteObject</div><div class="s3-arrow">→</div><div class="s3-rebac">Check(<span style="color:var(--orange)">delete</span>, object:{bucket}/{key})</div></div>
+        <div class="s3-row"><div class="s3-op">ListBucket</div><div class="s3-arrow">→</div><div class="s3-rebac">Check(<span style="color:var(--orange)">read</span>, bucket:{bucket})</div></div>
+        <div class="s3-row"><div class="s3-op">DeleteBucket</div><div class="s3-arrow">→</div><div class="s3-rebac">Check(<span style="color:var(--orange)">delete</span>, bucket:{bucket})</div></div>
+        <div class="s3-row"><div class="s3-op">CreateBucket</div><div class="s3-arrow">→</div><div class="s3-rebac"><span class="ok">✓ без проверки</span> <span style="color:var(--muted)">— любой авторизованный пользователь</span></div></div>
+      </div>
+
+      <div class="s3-flow">
+        <span class="b">Client</span> ─HTTP→ <span class="t">Gateway</span> ─gRPC→ <span class="o">AuthZ.Check()</span> → <span style="color:#7BE87B">allow</span> / <span style="color:#E07A7A">deny</span> → <span class="t">Gateway</span> ─gRPC→ <span class="b">Storage / Metadata</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 13: OBSERVABILITY ============ -->
+  <section class="slide" data-screen-label="14 Observability">
+    <div class="grid-bg"></div>
+    <div class="page-tag">14 — Observability</div>
+    <div class="page-num">14 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Observability</div>
+          <div class="h2">Три столпа, один trace ID</div>
+        </div>
+      </div>
+
+      <div class="obs-cols">
+        <div class="obs-col">
+          <div class="obs-icon t">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+          <h3>Tracing</h3>
+          <ul>
+            <li>OpenTelemetry SDK во всех сервисах</li>
+            <li>Jaeger UI для визуализации</li>
+            <li>Сквозные trace ID: HTTP → gRPC → Kafka</li>
+            <li>Автоматическая привязка span к каждому RPC</li>
+          </ul>
+        </div>
+
+        <div class="obs-col">
+          <div class="obs-icon m">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          </div>
+          <h3>Metrics</h3>
+          <ul>
+            <li>Prometheus scrape каждые 15 сек</li>
+            <li>Grafana дашборд на каждый сервис</li>
+            <li>Кастомные метрики: cache hit rate, flush duration, quota ops</li>
+            <li>Алерты на latency p99 и error rate</li>
+          </ul>
+        </div>
+
+        <div class="obs-col">
+          <div class="obs-icon l">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          </div>
+          <h3>Logs</h3>
+          <ul>
+            <li>Structured JSON: zap для Go, logging для Python</li>
+            <li>Elasticsearch для хранения и поиска</li>
+            <li>Kibana дашборды с фильтрацией по trace ID</li>
+            <li>Корреляция: log → trace → span</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="obs-strip">
+        <div class="item"><div class="v t">100%</div><div class="l">покрытие трейсингом</div></div>
+        <div class="item"><div class="v o">&lt; 5 мин</div><div class="l">среднее время диагностики</div></div>
+        <div class="item"><div class="v p">30 дней</div><div class="l">ретеншн логов</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 14: LOAD TEST RESULTS ============ -->
+  <section class="slide" data-screen-label="15 Результаты">
+    <div class="grid-bg"></div>
+    <div class="page-tag">15 — Результаты нагрузочного тестирования</div>
+    <div class="page-num">15 / 17</div>
+    <div class="body">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Load test · k6</div>
+          <div class="h2">5 минут sustained load · single-node</div>
+        </div>
+      </div>
+
+      <div class="res-grid">
+        <div class="res-card">
+          <div class="v">12 мс</div>
+          <div class="lbl">PutObject e2e</div>
+          <div class="sub">p50 · p99 = 45 мс</div>
+          <div class="bar"><div class="fill" style="width:30%; background:var(--orange);"></div></div>
+        </div>
+        <div class="res-card t">
+          <div class="v">8 мс</div>
+          <div class="lbl">GetObject e2e</div>
+          <div class="sub">p50 · p99 = 30 мс</div>
+          <div class="bar"><div class="fill" style="width:22%;"></div></div>
+        </div>
+        <div class="res-card t">
+          <div class="v">0.3 мс</div>
+          <div class="lbl">AuthZ Check (cache hit)</div>
+          <div class="sub">p50 · p99 miss = 8 мс</div>
+          <div class="bar"><div class="fill" style="width:8%;"></div></div>
+        </div>
+
+        <div class="res-card p">
+          <div class="v">~100 нс</div>
+          <div class="lbl">Quota Check</div>
+          <div class="sub">in-memory</div>
+          <div class="bar"><div class="fill" style="width:4%;"></div></div>
+        </div>
+        <div class="res-card">
+          <div class="v">1 000</div>
+          <div class="lbl">Concurrent users</div>
+          <div class="sub">sustained</div>
+          <div class="bar"><div class="fill" style="width:65%;"></div></div>
+        </div>
+        <div class="res-card t">
+          <div class="v">~3 200</div>
+          <div class="lbl">req/sec</div>
+          <div class="sub">один узел</div>
+          <div class="bar"><div class="fill" style="width:80%;"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 15: CONCLUSIONS ============ -->
+  <section class="slide" data-screen-label="16 Выводы">
+    <div class="grid-bg"></div>
+    <div class="glow-orange" style="left:-300px; top:-200px; opacity:0.5;"></div>
+    <div class="glow-teal" style="right:-300px; bottom:-200px; opacity:0.5;"></div>
+    <div class="page-tag">16 — Выводы</div>
+    <div class="page-num">16 / 17</div>
+    <div class="body" style="justify-content:center;">
+      <div class="head-row" style="margin-bottom:60px;">
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px;">Takeaways</div>
+          <div class="h2">Что мы узнали, пока строили</div>
+        </div>
+      </div>
+
+      <div class="concl-list">
+        <div class="concl-item">
+          <div class="concl-dot o"></div>
+          <div class="concl-text">Полиглот-архитектура работает, если контракты строгие — <span class="em-o">Protobuf</span> как единый источник истины</div>
+        </div>
+        <div class="concl-item">
+          <div class="concl-dot t"></div>
+          <div class="concl-text">ReBAC на графе масштабируется лучше ACL — проверено на <span class="em-t">50 000+ связей</span> в Neo4j</div>
+        </div>
+        <div class="concl-item">
+          <div class="concl-dot p"></div>
+          <div class="concl-text">Rust оправдан на горячем пути: разница с Go-прототипом квоты — <span class="em-p">40× по латентности</span></div>
+        </div>
+        <div class="concl-item">
+          <div class="concl-dot o"></div>
+          <div class="concl-text">Event-driven инвалидация кэша — правильный <span class="em-o">trade-off</span> между consistency и скоростью</div>
+        </div>
+        <div class="concl-item">
+          <div class="concl-dot t"></div>
+          <div class="concl-text">Observability с первого дня — окупается при <span class="em-t">первом же инциденте</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SLIDE 16: THANKS ============ -->
+  <section class="slide s-thanks" data-screen-label="17 Спасибо">
+    <div class="grid-bg"></div>
+    <div class="glow-orange" style="left:-300px; top:-200px;"></div>
+    <div class="glow-teal" style="right:-300px; bottom:-200px;"></div>
+    <div class="glow-purple" style="left:50%; top:50%; transform:translate(-50%,-50%); opacity:0.5;"></div>
+    <h1>OpenS3·ReBAC</h1>
+    <div class="sub">Спасибо. Вопросы?</div>
+    <div class="repo">github.com/alesplll/opens3-rebac</div>
+  </section>
+
+</deck-stage>
+
+</body>
+</html>
