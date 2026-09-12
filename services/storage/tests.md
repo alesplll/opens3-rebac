@@ -30,8 +30,7 @@
 - `TestUploadPart_StreamsAllChunksToService` — проверяет потоковую передачу чанков part-а в service.
 - `TestUploadPart_EmptyStream` — проверяет ошибку на пустой stream.
 - `TestUploadPart_StartsStreamingBeforeClientStreamEnds` — проверяет, что service начинает читать part до завершения client stream.
-- `TestUploadPart_ReturnsInvalidArgumentOnUploadIDMismatch` — проверяет ошибку при смене `upload_id` внутри одного stream-а.
-- `TestUploadPart_ReturnsInvalidArgumentOnPartNumberMismatch` — проверяет ошибку при смене `part_number` внутри одного stream-а.
+- Header с `upload_id` и `part_number` принимается только первым сообщением; последующие сообщения содержат только chunks, поэтому прежние mismatch-тесты для повторяющейся metadata больше не применимы.
 
 ### `internal/handler/storage/tests/retrieve_object_test.go`
 

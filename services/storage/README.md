@@ -1,536 +1,264 @@
-# Storage Service (Data Node)
+# Storage Service
 
-Микросервис хранения бинарных объектов (blob) на файловой системе.
-Является частью распределённого S3-совместимого объектного хранилища **OpenS3**.
+Go gRPC-сервис immutable blob storage. Он работает с `blob_id` и не знает о S3
+buckets, object keys, users или правах доступа.
 
-Сервис **не знает** о бакетах, ключах объектов, правах доступа или S3 API —
-он работает только с `blob_id` (UUID) и байтами. Вызывается исключительно из Gateway.
+## Назначение и возможности
 
----
+Обычная и multipart-загрузка, чтение целиком и по диапазону, удаление blob и отмена загрузки. Это внутренний data path; каталог объектов ведёт Metadata.
 
-## Оглавление
+## Архитектура и зависимости
 
-- [Архитектура](#архитектура)
-- [Структура проекта](#структура-проекта)
-- [gRPC API](#grpc-api)
-- [Конфигурация](#конфигурация)
-- [Запуск](#запуск)
-- [Хранилище на диске](#хранилище-на-диске)
-- [Dependency Injection](#dependency-injection)
-- [Обработка ошибок](#обработка-ошибок)
-- [Observability](#observability)
-- [Kafka-интеграция](#kafka-интеграция)
-- [Разработка](#разработка)
-- [TODO](#todo)
-
----
-
-## Архитектура
-
-Трёхслойная архитектура по аналогии с остальными Go-сервисами проекта:
-
-```
-gRPC request
-    │
-    ▼
-┌──────────────────────────────────────────┐
-│  Middleware (rate limiter → metrics →     │
-│  validation → tracing)                   │
-└──────────────┬───────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────┐
-│  Handler     (internal/handler/storage/) │  ← transport layer:
-│              разбирает первый message     │     стрима, валидирует streaming
-│              и прокидывает byte-stream    │     contract, делегирует в Service
-└──────────────┬───────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────┐
-│  Service     (internal/service/storage/) │  ← application/domain layer:
-│              валидирует команды,          │     назначает id, логирует,
-│              оркестрирует Repository      │     обновляет метрики
-└──────────────┬───────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────┐
-│  Repository  (internal/repository/       │  ← persistence layer:
-│              storage/)                   │     staging, атомарная запись,
-│                                          │     чтение/удаление blob-файлов
-└──────────────────────────────────────────┘
+```text
+gRPC handler → Storage service → filesystem repository
+                     ├── ID generation
+                     ├── stream validation
+                     └── multipart orchestration
 ```
 
-Каждый слой определён через **интерфейс** и подключается через DI-контейнер.
-
----
+Handler переводит protobuf streams в service calls. Service управляет IDs и
+последовательностью операций. Repository отвечает за temporary files, final
+paths, чтение ranges и cleanup.
 
 ## Структура проекта
 
-```
-services/storage/
-├── cmd/server/
-│   └── main.go                              # Точка входа
-├── internal/
-│   ├── app/
-│   │   ├── app.go                           # Жизненный цикл приложения
-│   │   └── service_provider.go              # DI-контейнер (lazy init)
-│   ├── config/
-│   │   ├── config.go                        # Загрузка конфигурации из .env
-│   │   ├── interfaces.go                    # Интерфейсы конфигов
-│   │   └── env/
-│   │       ├── grpc.go                      # GRPC_HOST, GRPC_PORT
-│   │       ├── storage.go                   # DATA_DIR, MULTIPART_DIR
-│   │       ├── logger.go                    # LOGGER_*
-│   │       ├── tracing.go                   # OTEL tracing
-│   │       ├── metrics.go                   # OTEL metrics
-│   │       └── rate_limiter.go              # RATE_LIMITER_*
-│   ├── handler/storage/                     # Слой 1: gRPC-хэндлеры
-│   │   ├── handler.go                       # Конструктор, embed Unimplemented
-│   │   ├── upload_streams.go                # Контракт и разбор client-streaming запросов
-│   │   ├── store_object.go                  # Client-streaming: приём blob
-│   │   ├── retrieve_object.go               # Server-streaming: отдача blob
-│   │   ├── delete_object.go                 # Unary: удаление blob
-│   │   ├── initiate_multipart.go            # Unary: старт multipart
-│   │   ├── upload_part.go                   # Client-streaming: приём части
-│   │   ├── complete_multipart.go            # Unary: склейка частей
-│   │   ├── abort_multipart.go               # Unary: отмена multipart
-│   │   └── health_check.go                  # Unary: проверка здоровья
-│   ├── service/
-│   │   └── service.go                       # Интерфейс StorageService
-│   ├── service/storage/                     # Слой 2: бизнес-логика
-│   │   ├── service.go                       # Конструктор
-│   │   ├── store_object.go
-│   │   ├── retrieve_object.go
-│   │   ├── delete_object.go
-│   │   ├── initiate_multipart.go
-│   │   ├── upload_part.go
-│   │   ├── complete_multipart.go
-│   │   ├── abort_multipart.go
-│   │   └── health_check.go
-│   ├── repository/
-│   │   └── repository.go                    # Интерфейс StorageRepository
-│   ├── repository/storage/                  # Слой 3: доступ к FS
-│   │   ├── repository.go                    # Конструктор (принимает StorageConfig)
-│   │   ├── store_blob.go                    # Запись файла на диск
-│   │   ├── multipart.go                     # Multipart session, part upload, final assemble
-│   │   ├── retrieve_blob.go                 # Чтение файла с диска
-│   │   ├── delete_blob.go                   # Удаление файла
-│   │   ├── write_helpers.go                 # Атомарная запись и temp-файлы
-│   │   └── health.go                        # Проверка доступности DATA_DIR
-│   ├── model/
-│   │   └── blob.go                          # Доменные модели: BlobMeta, PartInfo
-│   └── errors/domain_errors/
-│       └── apperrors.go                     # Доменные ошибки
-├── .env                                     # Переменные окружения (development)
-├── go.mod
-└── go.sum
+```text
+cmd/server/                         entrypoint
+internal/app/                       wiring и lifecycle
+internal/handler/storage/           gRPC transport
+internal/service/storage/           single-part и multipart logic
+internal/repository/storage/        filesystem implementation
+internal/config/                    environment configuration
+pkg/mocks/                          generated mocks
 ```
 
----
+## API
 
-## gRPC API
+Source of truth: `shared/api/storage/v1/storage.proto`.
 
-**Пакет:** `opens3.storage.v1`
-**Сервис:** `DataStorageService`
-**Порт:** `50053` (по умолчанию)
-**Proto-файл:** `shared/api/storage/v1/storage.proto`
-
-### Методы
-
-| Метод | Тип | Описание |
+| RPC | Тип | Назначение |
 |---|---|---|
-| `StoreObject` | Client-streaming | Принимает поток чанков → сохраняет blob → возвращает `blob_id` + MD5 |
-| `RetrieveObject` | Server-streaming | Читает blob → стримит чанки (поддержка Range) |
-| `DeleteObject` | Unary | Удаляет blob по `blob_id` (идемпотентно) |
-| `InitiateMultipartUpload` | Unary | Создаёт сессию multipart-загрузки → возвращает `upload_id` |
-| `UploadPart` | Client-streaming | Принимает чанки одной части → сохраняет → возвращает MD5 части |
-| `CompleteMultipartUpload` | Unary | Склеивает все части → возвращает итоговый `blob_id` + MD5 |
-| `AbortMultipartUpload` | Unary | Отменяет multipart, удаляет временные файлы (идемпотентно) |
-| `HealthCheck` | Unary | Проверяет доступность `DATA_DIR` и свободное место |
+| `StoreObject` | client stream | сохранить blob, вернуть UUID и full-content MD5 |
+| `RetrieveObject` | server stream | читать blob целиком или по offset/length |
+| `DeleteObject` | unary | идемпотентно удалить blob |
+| `InitiateMultipartUpload` | unary | создать multipart session/upload ID |
+| `UploadPart` | client stream | сохранить/перезаписать part |
+| `CompleteMultipartUpload` | unary | проверить список parts и собрать blob |
+| `AbortMultipartUpload` | unary | идемпотентно очистить session |
+| `HealthCheck` | unary | проверить filesystem repository |
 
-### Потоковые RPC — как это работает
+Client-streaming StoreObject/UploadPart используют первое сообщение `header`,
+затем сообщения `chunk`. Пустой объект поддерживается.
 
-**Client-streaming** (`StoreObject`, `UploadPart`):
-```
-Gateway                          Storage
-  │                                │
-  │──── StoreObjectRequest ──────► │  (header: metadata + optional first data)
-  │──── StoreObjectRequest ──────► │  (chunk: data)
-  │──── StoreObjectRequest ──────► │  (chunk: data)
-  │──── EOF ─────────────────────► │
-  │                                │  потоково читает чанки и пишет на диск
-  │◄─── StoreObjectResponse ────── │  (blob_id, checksum_md5)
-```
+Handler отклоняет нарушенный порядок messages. Header может содержать `data`;
+поле bytes представлено base64 при использовании grpcurl JSON. `RetrieveObject` возвращает server
+stream; offset и length задают range, а точные edge cases определяются protobuf и
+service validation.
 
-Для `StoreObject` streaming contract:
-- первое сообщение обязано быть `header`
-- `header` может содержать metadata и первые байты файла
-- `size` в `header` опционален: если он не передан, сервис не проверяет итоговый размер; `0` остаётся легитимным значением для пустого объекта
-- `content_type` в `header` опционален: если он не передан, service подставит `application/octet-stream`
-- все последующие сообщения обязаны быть `chunk`
-- пустой объект всё равно требует хотя бы одно сообщение в stream-е
-- если первым сообщением пришёл `chunk` или после первого сообщения снова пришёл `header`, сервер вернёт `INVALID_ARGUMENT`
+## Данные и основные сценарии
 
-Для `UploadPart` действуют те же streaming semantics:
-- первое сообщение обязано быть `header`
-- `header` обязан содержать `upload_id` и `part_number`, и может одновременно содержать первые байты части
-- все последующие сообщения обязаны быть `chunk`
-- если первым сообщением пришёл `chunk` или после первого сообщения снова пришёл `header`, сервер вернёт `INVALID_ARGUMENT`
-- данные части пишутся потоково, без буферизации всего part в памяти handler-а
-- части можно загружать в любом порядке; порядок фактической загрузки не влияет на итоговую сборку
-- при `CompleteMultipartUpload` список `parts` должен быть отсортирован по возрастанию `part_number`
-- текущая реализация не требует непрерывной последовательности `1..N`: сервис собирает итоговый blob из тех `part_number`, которые явно переданы в `CompleteMultipartUpload` и реально существуют на диске
+### Файловый commit
 
-**Server-streaming** (`RetrieveObject`):
-```
-Gateway                          Storage
-  │                                │
-  │──── RetrieveObjectRequest ───► │  (blob_id, offset, length)
-  │                                │
-  │◄─── RetrieveObjectResponse ─── │  (data + total_size в первом чанке)
-  │◄─── RetrieveObjectResponse ─── │  (data)
-  │◄─── RetrieveObjectResponse ─── │  (data)
-  │◄─── EOF ────────────────────── │
+Обычная запись получает blob ID в service до начала repository write. Repository
+пишет staging file, вызывает `Sync`, закрывает его и выполняет rename в final path.
+Final file появляется после rename, а не при первом chunk. Проверка ожидаемого
+size выполняется service **после** repository commit; при mismatch он пытается
+удалить blob. Ошибка cleanup может оставить orphan, несмотря на ошибочный RPC.
+
+Atomic rename гарантируется только внутри одной filesystem. Текущий код не делает
+fsync каталога после rename, поэтому документация не обещает полную durability при
+аварийной потере питания.
+
+#### Layout на диске
+
+```text
+DATA_DIR/<shard>/<blob_id>                         final blob
+MULTIPART_DIR/uploads/<upload_id>/                 session и parts
+MULTIPART_DIR/completed/<shard>/<upload_id>.json   completion marker
 ```
 
-Размер чанка при отдаче: **8 MB** (константа `chunkSize` в `handler/storage/retrieve_object.go`).
+Sharding ограничивает число entries в одном каталоге. Metadata хранит blob IDs,
+но не строит filesystem paths самостоятельно.
 
-### Когда именно появляются blob и part
+Multipart upload создаёт session заранее. В текущем repository итоговый blob ID
+совпадает с upload ID. Complete сохраняет completion metadata для retry и затем
+best-effort очищает session внутри Storage; он не ждёт callback от Metadata.
 
-- `StoreObject`: staging-директория и `manifest.json` создаются сразу при вызове метода repository; финальный blob в `DATA_DIR/.../<blob_id>` появляется только после полного чтения stream-а и атомарного `rename`.
-- `InitiateMultipartUpload`: сразу создаются директория сессии `MULTIPART_DIR/uploads/<upload_id>/` и manifest с metadata upload-а.
-- `UploadPart`: файл `part_<number>` создаётся во время записи входного stream-а; фактически part появляется, когда repository начинает читать и писать байты, а не в момент открытия RPC.
-- `CompleteMultipartUpload`: итоговый blob сначала собирается во временный файл и становится видимым только после финального `rename`; затем multipart staging удаляется best-effort.
+### S3 и multipart
 
----
+Storage возвращает MD5 полного собранного blob. Это внутренний checksum, а не
+универсальный внешний multipart ETag. Gateway должен отдельно реализовать выбранную
+S3 checksum/ETag semantics.
+
+S3 minimum part size проверяется на Complete для всех выбранных частей, кроме
+последней: при отдельном UploadPart ещё неизвестно, какая часть окажется последней.
+Storage валидирует свой внутренний контракт; полная S3-валидация относится к
+Gateway/Metadata orchestration.
+
+Multipart part можно загрузить повторно по тому же номеру; новая успешная запись
+заменяет прежнюю. `Complete` получает выбранный упорядоченный список, проверяет
+checksums и создаёт final blob. Completion marker хранит terminal result для retry
+после потерянного ответа.
 
 ## Конфигурация
 
-Конфигурация загружается из переменных окружения. Файл `.env` используется для локальной разработки.
+### Полный перечень переменных Go-конфигурации
 
-### Обязательные переменные
+Default ниже относится к коду, а не к development `.env`.
 
-| Переменная | Описание | Пример |
+| Переменная | Default / требование | Раздел конфигурации |
 |---|---|---|
-| `GRPC_HOST` | Хост gRPC сервера | `0.0.0.0` |
-| `GRPC_PORT` | Порт gRPC сервера | `50053` |
-| `LOGGER_LEVEL` | Уровень логирования | `DEBUG`, `INFO`, `WARN`, `ERROR` |
-| `LOGGER_AS_JSON` | JSON-формат логов | `true` / `false` |
-| `LOGGER_ENABLE_OLTP` | Экспорт логов в OTEL | `true` / `false` |
-| `OTEL_SERVICE_NAME` | Имя сервиса в OTEL | `storage_server` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP Collector endpoint | `otel-collector:4317` |
-| `OTEL_ENVIRONMENT` | Окружение | `development` |
-| `OTEL_SERVICE_VERSION` | Версия сервиса | `1.0.0` |
-| `OTEL_METRICS_PUSH_TIMEOUT` | Таймаут отправки метрик | `1s` |
+| `GRPC_HOST` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `GRPC_PORT` | задать явно | [grpc.go](internal/config/env/grpc.go) |
+| `LOGGER_LEVEL` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_AS_JSON` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `LOGGER_ENABLE_OLTP` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_NAME` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_ENVIRONMENT` | задать явно | [logger.go](internal/config/env/logger.go) |
+| `OTEL_SERVICE_VERSION` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `OTEL_METRICS_PUSH_TIMEOUT` | задать явно | [metrics.go](internal/config/env/metrics.go) |
+| `RATE_LIMITER_LIMIT` | `100` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `RATE_LIMITER_PERIOD` | `1s` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
+| `DATA_DIR` | `/data/blobs` | [storage.go](internal/config/env/storage.go) |
+| `MULTIPART_DIR` | `/data/staging` | [storage.go](internal/config/env/storage.go) |
 
-### Опциональные переменные
+Основные значения находятся в `services/storage/.env`:
 
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `DATA_DIR` | `/data/blobs` | Корневая директория для финальных blob (`<shard>/<blob_id>`) |
-| `MULTIPART_DIR` | `/data/staging` | Корневая директория staging-зоны (`uploads/` + `completed/`) |
-| `RATE_LIMITER_LIMIT` | `100` | Максимум запросов в окно |
-| `RATE_LIMITER_PERIOD` | `1s` | Окно rate limiter |
-
-### Пример `.env`
-
-```env
-GRPC_HOST=0.0.0.0
+```dotenv
 GRPC_PORT=50053
-
 DATA_DIR=/data/blobs
 MULTIPART_DIR=/data/staging
-
-LOGGER_LEVEL=DEBUG
-LOGGER_AS_JSON=false
-LOGGER_ENABLE_OLTP=true
-
-OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-OTEL_SERVICE_NAME=storage_server
-OTEL_ENVIRONMENT=development
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_METRICS_PUSH_TIMEOUT=1s
-
-RATE_LIMITER_LIMIT=100
-RATE_LIMITER_PERIOD=1s
 ```
 
----
+Для гарантированного rename staging/final paths должны находиться на одной
+filesystem.
+
+Полный набор параметров и validation rules находится в `internal/config`.
 
 ## Запуск
 
-### Локально
+Из корня репозитория:
 
 ```bash
-# Из корня монорепозитория
+docker compose --profile services up --build -d storage
+docker compose logs -f storage
+```
+
+Локально:
+
+```bash
 cd services/storage
-go run cmd/server/main.go
+DATA_DIR="/tmp/opens3-storage-dev/blobs" MULTIPART_DIR="/tmp/opens3-storage-dev/staging" \
+  OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 go run ./cmd/server
 ```
 
-Или с кастомным `.env`:
+## Примеры использования
+
+Для небольшого демонстрационного blob `abc` (`YWJj` — base64 поля bytes):
 
 ```bash
-go run cmd/server/main.go -config-path=.env.local
+grpcurl -plaintext -d '{"header":{"size":"3","content_type":"text/plain","data":"YWJj"}}' \
+  localhost:50053 opens3.storage.v1.DataStorageService/StoreObject
 ```
 
-### Сборка
+Подставьте `blobId` из ответа:
 
 ```bash
-# Из корня репозитория (используется go.work)
-go build ./services/storage/...
-
-# Тесты storage-сервиса
-make test-storage
-
-# Или из директории сервиса
-cd services/storage
-go build -o bin/storage-server cmd/server/main.go
-```
-
-### Проверка gRPC (grpcurl)
-
-```bash
-# Health check
-grpcurl -plaintext localhost:50053 opens3.storage.v1.DataStorageService/HealthCheck
-
-# Reflection (список методов)
-grpcurl -plaintext localhost:50053 list opens3.storage.v1.DataStorageService
-
-# Delete object (unary)
-grpcurl -plaintext -d '{"blob_id": "550e8400-e29b-41d4-a716-446655440000"}' \
+grpcurl -plaintext -d '{"blob_id":"<blob-id>","offset":"0","length":"0"}' \
+  localhost:50053 opens3.storage.v1.DataStorageService/RetrieveObject
+grpcurl -plaintext -d '{"blob_id":"<blob-id>"}' \
   localhost:50053 opens3.storage.v1.DataStorageService/DeleteObject
 ```
 
-### Multipart Smoke Test
-
-Для быстрого ручного happy-path smoke test multipart upload:
-
-```bash
-go run ./services/storage/cmd/multipart-smoke
-```
-
-С кастомными параметрами:
-
-```bash
-go run ./services/storage/cmd/multipart-smoke \
-  -addr localhost:50053 \
-  -content-type text/plain \
-  -part1 "hello " \
-  -part2 "world" \
-  -chunk-size 3
-```
-
-CLI создаёт multipart session, загружает 2 части несколькими чанками, выполняет `CompleteMultipartUpload`, затем читает итоговый blob обратно и проверяет содержимое и MD5.
-
----
-
-## Хранилище на диске
-
-```
-DATA_DIR/                            (по умолчанию /data/blobs)
-├── ab/
-│   └── abcd1111-2222-3333-4444-555566667777
-├── c4/
-│   └── c4ef1111-2222-3333-4444-555566667777
-└── ...
-
-MULTIPART_DIR/                       (по умолчанию /data/staging)
-├── completed/
-│   ├── ab/
-│   │   └── abcd1111-2222-3333-4444-555566667777.json
-│   └── ...
-└── uploads/
-    ├── {upload_id}/
-    │   ├── manifest.json            ← expected_parts + content_type + blob_id
-    │   ├── part_00001
-    │   ├── part_00002
-    │   └── ...
-    └── {blob_id}/
-        ├── manifest.json            ← staging single-part upload
-        └── object.bin
-```
-
-- `blob_id` — UUID v4, генерируется сервисом при `StoreObject`; финальный файл публикуется как `DATA_DIR/{blob_id[0:2]}/{blob_id}`
-- `upload_id` — UUID v4, генерируется при `InitiateMultipartUpload`; multipart-части складываются в `MULTIPART_DIR/uploads/{upload_id}/`
-- Single-part upload тоже проходит через staging: сначала создаётся `object.bin`, затем файл атомарно публикуется в `blobs/`
-- После успешного `CompleteMultipartUpload` session cleanup выполняется best-effort; идемпотентность retry обеспечивается через `completed/{upload_id[0:2]}/{upload_id}.json`
-- Для атомарной записи используются уникальные temp-файлы с последующим `os.Rename`, поэтому stale `*.tmp` после crash не должны ломать retry
-
----
-
-## Dependency Injection
-
-DI реализован через паттерн **Service Provider** с ленивой инициализацией.
-Каждый компонент создаётся при первом обращении и кэшируется:
-
-```
-service_provider.go
-
-StorageHandler(ctx)           ← создаёт handler при первом вызове
-    └── StorageService(ctx)   ← создаёт service при первом вызове
-        └── StorageRepository(ctx) ← создаёт repo при первом вызове
-```
-
-Файл: `internal/app/service_provider.go`
-
-Цепочка зависимостей:
-```
-Handler → StorageService (interface) → StorageRepository (interface)
-                                              ↓
-                                        StorageConfig (DATA_DIR, MULTIPART_DIR)
-```
-
----
-
-## Обработка ошибок
-
-Определены в `internal/errors/domain_errors/apperrors.go`:
-
-| Ошибка | gRPC код | Когда |
-|---|---|---|
-| `ErrBlobNotFound` | `NOT_FOUND` | blob_id не существует на диске |
-| `ErrUploadNotFound` | `NOT_FOUND` | upload_id multipart не найден |
-| `ErrInvalidBlobSize` | `INVALID_ARGUMENT` | size < 0 или фактический размер не совпал с ожидаемым |
-| `ErrInvalidUpload` | `INVALID_ARGUMENT` | некорректная multipart-сессия |
-| `ErrInvalidParts` | `INVALID_ARGUMENT` | пустой/невалидный список частей или не совпало expected_parts |
-| `ErrInvalidPartNumber` | `INVALID_ARGUMENT` | Некорректный номер части |
-| `ErrChecksumMismatch` | `INVALID_ARGUMENT` | MD5 не совпадает при CompleteMultipart |
-| `ErrDiskFull` | `RESOURCE_EXHAUSTED` | Недостаточно места на диске |
-| `ErrInternal` | `INTERNAL` | Внутренняя ошибка сервиса |
-
-Ошибки автоматически конвертируются в gRPC status codes через middleware
-`validationInterceptor.ErrorCodesUnaryInterceptor` и `validationInterceptor.ErrorCodesStreamInterceptor` из shared kit.
-
-Также есть transport-level ошибки, которые возникают ещё в handler/middleware:
-
-- `INVALID_ARGUMENT` для нарушенного streaming contract (ожидался `header`/`chunk`, но пришёл другой тип сообщения), для отсутствующего `upload_id`/`part_number` в `UploadPart`, и для пустого client stream (`io.ErrUnexpectedEOF`)
-- `CANCELED` если клиент отменил контекст
-- `DEADLINE_EXCEEDED` если истёк deadline запроса
-- `INTERNAL` для неожиданных ошибок FS
-
----
-
-## Observability
-
-### Логирование
-
-- Библиотека: [zap](https://github.com/uber-go/zap) (через `shared/pkg/go-kit/logger`)
-- Формат: text (development) или JSON (production, `LOGGER_AS_JSON=true`)
-- Экспорт в OTEL через OTLP (`LOGGER_ENABLE_OLTP=true`)
-
-### Трейсинг
-
-- OpenTelemetry SDK
-- Экспорт через OTLP gRPC в Collector
-- Каждый gRPC вызов автоматически создаёт span через `tracing.UnaryServerInterceptor`
-
-### Метрики
-
-- OpenTelemetry SDK
-- Latency гистограммы и error rate для unary и streaming gRPC методов
-- Автоматический сбор через `metricsInterceptor.MetricsInterceptor` и `metricsInterceptor.StreamMetricsInterceptor`
-- Дополнительно для storage:
-  - `storage_read_bytes_total`
-  - `storage_write_bytes_total`
-  - `storage_filesystem_usage_bytes`
-  - `storage_data_dir_usage_bytes`
-
-### Health Check
-
-Эндпоинт `HealthCheck` возвращает:
-- `SERVING` — сервис готов, `DATA_DIR` доступна
-- `NOT_SERVING` — `DATA_DIR` недоступна или заканчивается место
-- `UNKNOWN` — статус не определён
-
-Также зарегистрирован стандартный gRPC Health Checking Protocol
-(`grpc.health.v1.Health`) для использования с Kubernetes probes.
-
----
-
-## Kafka-интеграция
-
-> **Текущий статус:** не реализована (следующий этап: Phase 3)
-
-Планируемая интеграция:
-
-| Направление | Топик | Описание |
-|---|---|---|
-| **Producer** | `object-stored` | После успешного `StoreObject` — уведомление для Metadata Service |
-| **Consumer** | `object-deleted` | Получение `blob_id` → удаление файла с диска (идемпотентно) |
-
----
-
-## Разработка
-
-### Пререквизиты
-
-- Go 1.24.1+
-- protoc + protoc-gen-go + protoc-gen-go-grpc (для генерации proto)
-
-### Генерация protobuf
-
-```bash
-# Из корня репозитория
-make generate-storage
-```
-
-Результат: `shared/pkg/go/storage/v1/storage.pb.go` + `storage_grpc.pb.go`
-
-### Сборка и проверка
-
-```bash
-# Из корня репозитория (go.work подтягивает shared)
-go build ./services/storage/...
-
-# Unit + component tests
-go test ./services/storage/...
-```
-
-### Генерация minimock для service tests
+Retrieve возвращает bytes в base64; `length=0` означает читать до конца.
+Header может содержать первые байты; последующие сообщения — только chunk.
+Для больших файлов используйте generated streaming client с bounded buffering.
+Готовый multipart smoke-клиент проверяет initiate → upload parts → complete →
+retrieve, сверяет байты/MD5 и оставляет итоговый blob для осмотра:
 
 ```bash
 cd services/storage
-PATH="$PWD/bin:$PATH" go generate ./pkg/mocks
+go run ./cmd/multipart-smoke -addr localhost:50053
 ```
 
-### Структура модулей
+Это проверка внутреннего multipart API, а не S3 minimum part size.
 
+## Наблюдаемость и диагностика
+
+Сервис создаёт structured logs, traces и metrics через общий Go kit. Экспорт
+зависит от OTEL collector. Ошибки repository преобразуются в domain/gRPC errors;
+клиент должен различать invalid input, missing blob/session и internal I/O error.
+
+После cancellation или ошибки записи temporary file должен быть удалён. Ошибка
+cleanup после успешного rename требует logs/metrics и reconciliation, но не должна
+делать committed bytes неизвестными coordinator.
+
+Тестовый набор включает unit и filesystem/component scenarios: empty/large
+streams, size mismatch, range reads, delete, multipart overwrite/complete/abort и
+retry. Crash durability и multi-node replication требуют отдельных сред.
+
+## Разработка и тесты
+
+### Тесты
+
+```bash
+cd services/storage
+go test ./...
 ```
-go.work
-├── ./shared                    # Shared kit + сгенерированные proto
-├── ./services/storage          # Этот сервис
-├── ./services/users
-└── ./services/auth
+
+Инвентаризация тестов: [tests.md](tests.md). Standard gRPC Health выставляется в
+SERVING при старте; custom `DataStorageService.HealthCheck` отдельно проверяет
+filesystem. Эти два endpoint нельзя считать одной и той же readiness-проверкой.
+
+### Proto generation
+
+Из корня:
+
+```bash
+make generate-storage-go
+make generate-storage-py
 ```
 
-Модуль `shared` подключается через `go.work`, а не через `require` в `go.mod`.
-После пуша сгенерированных proto-файлов в remote `go mod tidy` отработает без ошибок.
+Либо сгенерировать все bindings:
 
-### Добавление нового RPC
+```bash
+make generate
+```
 
-1. Добавить метод в `shared/api/storage/v1/storage.proto`
-2. Запустить `make generate-storage`
-3. Добавить метод в интерфейс `StorageRepository` (`repository/repository.go`) — если нужен новый метод FS
-4. Реализовать в `repository/storage/`
-5. Добавить метод в интерфейс `StorageService` (`service/service.go`)
-6. Реализовать в `service/storage/`
-7. Реализовать handler в `handler/storage/` (новый файл)
+`go.work` подменяет опубликованные module versions локальными каталогами во время
+работы в workspace. При этом `services/storage/go.mod` всё равно содержит обычную
+module dependency на shared package.
 
----
+## Ограничения и дальнейшие работы
 
-## TODO
+### Что пока не реализовано
 
-Подробный план реализации с описанием всех фаз, взаимодействий и подводных камней:
-[docs/storage-service-implementation-plan.md](../../docs/storage-service-implementation-plan.md)
+- репликация blob на несколько Storage nodes;
+- placement service и consistent hashing;
+- Kafka consumer для object cleanup;
+- внешний S3 HTTP API;
+- durable связь Storage completion с Metadata finalize.
 
-- [x] Реализовать реальное чтение/запись на файловую систему в Repository
-- [x] Подсчёт MD5 при записи blob
-- [x] Range-запросы при чтении (RetrieveObject)
-- [x] Multipart: хранение частей, склейка, отмена
-- [ ] Kafka producer (`object-stored`) и consumer (`object-deleted`)
-- [x] Проверка свободного места на диске в HealthCheck
-- [ ] Шардирование файлов по первым байтам UUID
-- [ ] TTL/garbage collection для зависших multipart-сессий
-- [x] Unit/component-тесты для service и repository слоёв
-- [x] Dockerfile
-- [x] Интеграция в docker-compose.yml
+Нельзя вызвать StoreObject на нескольких узлах и ожидать один blob ID: текущий
+request не принимает заранее выбранный ID, а каждый service сам создаёт UUID.
+
+Варианты будущего cleanup: синхронный вызов для простого стенда, Kafka consumer с
+at-least-once delivery либо reconciliation worker по durable catalog. Для
+асинхронных вариантов нужны точные blob/version IDs и идемпотентность.
+
+### Варианты распределённого data path
+
+- Gateway/coordinator пишет replicas параллельно;
+- Storage nodes передают поток по chain;
+- fan-out выполняет отдельный data proxy.
+
+Текущий single-node API остаётся базовым blob interface. Изменения IDs, fencing,
+quorum и repair описаны в
+[`docs/distributed-storage-architecture.md`](../../docs/distributed-storage-architecture.md).
+
+## Связанные документы
+
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).

@@ -1,370 +1,208 @@
-# Распределённое хранение — шардирование + репликация
+# Распределённое хранение — шардирование и репликация
 
-Дата: 2026-04-06
+- Дата: 2026-04-06
+- Актуализировано: 2026-09-11
 Связанные документы: [Storage Service — план реализации](storage-service-implementation-plan.md) | [Kubernetes deployment](kubernetes-deployment-plan.md)
 
----
+## Контекст и текущее состояние
 
-## Контекст
+Сейчас Storage работает как один локальный blob store: принимает поток, создаёт
+`blob_id`, сохраняет файл на локальной файловой системе и возвращает его по этому
+идентификатору. Placement Service, репликации и автоматического repair пока нет.
 
-Сейчас Storage — один инстанс. Все blob лежат на одном диске. Это single point of failure и потолок по ёмкости. Этот документ описывает превращение Storage в **кластер нод**, где данные шардируются по consistent hash ring и реплицируются для отказоустойчивости.
+Цель этого плана — перейти к нескольким Storage nodes, сохранив простую модель:
+Storage отвечает за байты, Metadata — за объектные версии, Placement — за
+размещение и состояние реплик, Gateway или отдельный coordinator ведёт data path.
 
-**Ключевое свойство:** сам Storage-сервис **не меняется**. Каждая нода остаётся тупым blob-хранилищем. Вся координация — снаружи.
+## Базовые параметры
 
----
+- `N` — желаемое число реплик blob;
+- `W` — число durable acknowledgements, после которых запись можно считать
+  выполненной;
+- `R` — число реплик, участвующих в чтении;
+- `topology_epoch` — версия состава кластера и placement state;
+- `operation_id` — идентификатор одной повторяемой команды записи.
 
-## Параметры кластера
+Для первого прототипа можно исследовать `N=3`, `W=2`, `R=1`. Это ещё не готовая
+гарантия strong consistency. Условие `W + R > N` полезно только вместе с единым
+порядком версий, согласованным membership, выбором самой новой версии и обработкой
+конкурентных записей.
 
-```
-N = replication factor (сколько копий каждого blob)
-W = write quorum (сколько ACK ждать при записи)
-R = read quorum (сколько нод опросить при чтении)
+В OpenS3 проще опираться на authoritative pointer в Metadata: после `W` durable
+записей Metadata фиксирует конкретную committed version и список подтвердивших
+holders. Чтение обращается только к ним и при ошибке пробует следующую реплику.
 
-Гарантия консистентности: W + R > N
-```
+## Placement Service
 
-| Профиль | N | W | R | Свойство |
-|---|---|---|---|---|
-| Durability first | 3 | 3 | 1 | Запись медленная, чтение быстрое, максимальная надёжность |
-| Balanced (quorum) | 3 | 2 | 2 | Стандартный quorum, strong consistency |
-| **S3-like** | **3** | **2** | **1** | **Пишем в majority, читаем с любой живой — рекомендуемый** |
-| Fast write | 3 | 1 | 3 | Запись быстрая, риск потери при крэше до репликации |
+Placement хранит и выдаёт:
 
----
+- текущий `topology_epoch` и membership;
+- назначенные и подтверждённые holders каждого logical blob;
+- состояние nodes и время последнего health signal;
+- очередь repair/rebalance;
+- tombstones до завершения удаления со всех реплик.
 
-## Placement Service — новый сервис
+Статус `suspect` запрещает назначать node для новых записей, но сам по себе не
+останавливает старого coordinator. Для защиты от split brain Storage должен
+сравнивать fencing token/epoch с последним принятым значением и отклонять stale
+команды.
 
-Единственный новый компонент. Отвечает за:
-- Какая нода хранит какие шарды (consistent hash ring)
-- Какие ноды живы (heartbeat)
-- Куда писать новый blob (Allocate)
-- Где искать существующий blob (Locate)
-- Фоновая дорепликация при потере ноды
+## Идентификатор реплики
 
-```protobuf
-service PlacementService {
-  // Для записи: "на какие ноды положить этот blob?"
-  rpc Allocate(AllocateRequest) returns (AllocateResponse);
+Текущий `StoreObject` создаёт новый UUID внутри каждой Storage node. Поэтому
+несколько независимых вызовов не создадут реплики с одинаковым `blob_id` без
+изменения контракта. Возможны два варианта:
 
-  // Для чтения: "на каких нодах лежит этот blob?"
-  rpc Locate(LocateRequest) returns (LocateResponse);
+1. Coordinator выбирает logical `blob_id`, а Storage принимает его вместе с
+   `operation_id` и `topology_epoch`.
+2. Каждая node создаёт local `blob_id`, а Metadata/Placement хранит mapping
+   `logical_blob_id → node + local_blob_id`.
 
-  // Storage-ноды репортят о себе
-  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+Первый вариант проще для чтения и удаления. Второй меньше меняет автономность
+Storage, но усложняет каталог реплик. Выбор нужен до реализации fan-out.
 
-  // Административное: текущее состояние кластера
-  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
-}
-```
+## Три варианта записи
 
----
+### Вариант A: Gateway-driven parallel write
 
-## Три альтернативных подхода к записи
+Gateway или выделенный coordinator получает targets от Placement, читает входной
+поток один раз и передаёт chunks нескольким Storage workers через bounded buffers.
+После `W` полных durable commits он регистрирует version в Metadata.
 
-### Альтернатива A: Gateway-driven parallel write
+Плюсы: минимальное число новых компонентов и удобный первый прототип. Минусы:
+Gateway знает topology, держит fan-out/backpressure и тратит исходящий bandwidth
+на каждую реплику.
 
-```
-Gateway
-  │
-  ├── Placement.Allocate(blob_id, N=3) → [node-1, node-2, node-3]
-  │
-  ├──→ node-1.StoreObject(stream) ──→ ACK ─┐
-  ├──→ node-2.StoreObject(stream) ──→ ACK ─┤ ждём W=2
-  └──→ node-3.StoreObject(stream) ──→ ACK ─┘
-  │
-  └── Metadata.CreateObjectVersion(blob_id, nodes=[1,2,3])
-```
+Обычный `io.MultiWriter` здесь недостаточен: writers вызываются последовательно,
+поэтому одна медленная node блокирует весь поток. Нужны независимые workers,
+ограничение памяти, cancellation и cleanup частичных записей.
 
-Gateway мультиплексирует `io.Reader` на N потоков через `io.TeeReader` + `io.Pipe`:
+### Вариант B: chain replication
 
-```go
-// Псевдокод в Gateway
-readers := make([]io.Reader, N)
-for i := range nodes {
-    pr, pw := io.Pipe()
-    readers[i] = pr
-    go func() { storage[i].StoreObject(pr) }()
-}
-multiWriter := io.MultiWriter(pipeWriters...)
-io.Copy(multiWriter, clientStream)  // один проход по данным
-```
+Coordinator отправляет поток primary node, та пересылает его дальше по цепочке.
+Acknowledgement возвращается после заданного числа durable commits. Передачу
+можно pipeline-ить, поэтому задержка не обязана равняться сумме полных времён
+записи на каждой node.
 
-| | |
-|---|---|
-| **Плюсы** | Латентность = max(W самых быстрых нод). Storage не меняется вообще. Один проход по данным |
-| **Минусы** | Gateway сильно усложняется (мультиплексирование стримов, обработка частичных ошибок). Gateway должен знать о топологии нод |
-| **Подходит если** | Хотите минимум новых сервисов. Gateway уже достаточно сложный — ещё одна ответственность не критична |
+Плюсы: Gateway отправляет данные один раз. Минусы: Storage становится участником
+протокола репликации; нужны reconfiguration, fencing и обработка разрыва цепочки.
 
-### Альтернатива B: Chain replication (primary → replicas)
+### Вариант C: Placement/Data Proxy
 
-```
-Gateway
-  │
-  ├── Placement.Allocate(blob_id, N=3) → [node-1 (primary), node-2, node-3]
-  │
-  └──→ node-1.StoreObject(stream)
-          │
-          ├──→ node-2.StoreObject(forward)
-          │        │
-          │        └──→ node-3.StoreObject(forward)
-          │                    │
-          │              ACK ──┘
-          │        ACK ──┘
-          ACK ──┘
-```
+Отдельный proxy получает placement и ведёт fan-out, а Gateway видит один data
+endpoint. Frontend proxy можно масштабировать горизонтально, но membership,
+epochs и repair state должны храниться в согласованном control plane.
 
-Gateway пишет только на primary. Primary форвардит по цепочке.
+Плюсы: Gateway не знает topology, data path можно развивать отдельно. Минусы:
+появляется ещё один нагруженный компонент и сетевой hop.
 
-| | |
-|---|---|
-| **Плюсы** | Gateway простой — пишет в одну ноду. Хорошо изучен (CRAQ, Chain Replication, HDFS Pipeline) |
-| **Минусы** | Латентность = сумма всех хопов (последовательно). **Storage меняется** — нужна логика форвардинга. Если средняя нода в цепочке падает — цепочка рвётся |
-| **Подходит если** | Хотите держать Gateway тонким. Готовы добавить логику форвардинга в Storage |
+GFS и Ceph полезны как источники идей о placement и recovery, но не являются
+точными примерами такого proxy: после получения metadata их data path идёт к
+storage servers/OSDs.
 
-Что меняется в Storage при chain replication:
+## Сравнение вариантов
 
-```go
-// Новый метод или расширение StoreObject
-type StorageService interface {
-    // ... существующие методы ...
-
-    // Список нод для форвардинга (пустой = конец цепочки)
-    StoreObjectChain(ctx context.Context, reader io.Reader, size int64,
-                     contentType string, forwardTo []NodeInfo) (*model.BlobMeta, error)
-}
-```
-
-### Альтернатива C: Placement Service как прокси (самая чистая архитектура)
-
-```
-Gateway
-  │
-  └──→ Placement.StoreObject(stream, replication_factor=3)
-          │
-          │  (Placement сам решает куда, сам мультиплексирует)
-          │
-          ├──→ node-1.StoreObject(stream)
-          ├──→ node-2.StoreObject(stream)
-          └──→ node-3.StoreObject(stream)
-          │
-          ACK (blob_id, nodes)
-```
-
-Placement Service проксирует стримы. Gateway вообще не знает о количестве нод.
-
-| | |
-|---|---|
-| **Плюсы** | Gateway остаётся максимально простым. Storage не меняется. Вся сложность в одном месте. Легко менять стратегию без трогания Gateway/Storage |
-| **Минусы** | Placement на data-path — но он stateless, масштабируется горизонтально (как и сам Gateway). Основной trade-off: ещё один сервис для деплоя и мониторинга |
-| **Подходит если** | Хотите чистое разделение ответственностей. Placement stateless за load balancer — масштабируется как Gateway |
-
----
-
-## Сравнительная таблица
-
-| Критерий | A: Gateway-driven | B: Chain replication | C: Placement-proxy |
+| Критерий | A: parallel coordinator | B: chain | C: data proxy |
 |---|---|---|---|
-| Изменения в Storage | Нет | Да (форвардинг) | Нет |
-| Изменения в Gateway | Большие | Минимальные | Минимальные |
-| Новые сервисы | Placement (лёгкий) | Placement (лёгкий) | Placement (тяжёлый) |
-| Латентность записи | Лучшая (параллельно) | Худшая (последовательно) | Средняя (+1 hop) |
-| Сложность реализации | Средняя | Средняя | Средняя (Placement stateless) |
-| Data-path | Gateway | Storage chain | Placement (stateless, масштабируется) |
-| Аналоги | Cassandra, DynamoDB | HDFS Pipeline, CRAQ | GFS, Ceph (OSD) |
+| Изменения Storage API | logical ID/epoch | протокол репликации | logical ID/epoch |
+| Нагрузка на Gateway | высокая | ниже | низкая |
+| Новый компонент | не обязателен | не обязателен | обязателен |
+| Сложность failure handling | средняя | высокая | высокая |
+| Подход для первого этапа | **да** | позже | после измерений |
 
-### Рекомендация для учебного проекта
+Рекомендуемый первый этап — вариант A с coordinator-selected logical ID и
+Metadata как источником истины. Это решение для прототипа, которое нужно
+подтвердить тестами; варианты B и C остаются кандидатами при росте нагрузки.
 
-**Альтернатива A (Gateway-driven)** — лучший баланс:
-- Storage не трогаем вообще
-- Placement Service — лёгкий координатор (не data-path)
-- Параллельная запись — лучшая латентность
-- Gateway и так будет сложным — это его работа как оркестратора
+## Consistent hash ring
 
----
+Ring может выбирать предпочтительные nodes для нового blob:
 
-## Consistent Hash Ring — как работает шардирование
+1. Placement хэширует logical `blob_id`.
+2. Находит следующую virtual node на ring.
+3. Выбирает `N` разных физических nodes с учётом failure domain.
+4. Сохраняет назначение и затем отдельно отмечает durable acknowledgements.
 
-```
-         0 ──────── 90 ──────── 180 ──────── 270 ──────── 360
-         │          │            │             │            │
-      node-1     node-3       node-2        node-1       node-3
-         │          │            │             │            │
-         ▼          ▼            ▼             ▼            ▼
-     ┌───────┐  ┌───────┐  ┌──────────┐  ┌───────┐  ┌───────┐
-     │shard 0│  │shard 1│  │ shard 2  │  │shard 3│  │shard 4│
-     └───────┘  └───────┘  └──────────┘  └───────┘  └───────┘
+Ring не заменяет каталог фактических holders. После падения, частичной записи или
+rebalance вычисленное размещение может отличаться от реально подтверждённого.
+Чтение использует committed catalog, а ring — для новых назначений и repair.
 
-hash(blob_id) = 142 → попадает в shard 2 → primary: node-2
-                                          → replicas: node-1, node-3 (следующие по кольцу)
-```
+## Изменения в сервисах
 
-При добавлении node-4 между node-2 и node-1 перемещается только ~1/4 данных (шарды, попавшие в зону node-4), а не все.
+### Gateway/coordinator
 
-Библиотеки для Go:
-- `github.com/serialx/hashring` — простой consistent hash
-- `github.com/buraksezer/consistent` — bounded loads (более равномерное распределение)
+- получает placement и fencing epoch;
+- передаёт один поток репликам с bounded backpressure;
+- ждёт `W` durable результатов;
+- повторяет ту же команду по `operation_id`;
+- после частичного успеха создаёт durable cleanup/repair work.
 
----
+### Storage
 
-## Изменения в других сервисах
+- принимает выбранную схему logical/local ID;
+- проверяет `topology_epoch`;
+- идемпотентно возвращает terminal result одной операции;
+- сообщает checksum и durable commit;
+- поддерживает repair copy и удаление конкретной реплики.
 
 ### Metadata
 
-Metadata должен хранить, на каких нодах лежат реплики:
+- делает version видимой только после выполнения write policy;
+- хранит logical blob и подтверждённых holders либо ссылку на Placement catalog;
+- не использует ETag как ключ идемпотентности;
+- публикует cleanup/repair events через transactional outbox.
 
-```sql
--- Вариант 1: массив в JSONB (проще)
-ALTER TABLE versions ADD COLUMN replica_nodes JSONB;
--- {"nodes": ["storage-1", "storage-2", "storage-3"]}
+## Kafka, delete и repair
 
--- Вариант 2: отдельная таблица (нормализованно)
-CREATE TABLE blob_replicas (
-    version_id UUID REFERENCES versions(id) ON DELETE CASCADE,
-    storage_node TEXT NOT NULL,
-    blob_id UUID NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active', -- active, migrating, stale
-    PRIMARY KEY (version_id, storage_node)
-);
-```
+Kafka подходит для repair, rebalance и cleanup, которым не требуется держать
+клиентский запрос открытым. Доставка проектируется как at-least-once: события
+имеют `event_id`, resource generation, version и точные replica references, а
+consumers выполняют команды идемпотентно.
 
-При чтении:
-```
-Gateway → Metadata.GetObjectMeta → blob_id + nodes
-       → выбрать любую живую ноду (R=1)
-       → Storage-N.RetrieveObject(blob_id)
-```
+Удаление по одному bucket/key опасно: позднее событие старого поколения может
+затронуть новый объект с тем же именем. Delete marker скрывает текущий объект, но
+не удаляет старые version blobs. Permanent version delete и physical GC идут
+отдельным flow.
 
-### docker-compose
+Repair ограничивается по bandwidth/concurrency. Checksums подтверждают байты, но
+актуальную version и topology определяет control plane.
 
-```yaml
-storage-1:
-  build: { context: ., dockerfile: services/storage/Dockerfile }
-  ports: ["50053:50053"]
-  volumes: [storage-data-1:/data]
-  environment:
-    GRPC_PORT: "50053"
-    NODE_ID: "storage-1"
+## Основные failure modes
 
-storage-2:
-  build: { context: ., dockerfile: services/storage/Dockerfile }
-  ports: ["50063:50063"]
-  volumes: [storage-data-2:/data]
-  environment:
-    GRPC_PORT: "50063"
-    NODE_ID: "storage-2"
-
-storage-3:
-  build: { context: ., dockerfile: services/storage/Dockerfile }
-  ports: ["50073:50073"]
-  volumes: [storage-data-3:/data]
-  environment:
-    GRPC_PORT: "50073"
-    NODE_ID: "storage-3"
-
-placement:
-  build: { context: ., dockerfile: services/placement/Dockerfile }
-  ports: ["50060:50060"]
-  environment:
-    STORAGE_NODES: "storage-1:50053,storage-2:50063,storage-3:50073"
-    REPLICATION_FACTOR: "3"
-    WRITE_QUORUM: "2"
-    READ_QUORUM: "1"
-
-volumes:
-  storage-data-1:
-  storage-data-2:
-  storage-data-3:
-```
-
----
-
-## Kafka и репликация
-
-При удалении объекта `object-deleted` должен доехать до **всех нод**, хранящих реплику:
-
-**Вариант 1:** Каждая Storage-нода — свой consumer group → каждая получает сообщение:
-```
-consumer_group: storage-{node_id}-consumer
-```
-Минус: все ноды получают все сообщения, даже если blob у них нет. Нода делает `DeleteBlob` → файл не найден → идемпотентно ок.
-
-**Вариант 2:** Placement Service потребляет `object-deleted` и рассылает `DeleteObject` gRPC только на нужные ноды:
-```
-Metadata → Kafka: object-deleted { blob_id }
-Placement (consumer) → Locate(blob_id) → [node-1, node-3]
-  → node-1.DeleteObject(blob_id)
-  → node-3.DeleteObject(blob_id)
-```
-Минус: Placement на критическом пути удаления.
-
-**Рекомендация:** Вариант 1 для простоты. Идемпотентность DeleteBlob делает лишние вызовы безвредными.
-
----
-
-## Подводные камни
-
-### 1. Split brain при network partition
-
-Если Placement потеряет связь с нодой, но нода жива — Placement начнёт дорепликацию, а нода продолжит отвечать. Два источника правды.
-
-**Решение:** Fencing — перед дорепликацией Placement ставит ноду в статус `suspect`. Gateway перестаёт писать на `suspect` ноды, но продолжает читать. Если нода вернётся — синхронизация по checksums.
-
-### 2. Partial write при параллельной записи
-
-Gateway пишет на 3 ноды. Две записали, третья упала. Blob с одним blob_id существует на 2 нодах из 3.
-
-**Решение:** W=2 означает "достаточно". Gateway возвращает success. Placement фоново дореплицирует на третью ноду (или на replacement ноду).
-
-### 3. Читаем stale данные после перезаписи
-
-Object перезаписан (новый PutObject с тем же ключом). Metadata обновлён (новый blob_id). Но старый blob ещё не удалён с некоторых нод.
-
-**Не проблема:** blob_id уникален (UUID). Новый PutObject создаёт **новый** blob_id. Старый blob_id → `object-deleted` через Kafka → eventually удалится.
-
-### 4. Thundering herd при падении ноды
-
-Если нода-1 упала и хранила 1000 blob — Placement пытается скопировать все 1000 одновременно на оставшиеся ноды, забивая сеть.
-
-**Решение:** Rate-limited rebalance queue. Копировать по 10 blob одновременно, с паузой. Приоритизировать blob с `replica_count < N` (критически недореплицированные).
-
----
+1. **Split brain.** Старый coordinator пишет после изменения topology — Storage
+   отклоняет stale epoch.
+2. **Partial write.** Записано меньше `W` или ответ потерян — операция остаётся
+   незавершённой, а подтверждённые orphan replicas попадают в cleanup/repair.
+3. **Stale read.** Клиент попал на node без current version — чтение выбирает
+   holders из committed Metadata и умеет сделать retry.
+4. **Thundering herd.** После падения node repair ограничивается очередью,
+   приоритетами и лимитами, а не стартует для всех blob одновременно.
+5. **Late delete.** Команда содержит поколение/version/blob IDs и не удаляет
+   ресурс только по переиспользуемому имени.
 
 ## Поэтапная реализация
 
-```
-Фаза 5a: Static sharding (MVP)
-  │
-  ├── Placement Service с фиксированным hash ring (конфиг из env)
-  ├── 3 Storage-ноды в docker-compose
-  ├── Gateway: Allocate → parallel write на N нод, ждать W=2
-  ├── Gateway: Locate → читать с любой живой ноды (R=1)
-  ├── Metadata: хранить replica_nodes
-  └── Нет добавления/удаления нод в runtime
-  │
-Фаза 5b: Failure recovery
-  │
-  ├── Placement: heartbeat от нод (каждые 5s)
-  ├── Placement: детекция упавшей ноды (3 пропущенных heartbeat)
-  ├── Фоновая дорепликация: копирование blob с живой реплики на новую ноду
-  ├── Gateway: при ошибке чтения → retry на другую реплику
-  └── Тесты: убить ноду → данные доступны → дорепликация завершена
-  │
-Фаза 5c: Dynamic rebalance
-  │
-  ├── Добавление ноды: пересчёт hash ring → миграция ~1/N шардов
-  ├── Dual-read: во время миграции читать и со старой, и с новой ноды
-  ├── Throttling: фоновая миграция не убивает сеть (rate limit на байты/сек)
-  └── Удаление ноды: перенести все шарды → вывести из ring
-```
+1. Зафиксировать logical ID, operation ID и fencing в protobuf.
+2. Реализовать Placement membership и durable replica catalog.
+3. Добавить parallel coordinator для `N=3/W=2`.
+4. Перевести read path на confirmed holders с retry.
+5. Добавить outbox, cleanup и rate-limited repair.
+6. Провести node-loss, partition и rebalance tests.
+7. По метрикам решить, нужен ли chain replication или отдельный data proxy.
 
----
+## Проверки
 
-## Тесты
+- success записи возможен только после `W` durable acknowledgements;
+- retry с тем же `operation_id` возвращает тот же terminal result;
+- независимый PUT одинаковых байтов создаёт новую logical version;
+- чтение не выбирает неподтвердившую current version node;
+- stale coordinator получает rejection;
+- падение одной node соответствует заявленной durability/availability;
+- repair не превышает заданные лимиты;
+- late delete не затрагивает новое поколение ресурса;
+- Metadata pointer не виден до выполнения write policy.
 
-| Фаза | Тест | Что проверяет |
-|---|---|---|
-| 5a | Placement hash ring unit-тесты | Allocate/Locate возвращают правильные ноды |
-| 5a | Интеграция: запись на N нод | blob доступен с любой реплики |
-| 5b | Chaos: убить ноду | данные доступны с оставшихся реплик |
-| 5b | Дорепликация | replica_count восстанавливается до N |
-| 5c | Добавить ноду | шарды мигрируют, данные доступны во время миграции |
+Материалы для сравнения:
+[The Google File System](https://static.googleusercontent.com/media/research.google.com/en/us/archive/gfs-sosp2003.pdf),
+[Ceph architecture](https://docs.ceph.com/en/quincy/architecture/),
+[Go io.MultiWriter](https://pkg.go.dev/io#MultiWriter).

@@ -1,8 +1,8 @@
-# CLAUDE.md — opens3-rebac
+# CLAUDE.md — OpenS3-ReBAC
 
 > Context for AI assistants. Contains only what can't be derived from reading the code.
 
----
+## Что есть в текущем checkout
 
 ## What this project is
 
@@ -10,7 +10,14 @@
 
 Repo: https://github.com/alesplll/opens3-rebac
 
----
+- protobuf source of truth: `shared/api/<service>/v1/*.proto`;
+- generated Go: `shared/pkg/go`;
+- generated Python: `shared/pkg/py`;
+- общие библиотеки: `shared/pkg/go-kit`, `shared/pkg/py_kit`,
+  `shared/pkg/rust-kit`;
+- Go-сервисы: `services/{auth,users,metadata,storage}`;
+- Python AuthZ: `services/authz`;
+- Rust Quota: `services/quota`.
 
 ## Services
 
@@ -26,7 +33,10 @@ Repo: https://github.com/alesplll/opens3-rebac
 
 Proto source: `shared/api/`. Generated stubs: `shared/pkg/go/`, `shared/pkg/py/`.
 
----
+`Login` возвращает refresh token. Access token выдаёт отдельный
+`GetAccessToken`. `GetRefreshToken` выпускает новый token, но пока не отзывает
+старый. JWT содержит строковый UUID в claim `user_id` и `token_type`; `sub` не
+является текущим источником ID. Redis используется для login-attempt counters.
 
 ## Architecture
 
@@ -69,7 +79,9 @@ Quota :50055 ── Redis ── Kafka
 | `auth-changes` | AuthZ | AuthZ cache_invalidator |
 | `auth-audit` | AuthZ | — (log sink) |
 
----
+Публичные relations: `MEMBER_OF`, `HAS_PERMISSION`, `PARENT_OF`. Для владельца
+используйте `HAS_PERMISSION` с уровнем `ADMIN`; `OWNER_OF` — только legacy-чтение
+в store и не принимается публичным enum.
 
 ## Service boundaries
 
@@ -83,9 +95,15 @@ Quota :50055 ── Redis ── Kafka
 | **Users** | issue tokens, know about S3, check permissions |
 | **Gateway** | store data, make authorization decisions, know about graph structure |
 
----
+1. [AGENTS.md](AGENTS.md): стиль Go/Python, minimock, документация и scope изменений.
+2. [Карта документации](docs/README.md): README нужного сервиса и связанные планы.
+3. Wire fields в `shared/api`, затем handler/service/repository: комментарии proto
+   тоже могут быть устаревшими. Наличие комментария о Kafka consumer не доказывает,
+   что consumer подключён в runtime.
+4. `docker-compose.yml`, сервисный `.env` и config parser: отличайте defaults кода,
+   значения development и host overrides.
 
-## Roadmap
+## Пакеты и границы API
 
 | Phase | Status | What |
 |---|---|---|

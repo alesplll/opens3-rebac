@@ -1,449 +1,247 @@
 # Quota Service
 
-gRPC-сервис управления квотами хранилища для **OpenS3**.
-Написан на Rust.
+Rust 1.95 gRPC-сервис учёта лимитов пользователей и buckets. Горячее состояние
+находится в памяти (`DashMap`), Redis используется для периодического сохранения.
 
-**Порт:** `50055` | **Язык:** Rust 1.95 | **БД:** Redis (DB 1)
+## Назначение и возможности
 
----
+Учёт bytes/objects/buckets, резервирование квоты, компенсация расхода, настройка лимитов и удаление subject. Сервис не хранит байты и не проверяет права AuthZ.
 
-## Содержание
+## Архитектура и зависимости
 
-- [Как запустить](#как-запустить)
-- [Структура файлов](#структура-файлов)
-- [Как работает сервис](#как-работает-сервис)
-- [Почему быстрый](#почему-быстрый)
-- [Redis: свой или общий](#redis-свой-или-общий)
-- [Как собирается Docker](#как-собирается-docker)
-- [Ручное тестирование: 10 grpcurl запросов](#ручное-тестирование)
+```text
+gRPC handler → QuotaService → MemoryCache (DashMap)
+                    │               │
+                    └──── flush ────┴──> RedisRepository
+```
 
----
+Проверка и резервирование выполняются в памяти без repository I/O на hot path.
+Фоновая задача сохраняет dirty entries в Redis. Limits записываются через
+repository реже, usage меняется на каждом reserve/compensation.
 
-## Как запустить
+## Структура проекта
 
-### Вариант 1: только этот сервис (для разработки)
+```text
+src/main.rs                 process entrypoint
+src/lib.rs                  public modules
+src/app.rs                  wiring, background flush, lifecycle
+src/config.rs               environment parsing
+src/domain/                 quota types и errors
+src/cache/memory.rs         in-memory usage/limits
+src/repository/             trait и Redis implementation
+src/service/quota.rs        reserve/update business logic
+src/transport/grpc.rs       protobuf mapping и gRPC handler
+src/metrics.rs              OpenTelemetry metrics
+tests/                      gRPC и Redis integration tests
+```
 
-Тебе нужен только Redis. Запускаем инфру и сервис:
+## API
+
+Source of truth: `shared/api/quota/v1/quota.proto`.
+
+| RPC | Назначение |
+|---|---|
+| `CheckQuota` | проверить и сразу зарезервировать положительную дельту |
+| `UpdateUsage` | применить самостоятельную дельту/компенсацию |
+| `GetUsage` | получить текущий usage |
+| `SetQuota` / `GetQuota` | управлять limits |
+| `DeleteSubject` | удалить usage и limits subject |
+| `HealthCheck` | проверить доступность repository |
+
+### Правильный write flow
+
+```text
+CheckQuota(+delta)
+  denied → операцию не выполнять
+  allowed → резерв уже учтён
+      операция успешна → ничего не добавлять повторно
+      операция неуспешна → UpdateUsage(-delta) как компенсация
+```
+
+Вызов `UpdateUsage(+delta)` после allowed `CheckQuota(+delta)` начислит расход
+дважды. Текущий контракт не содержит operation/reservation ID, поэтому timeout и
+retry мутации не являются exactly-once. Для надёжного production flow нужны
+стабильный operation ID, сохранённый terminal result и reconciliation.
+
+### Пример жизненного цикла
+
+```text
+CreateBucket: CheckQuota(buckets=+1) → выполнить create
+PutObject:    CheckQuota(bytes=+size, objects=+1) → выполнить write
+ошибка write: UpdateUsage(bytes=-size, objects=-1)
+DeleteObject: UpdateUsage(bytes=-size, objects=-1)
+```
+
+Если после allowed reserve операция завершилась успешно, положительный
+`UpdateUsage` для той же дельты не вызывается.
+
+## Данные и основные сценарии
+
+### Границы консистентности
+
+Операция над одной записью DashMap синхронизирована внутри одного процесса.
+Резерв пользователя и bucket — два шага с компенсацией user при отказе bucket.
+Это не распределённая транзакция. Несколько активных Quota replicas держат
+независимое состояние и не обеспечивают единый строгий лимит, поэтому текущий
+deployment должен иметь одного active writer.
+
+`DashMap::new()` сам выбирает число shards; это не фиксированные 256 shards и не
+lock-free структура. Оценки nanoseconds для map operation нельзя переносить на
+полный gRPC request без benchmark.
+
+### Persistence
+
+При старте service загружает usage и limits из Redis в память; ошибка загрузки
+останавливает startup. SetQuota меняет cache и синхронно сохраняет limits в Redis;
+если сохранение не удалось, cache уже изменён. GetUsage неизвестного subject
+возвращает нули. GetQuota возвращает сохранённый limit или отсутствие записи;
+defaults при CheckQuota и отсутствие настроенного limit — разные ситуации.
+
+Фоновый task вызывает flush с интервалом `REDIS_FLUSH_INTERVAL_MS`. В текущем
+development `.env` это 500 ms, default кода — 1000 ms. Интервал не является
+гарантированной верхней границей потери: между изменением памяти, flush и
+persistence Redis остаются окна сбоя.
+
+Development Redis в Compose запущен без AOF. После перезапуска Redis persisted
+quota data может исчезнуть. Включение AOF уменьшает одно из окон, но не делает
+весь протокол синхронно durable.
+
+При неуспешном `flush_usage` snapshot keys снова помечаются dirty и повторяются в
+следующем цикле. Concurrent delete остаётся отдельным lifecycle race: ранее
+взятый snapshot может быть записан после `DeleteSubject`, поэтому для строгой
+семантики нужны generation/tombstone либо сериализация операций.
+
+## Конфигурация
+
+```dotenv
+GRPC_PORT=50055
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=1
+REDIS_FLUSH_INTERVAL_MS=500
+DEFAULT_USER_BYTES_LIMIT=10737418240
+DEFAULT_USER_OBJECTS_LIMIT=-1
+DEFAULT_USER_BUCKETS_LIMIT=100
+DEFAULT_BUCKET_BYTES_LIMIT=-1
+DEFAULT_BUCKET_OBJECTS_LIMIT=-1
+```
+
+Значение 100 buckets — собственный default проекта, не текущий AWS quota. Размеры
+и HTTP mapping внешнего S3 API определяет будущий Gateway; 507 — расширение
+проекта, а не универсальный S3 error contract.
+
+Для локальной Rust-сборки нужен `protoc`, потому что `build.rs` компилирует proto.
+Dockerfile устанавливает его через `protobuf-dev`.
+
+Полный набор параметров определён в `src/config.rs`. При запуске внутри Compose
+используется container address Redis; при запуске с хоста — опубликованный host
+address.
+
+### Дополнительные переменные
+
+| Переменная | Default кода / назначение |
+|---|---|
+| `REDIS_PASSWORD` | не задан; используется при формировании URL |
+| `SERVICE_NAME`, `ENVIRONMENT` | `quota`, `development` |
+| `LOG_LEVEL`, `LOG_JSON` | `info`, `true` |
+| `ENABLE_OTLP`, `OTLP_ENDPOINT` | `false`, `http://otel-collector:4317` |
+
+Все лимиты перечислены выше; `-1` означает unlimited. Redis DB 1 отделяет Quota
+от AuthZ DB 0. Параметры загружаются один раз в `OnceLock`.
+
+## Запуск
+
+### Локально
+
+Из корня репозитория, с установленным Rust toolchain и `protoc`:
 
 ```bash
-# 1. Поднять Redis (из корня репо)
-docker compose up redis -d
-
-# 2. Перейти в директорию сервиса
-cd services/quota
-
-# 3. Убедиться что .env настроен (там уже всё правильно по умолчанию)
-cat .env
-
-# 4. Запустить
-cargo run --release -p quota-service
+docker compose up -d redis
+docker compose --profile services stop quota
+cargo run -p quota-service
 ```
 
-Сервис стартует за ~100ms и пишет в консоль:
-```
-INFO quota service starting quota port=50055 env=development
-INFO connected to Redis url=redis://localhost:6379/1
-INFO loaded quota data from Redis usage_count=0 limits_count=0
-INFO gRPC server listening addr=0.0.0.0:50055
-```
+Запуск из корня использует defaults и окружение корня: Redis localhost, DB 1,
+flush 1000 ms. Чтобы читать сервисный `.env`, запускайте Cargo из `services/quota`;
+в нём flush 500 ms. Не запускайте контейнер и local process одновременно на 50055.
 
-### Вариант 2: весь проект (docker compose)
+### Docker
+
+Из корня:
 
 ```bash
-# Из корня репо — поднимает всё: Redis, Neo4j, Kafka, все сервисы
-make up-services
-
-# Только инфра + quota
-docker compose up redis quota -d
-
-# С observability (Jaeger, Prometheus, Grafana, Kibana)
-make up-all
+docker compose --profile services up --build -d quota
+docker compose logs -f quota
 ```
 
-### Вариант 3: включить OTLP трейсинг (нужен observability stack)
+Compose переопределяет Redis address на `redis`, включает OTLP и задаёт
+`http://otel-collector:4317`. Collector запускается через `make up-observability`.
+
+## Примеры использования
+
+Пример резервирует 3 байта и один объект, затем освобождает резерв без записи файла.
+Выполняйте компенсацию только после `allowed=true`:
 
 ```bash
-make up-all   # поднимает сервисы + Jaeger + Prometheus + Grafana + OTel Collector
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo","bucket_id":"bucket:docs-demo","delta":{"bytes":"3","objects":"1"}}' \
+  localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo"}' \
+  localhost:50055 opens3.quota.v1.QuotaService/GetUsage
+grpcurl -plaintext -d '{"subject_id":"user:docs-demo","bucket_id":"bucket:docs-demo","delta":{"bytes":"-3","objects":"-1"}}' \
+  localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
 ```
 
-При запуске через docker compose `ENABLE_OTLP=true` выставляется автоматически через `docker-compose.yml`.
-Для локального `cargo run` выставь вручную в `.env`:
-```env
-ENABLE_OTLP=true
-OTLP_ENDPOINT=http://localhost:4317
-```
+`allowed=false` и `code` описывают отказ квоты в обычном ответе. При timeout нельзя
+вслепую повторить reserve или compensation: результат первой мутации неизвестен.
+В SetQuota указывайте все три лимита; пропущенный числовой protobuf field равен
+нулю, для unlimited нужен `-1`.
 
----
-
-## Структура файлов
-
-Сервис разбит на **6 слоёв**. Каждый слой знает только о слое ниже себя.
-
-```
-services/quota/
-├── Cargo.toml          ← зависимости Rust (tonic, dashmap, fred, ...)
-├── build.rs            ← компилирует quota.proto в Rust код при сборке
-├── Dockerfile          ← четырёхстадийная сборка: cargo-chef + builder + runtime
-├── .env                ← конфигурация по умолчанию
-├── src/
-│   ├── main.rs         ← точка входа
-│   ├── lib.rs          ← публичный экспорт модулей (нужен для интеграционных тестов)
-│   ├── app.rs          ← главный оркестратор
-│   ├── config.rs       ← конфигурация из env vars
-│   ├── metrics.rs      ← QuotaMetrics: счётчики Redis flush
-│   ├── domain/         ← доменные типы (бизнес-модели)
-│   │   ├── mod.rs
-│   │   ├── quota.rs    ← UsageEntry, QuotaEntry, ResourceDelta, CheckResult
-│   │   └── error.rs    ← QuotaError
-│   ├── repository/     ← слой данных (Redis)
-│   │   ├── mod.rs
-│   │   ├── traits.rs   ← интерфейс хранилища (trait)
-│   │   └── redis.rs    ← реализация через Redis
-│   ├── cache/          ← горячий in-memory кэш
-│   │   ├── mod.rs
-│   │   └── memory.rs   ← DashMap, атомарные операции
-│   ├── service/        ← бизнес-логика
-│   │   ├── mod.rs
-│   │   └── quota.rs    ← QuotaService
-│   └── transport/      ← gRPC обработчик
-│       ├── mod.rs
-│       └── grpc.rs     ← GrpcHandler, proto↔domain конвертации
-└── tests/
-    ├── grpc.rs         ← 8 in-process gRPC тестов (Tonic TcpListenerStream)
-    └── redis.rs        ← 6 Redis интеграционных тестов (#[ignore], DB 15)
-```
-
-### Что в каждом файле
-
-#### `lib.rs`
-Публично экспортирует все внутренние модули сервиса (`pub mod app`, `pub mod domain`, `pub mod repository`, ...). Нужен чтобы интеграционные тесты в `tests/` могли импортировать типы крейта — без `lib.rs` тесты видят только бинарник, не модули.
-
-#### `main.rs`
-Точка входа. Три строки: загрузить `.env` файл (если есть), вызвать `app::run()`. Никакой логики.
-
-#### `app.rs`
-Главный оркестратор. Запускается в такой последовательности:
-1. Читает конфиг
-2. Инициализирует логгер и OTel метрики (не-фатально — при недоступном коллекторе продолжает работу)
-3. Создаёт `GrpcMetrics` (Tower middleware) и `QuotaMetrics` (Redis flush)
-4. Подключается к Redis
-5. Загружает все данные из Redis в память (чтобы сервис не ходил в Redis при каждом запросе)
-6. Запускает фоновую задачу: каждые 1s сбрасывает изменения обратно в Redis
-7. Запускает gRPC сервер с `MetricsLayer`, health check и reflection
-8. Ждёт SIGTERM/SIGINT → красиво завершает все соединения
-
-#### `config.rs`
-Читает переменные окружения **один раз** при старте через `OnceLock` (Rust аналог Go `sync.Once`). После инициализации — доступен из любого места через `config::get()` без блокировок.
-
-#### `domain/quota.rs`
-Чистые типы данных — никаких зависимостей, никакого I/O:
-- `UsageEntry` — сколько уже использовано (bytes, objects, buckets)
-- `QuotaEntry` — лимиты (-1 = без ограничений)
-- `ResourceDelta` — изменение ресурса (может быть отрицательным при удалении)
-- `CheckResult` — результат проверки: `Allowed` или `Denied(DenyReason)`
-- `DenyReason` — конкретная причина отказа с контекстом (сколько использовано / какой лимит)
-
-#### `domain/error.rs`
-Перечень всех ошибок сервиса через `thiserror`. Каждая ошибка автоматически превращается в gRPC Status в transport слое.
-
-#### `repository/traits.rs`
-**Интерфейс** хранилища — абстрактный контракт (Rust trait). Описывает что хранилище умеет: загрузить всё, сохранить батч, удалить субъекта, проверить здоровье. Конкретная реализация (Redis) — в отдельном файле. Благодаря этому тесты могут подменить Redis на фейковое хранилище.
-
-#### `repository/redis.rs`
-Реализация хранилища через Redis. Использует библиотеку `fred` с пулом соединений (8 штук). Схема ключей в Redis:
-```
-quota:usage:{subject_id}  →  HASH { bytes, objects, buckets }
-quota:limit:{subject_id}  →  HASH { bytes_limit, objects_limit, buckets_limit }
-```
-При старте — загружает все данные через `SCAN quota:usage:*` (не `KEYS` — он блокирует Redis). При flush — пишет пачками через `HSET`.
-
-#### `cache/memory.rs`
-**Горячий путь** — самый важный файл для производительности. Хранит все данные в `DashMap` — это concurrent HashMap с мелкой блокировкой (256 шардов). 
-
-Главная операция `check_and_reserve` работает атомарно на уровне одной записи:
-```
-lock shard → прочитать текущее использование →
-  проверить лимит → если OK: обновить → unlock shard
-                 → если превышен: не трогать → unlock shard
-```
-Это **без TOCTOU-гонок** (time-of-check-time-of-use race condition) и без внешнего Mutex.
-
-#### `service/quota.rs`
-Бизнес-логика. Принимает вызовы от gRPC слоя и координирует cache + repository:
-- `check_quota` — проверяет user, потом bucket. Если bucket отказал — **откатывает** user резервацию
-- `update_usage` — fire-and-forget обновление после успешной операции
-- `set_quota` — write-through: сразу пишет в cache И в Redis (лимиты важны)
-- `load_from_storage` — при старте, заполняет cache из Redis
-- `flush_to_storage` — вызывается фоном каждые 1s, записывает метрики flush (count, duration, errors) через `QuotaMetrics`
-
-#### `metrics.rs`
-Доменные метрики сервиса — отдельные от инфраструктурного `rust-kit`. `QuotaMetrics` инициализируется один раз при старте и передаётся в `QuotaService`. Содержит 4 инструмента: `redis_flush_total`, `redis_flush_errors_total`, `redis_flush_entries`, `redis_flush_duration_seconds`. Видны в Grafana в секции "Redis Persistence".
-
-#### `transport/grpc.rs`
-gRPC обработчик. Принимает protobuf сообщения, конвертирует в доменные типы, вызывает service слой, конвертирует результат обратно в protobuf. Содержит встроенный дескриптор proto файла для gRPC reflection (чтобы работал `grpcurl list`).
-
----
-
-## Как работает сервис
-
-```
-При старте:
-  Redis → load_all_usage/limits → MemoryCache (DashMap)
-
-Каждый CheckQuota запрос (~200ns):
-  gRPC → GrpcHandler → QuotaService → MemoryCache → ответ
-  (Redis не трогается!)
-
-Каждые 5s (фоновая задача):
-  MemoryCache.snapshot() → Redis.flush()
-
-При SetQuota (редко):
-  MemoryCache.set_limit() + Redis.flush_limits() (сразу)
-```
-
-Сервис работает **целиком в памяти** на горячем пути. Redis используется только для:
-1. Загрузки данных при старте (восстановление после перезапуска)
-2. Периодического сохранения (дубликат в памяти → диск)
-
----
-
-## Почему быстрый
-
-| Причина | Детали |
-|---------|--------|
-| **Rust** | Нет GC-пауз, нет виртуальной машины. Компилируется в машинный код |
-| **Tokio** | Асинхронный рантайм. Один поток обслуживает тысячи соединений без блокировок |
-| **DashMap** | Lock-free чтение для большинства операций. 256 независимых шардов → минимальная конкуренция между потоками |
-| **Нет I/O на горячем пути** | CheckQuota не ходит в Redis — только DashMap в памяти |
-| **Статичный бинарь** | Нет динамической линковки → быстрый старт контейнера (~50ms vs ~2s у Python) |
-| **Атомарный check-and-reserve** | Нет двух отдельных операций чтения+записи → нет гонок → нет retry loops |
-
----
-
-## Redis: свой или общий
-
-**Общий Redis, но разный DB.**
-
-В проекте один Redis контейнер. Сервисы разделяют его по database index:
-- `DB 0` — authz кэш (`auth_decision:*`)
-- `DB 1` — quota (`quota:usage:*`, `quota:limit:*`) ← наш
-
-В `.env` прописано `REDIS_DB=1`. Неймспейсы не пересекаются, никаких коллизий.
-
-**Важно для production:** В dev Redis запущен без AOF (`--appendonly no`), то есть при перезапуске Redis данные квот потеряются. Сервис просто начнёт с нулей. Для production нужно включить AOF на Redis или добавить отдельный `redis-quota` с `--appendonly yes`.
-
----
-
-## Как собирается Docker
-
-Используется **cargo-chef** — инструмент для кэширования зависимостей Rust в Docker.
-
-```dockerfile
-FROM rust:1.95-alpine AS chef       # базовый образ с cargo-chef
-  cargo install cargo-chef --locked
-
-FROM chef AS planner                # стадия 1: анализ зависимостей
-  COPY . .
-  RUN cargo chef prepare --recipe-path recipe.json   # → recipe.json
-
-FROM chef AS builder                # стадия 2: сборка
-  COPY --from=planner recipe.json .
-  RUN cargo chef cook --release --recipe-path recipe.json  # компилирует ВСЕ зависимости
-  COPY . .
-  RUN cargo build --release -p quota-service         # компилирует только наш код
-
-FROM alpine:3.21                    # стадия 3: финальный образ
-  COPY --from=builder .../server ./  # только бинарь (~8MB)
-```
-
-**Почему образ маленький:**
-- Статичный бинарь (musl) — не нужен libc в runtime образе
-- Alpine как base — ~5MB сам по себе
-- Итого образ: ~13-15MB (vs ~200MB у Python, ~50MB у Go)
-
-**Почему сборка быстрая (cargo-chef):**
-
-Без cargo-chef Docker пересобирает все зависимости при **любом** изменении кода — даже если поменял одну строку.
-
-С cargo-chef слой зависимостей (`cargo chef cook`) кэшируется в Docker слое. Если `Cargo.toml` не менялся — зависимости берутся из кэша за секунды. Пересобирается только `cargo build -p quota-service` (~30s вместо 5-8 минут).
-
----
-
-## Автоматические тесты
-
-### Юнит-тесты (домен, кэш, сервис)
+## Наблюдаемость и диагностика
 
 ```bash
-cargo test -p quota-service
+grpcurl -plaintext localhost:50055 opens3.quota.v1.QuotaService/HealthCheck
 ```
 
-29 тестов: domain roundtrips, cache check-and-reserve атомарность, service rollback логика. Запускаются без Redis.
+RPC проверяет Redis. При сбое flush смотрите `quota_redis_flush_errors_total`,
+`quota_redis_flush_total`, `quota_redis_flush_entries` и `quota_redis_flush_duration_seconds`
+из [src/metrics.rs](src/metrics.rs). Dashboard: [quota.json](../../infra/otel/grafana/dashboards/quota.json).
+После неуспешного flush dirty keys сохраняются для повтора; это не защищает от падения процесса до сохранения памяти.
 
-### gRPC-тесты (in-process Tonic сервер)
+## Разработка и тесты
+
+Отдельные suites (из корня; Redis DB 15 должен быть выделен для тестов):
 
 ```bash
 cargo test -p quota-service --test grpc
-```
-
-8 тестов: CheckQuota, UpdateUsage, SetQuota, GetQuota, GetUsage, HealthCheck через настоящий gRPC клиент ↔ сервер. Redis не нужен.
-
-### Redis интеграционные тесты
-
-```bash
-# Нужен запущенный Redis
-docker compose up redis -d
-
-# Запустить (помечены #[ignore], нужен --include-ignored)
 TEST_REDIS_URL=redis://localhost:6379/15 cargo test -p quota-service --test redis -- --include-ignored
 ```
 
-6 тестов: flush_usage, flush_limits, load_all, delete_subject, health. Используют DB 15 (не трогают dev данные).
-
----
-
-## Ручное тестирование
-
-Убедись что сервис запущен на `:50055`.
+Redis tests помечены `#[ignore]`; обычный `cargo test` их не запускает. Даже с
+`--include-ignored` они возвращаются без проверки, если подключение не удалось:
+проверяйте доступность Redis, а не только итоговый exit code.
+Rust stubs создаёт `build.rs` при Cargo build; shared Go/Python clients обновляются
+через `make generate-quota-go` / `make generate-quota-py` после `make install-deps`.
 
 ```bash
-# Проверить доступность и посмотреть все методы
-grpcurl -plaintext localhost:50055 list
-grpcurl -plaintext localhost:50055 list opens3.quota.v1.QuotaService
+cargo fmt -p quota-service -- --check
+cargo clippy -p quota-service -- -D warnings
+cargo test -p quota-service
 ```
 
-### Сценарий: полный цикл жизни объекта
+Redis integration tests запускаются согласно `.github/workflows/quota-ci.yml` и
+требуют доступный Redis. gRPC tests поднимают in-process Tonic server.
 
-```bash
-# 1. Установить лимиты для пользователя (10 GiB, 100 бакетов, объекты не ограничены)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bytes_limit": 10737418240,
-  "objects_limit": -1,
-  "buckets_limit": 100
-}' localhost:50055 opens3.quota.v1.QuotaService/SetQuota
+## Ограничения и дальнейшие работы
 
-# 2. Проверить что лимиты записались
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001"
-}' localhost:50055 opens3.quota.v1.QuotaService/GetQuota
+- **Один active writer:** текущий простой вариант для стенда.
+- **Redis atomic reserve:** общий state для replicas, но Redis входит в hot path.
+- **Reservation ledger:** operation IDs и terminal results дают безопасный retry,
+  но требуют cleanup/reconciliation.
 
-# 3. CreateBucket: проверить квоту (+1 бакет)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id": "",
-  "delta": {"bytes": 0, "objects": 0, "buckets": 1}
-}' localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
-# ожидаем: allowed=true
+Выбор зависит от допустимой latency и требуемой строгости лимита.
 
-# 4. CreateBucket прошёл — обновить потребление
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id": "",
-  "delta": {"bytes": 0, "objects": 0, "buckets": 1}
-}' localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
+## Связанные документы
 
-# 5. PutObject 50MB: проверить квоту (user + bucket)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id":  "bucket:my-photos",
-  "delta": {"bytes": 52428800, "objects": 1, "buckets": 0}
-}' localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
-# ожидаем: allowed=true
-
-# 6. PutObject прошёл — обновить потребление
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id":  "bucket:my-photos",
-  "delta": {"bytes": 52428800, "objects": 1, "buckets": 0}
-}' localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
-
-# 7. Посмотреть текущее потребление пользователя
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001"
-}' localhost:50055 opens3.quota.v1.QuotaService/GetUsage
-# ожидаем: bytes=52428800, objects=1, buckets=1
-
-# 8. Попробовать загрузить файл который превышает лимит (установим маленький лимит)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bytes_limit": 104857600,
-  "objects_limit": -1,
-  "buckets_limit": 100
-}' localhost:50055 opens3.quota.v1.QuotaService/SetQuota
-# лимит теперь 100MB, уже использовано 50MB
-
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id":  "bucket:my-photos",
-  "delta": {"bytes": 104857600, "objects": 1, "buckets": 0}
-}' localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
-# ожидаем: allowed=false, code=DENY_CODE_USER_STORAGE_EXCEEDED
-# reason: "user storage exceeded: 157286400/104857600 bytes"
-
-# 9. DeleteObject: освободить квоту
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bucket_id":  "bucket:my-photos",
-  "delta": {"bytes": -52428800, "objects": -1, "buckets": 0}
-}' localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
-
-# 10. Проверить HealthCheck
-grpcurl -plaintext -d '{"service": "QuotaService"}' \
-  localhost:50055 opens3.quota.v1.QuotaService/HealthCheck
-# ожидаем: status=SERVING (Redis доступен)
-# если Redis упал: status=NOT_SERVING
-```
-
-### Дополнительно: тест лимита бакетов
-
-```bash
-# Установить лимит 2 бакета
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "bytes_limit": -1,
-  "objects_limit": -1,
-  "buckets_limit": 2
-}' localhost:50055 opens3.quota.v1.QuotaService/SetQuota
-
-# Уже есть 1 бакет — создать ещё один (должно пройти)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "delta": {"bytes": 0, "objects": 0, "buckets": 1}
-}' localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
-# allowed=true
-
-# Обновить (+1 бакет, теперь 2)
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "delta": {"bytes": 0, "objects": 0, "buckets": 1}
-}' localhost:50055 opens3.quota.v1.QuotaService/UpdateUsage
-
-# Попробовать создать третий бакет — должно быть отказано
-grpcurl -plaintext -d '{
-  "subject_id": "user:alice-uuid-001",
-  "delta": {"bytes": 0, "objects": 0, "buckets": 1}
-}' localhost:50055 opens3.quota.v1.QuotaService/CheckQuota
-# allowed=false, code=DENY_CODE_USER_BUCKET_LIMIT_REACHED
-```
-
----
-
-## Что поднимается при `make up-services`
-
-| Сервис | Порт | Зависит от |
-|--------|------|-----------|
-| postgres-users | 5432 | — |
-| postgres-metadata | 5433 | — |
-| redis | 6379 | — |
-| neo4j | 7474/7687 | — |
-| zookeeper | 2181 | — |
-| kafka | 9092 | zookeeper |
-| users | 50054 | postgres-users |
-| auth | 50050 | redis, users |
-| authz | 50051 | neo4j, redis, kafka |
-| metadata | 50052 | — |
-| storage | 50053 | — |
-| **quota** | **50055** | **redis** |
-
-Quota зависит только от Redis — самая простая зависимость в проекте.
-
+- [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
+- [Карта документации](../../docs/README.md).
+- [Правила разработки](../../AGENTS.md).

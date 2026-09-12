@@ -1,35 +1,12 @@
 # Getting Started
 
-Этот документ нужен для самого простого сценария:
+Эта инструкция поднимает текущие внутренние сервисы проекта. Внешний S3 Gateway
+ещё не реализован, поэтому после запуска не появится S3 HTTP endpoint.
 
-- у вас установлен только Docker
-- вы хотите поднять локально всё, что уже реализовано в проекте
-- вы не хотите ставить Go, Python, `make`, `grpcurl` и другие утилиты
+## Требования
 
-## Что важно заранее
-
-Все команды ниже нужно запускать **из корня репозитория**.
-
-То есть сначала нужно перейти в директорию проекта:
-
-```bash
-cd /путь/до/opens3-rebac
-```
-
-Пример:
-
-```bash
-cd ~/projects/opens3-rebac
-```
-
-Если запускать команды не из корня репозитория, `docker compose` не найдёт `docker-compose.yml`, `env_file` и Docker build context.
-
-## Что должно быть установлено
-
-Достаточно:
-
-- Docker
-- Docker Compose plugin
+- Docker с Compose plugin;
+- запуск команд из корня репозитория, где находится `docker-compose.yml`.
 
 Проверка:
 
@@ -38,159 +15,143 @@ docker --version
 docker compose version
 ```
 
-## Что поднимется
-
-На текущем этапе реально поднимаются:
-
-- `users`
-- `auth`
-- `authz`
-- `storage`
-
-Вместе с инфраструктурой:
-
-- `postgres-users`
-- `postgres-metadata`
-- `redis`
-- `neo4j`
-- `zookeeper`
-- `kafka`
-- `migrator-users`
-
-Пока не реализованы как рабочие сервисы:
-
-- `gateway`
-- `metadata`
-
-Поэтому полного S3 flow ещё нет. Этот запуск нужен для локальной разработки и проверки уже существующих сервисов.
-
-## Самый короткий путь
-
-Из корня репозитория выполните:
+## Запуск
 
 ```bash
 docker compose --profile services up --build -d
-```
-
-Эта команда:
-
-- поднимет инфраструктуру
-- соберёт локальные образы сервисов
-- запустит все сервисы из профиля `services`
-
-## Как проверить, что всё поднялось
-
-Проверьте список контейнеров:
-
-```bash
 docker compose ps
 ```
 
-Ожидаемо должны быть в состоянии `Up` или `Exited (0)` для одноразового мигратора:
+Профиль `services` запускает:
 
-- `postgres-users`
-- `postgres-metadata`
-- `redis`
-- `neo4j`
-- `zookeeper`
-- `kafka`
-- `migrator-users`
-- `users`
-- `auth`
-- `authz`
-- `storage`
+- одноразовые `migrator-users` и `migrator-metadata`;
+- `users`, `auth`, `authz`, `metadata`, `storage`, `quota`;
+- PostgreSQL для Users и Metadata, Redis, Neo4j, ZooKeeper и Kafka.
 
-## Полезные команды
+Миграторы в норме завершаются с кодом 0. Долгоживущие контейнеры должны быть в
+состоянии Up/healthy согласно их Compose healthcheck.
 
-Посмотреть статус:
+## Порты на хосте
+
+| Компонент | Адрес |
+|---|---|
+| Auth | `localhost:50050` |
+| AuthZ | `localhost:50051` |
+| Metadata | `localhost:50052` |
+| Storage | `localhost:50053` |
+| Users | `localhost:50054` |
+| Quota | `localhost:50055` |
+| PostgreSQL Users | `localhost:5432` |
+| PostgreSQL Metadata | `localhost:5433` |
+| Redis | `localhost:6379` |
+| Kafka external listener | `localhost:9092` |
+| Neo4j HTTP | `localhost:7474` |
+| Neo4j Bolt | `localhost:7687` |
+
+Контейнеры обращаются к Kafka через `kafka:29092`, а не через внешний listener
+9092.
+
+## Проверка и диагностика
 
 ```bash
 docker compose ps
-```
-
-Посмотреть логи всех сервисов:
-
-```bash
-docker compose logs -f
-```
-
-Посмотреть логи одного сервиса:
-
-```bash
-docker compose logs -f users
-docker compose logs -f auth
-docker compose logs -f authz
+docker compose logs -f metadata
+docker compose logs -f quota
 docker compose logs -f storage
 ```
 
-Остановить всё:
+Для другого сервиса замените имя в последней команде. Типичные причины сбоя:
+занятый порт, не запущенный Docker daemon, недостаток ресурсов или неготовая
+зависимость.
+
+Стандартный health endpoint проверяет заявленный приложением статус процесса и не
+обязательно выполняет запрос к базе/диску. Для Storage filesystem проверяет
+отдельный RPC `DataStorageService.HealthCheck`.
+
+## Остановка
 
 ```bash
 docker compose --profile services down
 ```
 
-Остановить всё и удалить volume-данные:
+Удаление volumes также удаляет локальные данные:
 
 ```bash
 docker compose --profile services down -v
 ```
 
-Пересобрать и поднять заново:
+## Makefile
 
-```bash
-docker compose --profile services up --build -d
-```
-
-## Порты
-
-Основные локальные порты:
-
-- `users` → `localhost:50054`
-- `auth` → `localhost:50050`
-- `authz` → `localhost:50051`
-- `storage` → `localhost:50053`
-- `postgres-users` → `localhost:5432`
-- `postgres-metadata` → `localhost:5433`
-- `redis` → `localhost:6379`
-- `kafka` → `localhost:9092`
-- `neo4j http` → `localhost:7474`
-- `neo4j bolt` → `localhost:7687`
-
-Neo4j Browser:
-
-- URL: `http://localhost:7474`
-- login: `neo4j`
-- password: `password123`
-
-## Что делать, если что-то не поднялось
-
-1. Убедиться, что вы находитесь в корне репозитория.
-2. Проверить `docker compose ps`.
-3. Посмотреть логи проблемного сервиса:
-
-```bash
-docker compose logs -f <service-name>
-```
-
-Чаще всего проблемы будут такие:
-
-- уже занят локальный порт
-- Docker daemon не запущен
-- не хватает ресурсов Docker
-- один из зависимых контейнеров не стал healthy
-
-## Если `make` установлен
-
-Можно использовать короткие команды-обёртки:
+Если установлен `make`:
 
 ```bash
 make up-services
-make up-e2e
-make test-metadata-integration
-make test-metadata-integration-local
 make down
 make down-volumes
 make rebuild
 ```
 
-Но для первого запуска `make` не нужен: все основные шаги выше работают напрямую через `docker compose`.
+Для отдельной PostgreSQL интеграционных тестов Metadata:
+
+```bash
+make up-e2e
+make test-metadata-integration
+make down-e2e
+```
+
+Или одним запуском:
+
+```bash
+make test-metadata-integration-local
+```
+
+Observability поднимается отдельным профилем:
+
+```bash
+make up-observability
+```
+
+## Разработка вне контейнера
+
+| Компонент | Нужные инструменты | Инструкция |
+|---|---|---|
+| Go services | Go 1.24.1; зависимости в Docker | [Auth](services/auth/README.md#запуск), [Users](services/users/README.md#запуск), [Metadata](services/metadata/README.md#запуск), [Storage](services/storage/README.md#запуск) |
+| AuthZ | Python 3.12, venv, pip | [Setup и отдельный invalidator](services/authz/README.md#запуск) |
+| Quota | Rust (Docker build использует 1.95), protoc, Redis | [Запуск и tests](services/quota/README.md#запуск) |
+| Ручные RPC | grpcurl | раздел «Примеры использования» каждого сервиса |
+| Генерация proto | protoc, Go, Python/pip, make | команды ниже |
+
+Go `.env` читается относительно папки запуска, Python Config — только из окружения,
+Rust использует dotenvy от текущей папки. Для local process адреса Docker DNS
+заменяются на localhost и опубликованные порты. Если контейнер сервиса уже запущен,
+остановите именно его, чтобы освободить порт; зависимости оставьте работающими.
+
+## Изменение protobuf
+
+Из корня:
+
+```bash
+make install-deps
+make generate
+```
+
+`install-deps` кладёт Go plugins и Python grpcio-tools в `bin/`; сам `protoc`
+нужно установить отдельно. Go/Python clients генерируются в `shared/pkg/go` и
+`shared/pkg/py`. Для отдельного сервиса есть targets `generate-<service>-go/py`;
+у Users имя target — `generate-user-go/py`. Rust Quota генерирует bindings через
+`build.rs` при сборке и также требует `protoc`.
+
+## Что проверять при первом запуске
+
+1. `docker compose ps -a`: миграторы должны завершиться с кодом 0; healthcheck
+   есть не у каждого приложения, отсутствие метки healthy не равно ошибке.
+2. Standard gRPC Health показывает статус процесса. Custom HealthCheck у Metadata
+   проверяет PostgreSQL/Kafka, AuthZ — Neo4j/Redis, Storage — filesystem, Quota — Redis.
+3. `make up-observability` поднимает Collector и UI. Ошибка экспорта telemetry
+   при отсутствии Collector не является доказательством ошибки бизнес-RPC.
+4. При ошибке credentials БД проверьте соответствие `.env` и существующего volume:
+   новые значения env не переинициализируют уже созданную БД. `down -v` удаляет данные.
+5. Проверьте реальный запрос из README сервиса. Успех health сам по себе не является
+   end-to-end проверкой записи объекта.
+
+[Карта документации](docs/README.md) связывает сервисы, архитектурные планы и аудиты.

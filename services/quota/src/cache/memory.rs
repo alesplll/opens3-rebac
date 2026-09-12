@@ -1,22 +1,22 @@
-//! Lock-free in-memory quota cache — the hot path for CheckQuota and UpdateUsage.
+//! Concurrent in-memory quota cache — the hot path for CheckQuota and UpdateUsage.
 //!
-//! Uses `DashMap` (fine-grained shard locking, ~256 shards by default).
+//! Uses `DashMap` with fine-grained shard locking.
 //! All operations on a single entry are atomic: the shard lock is held for the
 //! duration of the `entry()` call, so check-and-reserve is race-free without
 //! an outer Mutex.
 //!
 //! Architecture:
 //!   ┌─────────────────────┐
-//!   │   gRPC handler      │  ←── hot path: <1µs per op
+//!   │   gRPC handler      │  ←── no repository I/O on the hot path
 //!   └────────┬────────────┘
 //!            │
 //!   ┌────────▼────────────┐
 //!   │   MemoryCache       │  DashMap<SubjectId, UsageEntry>
 //!   │   (this module)     │  DashMap<SubjectId, QuotaEntry>
 //!   └────────┬────────────┘
-//!            │  flush every 1s — only dirty entries (background task in app.rs)
+//!            │  configurable periodic flush of dirty entries
 //!   ┌────────▼────────────┐
-//!   │   RedisRepository   │  AOF persistence
+//!   │   RedisRepository   │  persistence depends on Redis configuration
 //!   └─────────────────────┘
 
 use dashmap::{DashMap, DashSet};
@@ -141,13 +141,19 @@ impl MemoryCache {
         self.dirty.remove(subject_id);
     }
 
+    /// Mark entries for another persistence attempt.
+    pub fn mark_dirty<'a>(&self, subject_ids: impl IntoIterator<Item = &'a str>) {
+        for subject_id in subject_ids {
+            self.dirty.insert(subject_id.to_string());
+        }
+    }
+
     // ── Flush snapshot for persistence ───────────────────────────────────────
 
     /// Collect only entries modified since the last flush.
     ///
-    /// Atomically drains the dirty set: each key is removed before its value
-    /// is read. Any concurrent write that arrives after removal re-inserts the
-    /// key, so it appears in the next flush cycle — no data is ever lost.
+    /// Drains the dirty set into a snapshot. The caller must mark all snapshot
+    /// keys dirty again if persistence fails.
     pub fn snapshot_dirty(&self) -> Vec<(String, UsageEntry)> {
         let keys: Vec<String> = self.dirty.iter().map(|k| k.clone()).collect();
         for k in &keys {
