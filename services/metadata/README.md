@@ -263,5 +263,5 @@ Generated outputs вручную не редактируются.
 - [Обзор проекта](../../README.md) и [первый запуск](../../GETTING_STARTED.md).
 - [Карта документации](../../docs/README.md).
 - [Правила разработки](../../AGENTS.md).
-- [Фактологический аудит: C01–C03](../../docs/factual-audit-2026-09-10.md).
+- [Проверка исправлений C01–C03](../../docs/documentation-review-2026-09-11.md).
 - [План согласования Storage и Metadata](../../docs/storage-service-implementation-plan.md).

@@ -6,7 +6,7 @@
 
 Проверена ветка `codex/fix-factual-docs`: исходный checkout аудита `e4b2cfb`,
 состояние перед этой проверкой `dbc5585`, изменения README, AGENTS/CLAUDE и планов.
-Основания — исходный [аудит](factual-audit-2026-09-10.md), diff, protobuf fields,
+Основания — исходный аудит от 10 сентября (сохранён в истории Git), diff, protobuf fields,
 handlers/services/repositories, config, миграции, Makefile и Compose.
 
 Первое исправление устранило многие опасные обещания, но часть информации была
