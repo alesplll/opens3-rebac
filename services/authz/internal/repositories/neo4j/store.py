@@ -1,4 +1,6 @@
 """Neo4j GraphStore implementation with transitive ReBAC and HAS_PERMISSION levels."""
+import time
+
 from neo4j import GraphDatabase
 from typing import List
 from internal.types import Tuple
@@ -11,6 +13,11 @@ from internal.repositories.neo4j.schema import (
 )
 
 from shared.pkg.py_kit import logger
+
+
+def _now_ms() -> int:
+    """Wall-clock milliseconds, the unit used for every timestamp in the graph."""
+    return int(time.time() * 1000)
 
 
 class Neo4jStore:
@@ -35,9 +42,12 @@ class Neo4jStore:
         o_label = infer_node_label(tuple_.object).value
         query = """
         MERGE (subject:`%s` {id: $subject_id})
+          ON CREATE SET subject.created_at = $now
         MERGE (object:`%s` {id: $object_id})
+          ON CREATE SET object.created_at = $now
         MERGE (subject)-[r:HAS_PERMISSION]->(object)
-        SET r.level = $level
+          ON CREATE SET r.created_at = $now
+        SET r.level = $level, r.updated_at = $now
         RETURN r
         """ % (s_label, o_label)
         with self.driver.session() as session:
@@ -46,6 +56,7 @@ class Neo4jStore:
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
                 level=tuple_.level,
+                now=_now_ms(),
             )
             return result.single() is not None
 
@@ -55,8 +66,12 @@ class Neo4jStore:
         o_label = infer_node_label(tuple_.object).value
         query = """
         MERGE (subject:`%s` {id: $subject_id})
+          ON CREATE SET subject.created_at = $now
         MERGE (object:`%s` {id: $object_id})
+          ON CREATE SET object.created_at = $now
         MERGE (subject)-[rel:`%s`]->(object)
+          ON CREATE SET rel.created_at = $now
+        SET rel.updated_at = $now
         RETURN rel
         """ % (s_label, o_label, tuple_.relation)
         logger.debug({}, "Neo4j write plain relation", tuple=str(tuple_))
@@ -65,6 +80,7 @@ class Neo4jStore:
                 query,
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
+                now=_now_ms(),
             )
             return result.single() is not None
 

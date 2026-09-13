@@ -1,5 +1,6 @@
 """Integration tests for Neo4jStore: transitive ReBAC and HAS_PERMISSION."""
 import os
+import time
 
 import pytest
 
@@ -258,3 +259,53 @@ def test_parent_of_does_not_propagate_permissions(neo4j_store, clean_graph):
     )
     # alice has read on bucket, but NOT automatically on the object
     assert neo4j_store.check("user:alice", "read", "object:photos/cat.jpg") is False
+
+
+def test_write_records_timestamps(neo4j_store, clean_graph):
+    """Every written relationship and node carries creation time in milliseconds."""
+    before = int(time.time() * 1000)
+    neo4j_store.write_tuple(Tuple("user:alex", "MEMBER_OF", "group:devops", level=None))
+    after = int(time.time() * 1000)
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            """
+            MATCH (s {id: 'user:alex'})-[r:MEMBER_OF]->(o {id: 'group:devops'})
+            RETURN r.created_at AS created, r.updated_at AS updated,
+                   s.created_at AS subject_created
+            """
+        ).single()
+
+    assert record is not None
+    assert before <= record["created"] <= after
+    assert record["updated"] >= record["created"]
+    assert before <= record["subject_created"] <= after
+
+
+def test_rewrite_keeps_created_and_advances_updated(neo4j_store, clean_graph):
+    """A re-grant must not look like a brand new relationship."""
+    neo4j_store.write_tuple(
+        Tuple("group:devs", RelationType.HAS_PERMISSION.value, "bucket:repo1", level="read")
+    )
+
+    with neo4j_store.driver.session() as session:
+        first = session.run(
+            "MATCH ()-[r:HAS_PERMISSION]->() RETURN r.created_at AS created"
+        ).single()["created"]
+
+    time.sleep(0.01)
+    neo4j_store.write_tuple(
+        Tuple("group:devs", RelationType.HAS_PERMISSION.value, "bucket:repo1", level="admin")
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            """
+            MATCH ()-[r:HAS_PERMISSION]->()
+            RETURN r.created_at AS created, r.updated_at AS updated, r.level AS level
+            """
+        ).single()
+
+    assert record["created"] == first
+    assert record["updated"] > first
+    assert record["level"] == "admin"
