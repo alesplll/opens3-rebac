@@ -87,7 +87,7 @@ class TestPermissionServiceCheck:
 class TestPermissionServiceWriteTuple:
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
-        store.write_tuple.return_value = True
+        store.write_tuple.return_value = 1789317191374
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
@@ -96,13 +96,13 @@ class TestPermissionServiceWriteTuple:
 
         assert result is True
         store.write_tuple.assert_called_once_with(t)
-        audit.send_tuple_event.assert_called_once_with(t, "tuple_written")
+        audit.send_tuple_event.assert_called_once_with(t, "tuple_written", 1789317191374)
 
 
 class TestPermissionServiceDeleteTuple:
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
-        store.delete_tuple.return_value = True
+        store.delete_tuple.return_value = 1789317191374
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
@@ -111,11 +111,11 @@ class TestPermissionServiceDeleteTuple:
 
         assert result is True
         store.delete_tuple.assert_called_once_with(t)
-        audit.send_tuple_event.assert_called_once_with(t, "tuple_removed")
+        audit.send_tuple_event.assert_called_once_with(t, "tuple_removed", 1789317191374)
 
     def test_no_audit_if_delete_fails(self):
         store = MagicMock()
-        store.delete_tuple.return_value = False
+        store.delete_tuple.return_value = None
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)

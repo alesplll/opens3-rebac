@@ -14,7 +14,7 @@ from internal.repositories.neo4j.store import Neo4jStore
 
 class _FakeResult:
     def single(self):
-        return {"written": True}
+        return {"recorded_at": 1789317191374}
 
 
 class _FakeSession:

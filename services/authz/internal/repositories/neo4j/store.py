@@ -1,6 +1,6 @@
 """Neo4j GraphStore implementation with transitive ReBAC and HAS_PERMISSION levels."""
 from neo4j import GraphDatabase
-from typing import List
+from typing import List, Optional
 from internal.types import Tuple
 from internal.repositories.neo4j.schema import (
     infer_node_label,
@@ -13,6 +13,11 @@ from internal.repositories.neo4j.schema import (
 from shared.pkg.py_kit import logger
 
 
+def _recorded_at(record) -> Optional[int]:
+    """The change time out of a write result, or None when nothing was changed."""
+    return None if record is None else int(record["recorded_at"])
+
+
 class Neo4jStore:
     """Neo4j-backed GraphStore with transitive User->Group*->Resource checks."""
 
@@ -20,16 +25,21 @@ class Neo4jStore:
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
         logger.info({}, "Connected to Neo4j", uri=uri)
 
-    def write_tuple(self, tuple_: Tuple) -> bool:
-        """Create nodes and relationship in Neo4j. For HAS_PERMISSION, level is required."""
+    def write_tuple(self, tuple_: Tuple) -> Optional[int]:
+        """Create nodes and relationship in Neo4j. For HAS_PERMISSION, level is required.
+
+        Returns the milliseconds the database recorded the change, or None if
+        nothing was written. The caller passes that time on to the audit log so
+        that the graph and the log describe one change with one clock.
+        """
         if tuple_.relation == RelationType.HAS_PERMISSION.value:
             if not tuple_.level or not is_valid_permission_level(tuple_.level):
                 logger.warn({}, "HAS_PERMISSION requires valid level", permission_level=tuple_.level)
-                return False
+                return None
             return self._write_has_permission(tuple_)
         return self._write_plain_relation(tuple_)
 
-    def _write_has_permission(self, tuple_: Tuple) -> bool:
+    def _write_has_permission(self, tuple_: Tuple) -> Optional[int]:
         """Create (subject)-[:HAS_PERMISSION {level: ...}]->(object).
 
         Timestamps come from Neo4j's `timestamp()`, the transaction start time in
@@ -45,7 +55,7 @@ class Neo4jStore:
         MERGE (subject)-[r:HAS_PERMISSION]->(object)
           ON CREATE SET r.created_at = timestamp()
         SET r.level = $level, r.updated_at = timestamp(), r.actor = $actor
-        RETURN r
+        RETURN r.updated_at AS recorded_at
         """ % (s_label, o_label)
         with self.driver.session() as session:
             result = session.run(
@@ -55,9 +65,9 @@ class Neo4jStore:
                 level=tuple_.level,
                 actor=tuple_.actor,
             )
-            return result.single() is not None
+            return _recorded_at(result.single())
 
-    def _write_plain_relation(self, tuple_: Tuple) -> bool:
+    def _write_plain_relation(self, tuple_: Tuple) -> Optional[int]:
         """Create (subject)-[:REL_TYPE]->(object) for MEMBER_OF, OWNER_OF, etc.
 
         Timestamps come from the database clock, as in `_write_has_permission`.
@@ -72,7 +82,7 @@ class Neo4jStore:
         MERGE (subject)-[rel:`%s`]->(object)
           ON CREATE SET rel.created_at = timestamp()
         SET rel.updated_at = timestamp(), rel.actor = $actor
-        RETURN rel
+        RETURN rel.updated_at AS recorded_at
         """ % (s_label, o_label, tuple_.relation)
         logger.debug({}, "Neo4j write plain relation", tuple=str(tuple_))
         with self.driver.session() as session:
@@ -82,7 +92,7 @@ class Neo4jStore:
                 object_id=tuple_.object,
                 actor=tuple_.actor,
             )
-            return result.single() is not None
+            return _recorded_at(result.single())
 
     def read_tuples(self, subject: str) -> List[Tuple]:
         """Read all outgoing relationships for subject; include level for HAS_PERMISSION."""
@@ -107,12 +117,17 @@ class Neo4jStore:
                 )
         return result
 
-    def delete_tuple(self, tuple_: Tuple) -> bool:
-        """Delete a relationship edge. Returns True if it existed and was deleted."""
+    def delete_tuple(self, tuple_: Tuple) -> Optional[int]:
+        """Delete a relationship edge.
+
+        Returns the milliseconds of the removal, or None if the edge did not
+        exist. A deleted edge carries no time of its own, so the store is the
+        only place this can come from.
+        """
         query = """
         MATCH (subject {id: $subject_id})-[rel:`%s`]->(object {id: $object_id})
         DELETE rel
-        RETURN true AS deleted
+        RETURN timestamp() AS recorded_at
         """ % tuple_.relation
         with self.driver.session() as session:
             result = session.run(
@@ -120,10 +135,9 @@ class Neo4jStore:
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
             )
-            rec = result.single()
-            deleted = bool(rec and rec["deleted"])
-            logger.debug({}, "Neo4j delete_tuple", tuple=str(tuple_), deleted=deleted)
-            return deleted
+            recorded_at = _recorded_at(result.single())
+            logger.debug({}, "Neo4j delete_tuple", tuple=str(tuple_), deleted=recorded_at is not None)
+            return recorded_at
 
     def check(self, subject: str, action: str, object: str) -> bool:
         """
