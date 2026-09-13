@@ -87,7 +87,7 @@ class TestPermissionServiceCheck:
 class TestPermissionServiceWriteTuple:
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
-        store.write_tuple.return_value = True
+        store.write_tuple.return_value = 1789317191374
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
@@ -96,13 +96,13 @@ class TestPermissionServiceWriteTuple:
 
         assert result is True
         store.write_tuple.assert_called_once_with(t)
-        audit.send_tuple_event.assert_called_once_with(t, "tuple_written")
+        audit.send_tuple_event.assert_called_once_with(t, "tuple_written", 1789317191374)
 
 
 class TestPermissionServiceDeleteTuple:
     def test_delegates_to_store_and_emits_audit(self):
         store = MagicMock()
-        store.delete_tuple.return_value = True
+        store.delete_tuple.return_value = 1789317191374
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
@@ -111,11 +111,11 @@ class TestPermissionServiceDeleteTuple:
 
         assert result is True
         store.delete_tuple.assert_called_once_with(t)
-        audit.send_tuple_event.assert_called_once_with(t, "tuple_removed")
+        audit.send_tuple_event.assert_called_once_with(t, "tuple_removed", 1789317191374)
 
     def test_no_audit_if_delete_fails(self):
         store = MagicMock()
-        store.delete_tuple.return_value = False
+        store.delete_tuple.return_value = None
         audit = MagicMock()
 
         svc = PermissionService(store=store, cache=MagicMock(), audit_producer=audit)
@@ -190,3 +190,42 @@ class TestPermissionServiceServicerHealthCheck:
         response = servicer.HealthCheck(MagicMock(), MagicMock())
 
         assert response.status == authz_pb2.HealthCheckResponse.NOT_SERVING
+
+
+class TestTupleActor:
+    """The initiator of a change travels from the request into the tuple."""
+
+    def test_actor_defaults_to_unknown(self):
+        assert Tuple("user:alice", "MEMBER_OF", "group:devops").actor is None
+
+    def test_actor_is_carried_when_supplied(self):
+        tuple_ = Tuple("user:alice", "MEMBER_OF", "group:devops", actor="user:root")
+        assert tuple_.actor == "user:root"
+
+    def test_write_tuple_request_carries_an_actor(self):
+        request = authz_pb2.WriteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+            actor="user:root",
+        )
+        assert request.actor == "user:root"
+
+    def test_write_tuple_request_actor_is_optional(self):
+        request = authz_pb2.WriteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+        )
+        # An omitted proto3 string is the empty string, which the servicer maps
+        # to None so that "unknown" stays distinct from "nobody".
+        assert request.actor == ""
+
+    def test_delete_tuple_request_carries_an_actor(self):
+        request = authz_pb2.DeleteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+            actor="user:root",
+        )
+        assert request.actor == "user:root"

@@ -26,17 +26,18 @@ class PermissionService:
         self._audit_producer = audit_producer
 
     def _mutate_tuple(self, tuple_: Tuple, op: str, audit_event: str) -> bool:
+        """Apply a graph change and audit it with the time the graph recorded."""
         store_fn = getattr(self._store, f"{op}_tuple")
         with start_span(f"rebac.{op}_tuple", subject=tuple_.subject, relation=tuple_.relation, object=tuple_.object):
             t0 = time.perf_counter()
-            success = store_fn(tuple_)
+            recorded_at = store_fn(tuple_)
             authz_metrics.record_neo4j_query(op, time.perf_counter() - t0)
 
-            if success:
+            if recorded_at is not None:
                 with start_span("audit.emit", event=audit_event):
-                    self._audit_producer.send_tuple_event(tuple_, audit_event)
+                    self._audit_producer.send_tuple_event(tuple_, audit_event, recorded_at)
 
-        return success
+        return recorded_at is not None
 
     def write_tuple(self, tuple_: Tuple) -> bool:
         """Write relationship tuple to Neo4j."""

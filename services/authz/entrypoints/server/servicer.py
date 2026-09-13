@@ -57,7 +57,8 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "level is required for HAS_PERMISSION")
 
         logger.debug({}, "WriteTuple RPC", subject=request.subject, relation=relation, object=request.object)
-        tuple_ = Tuple(request.subject, relation, request.object, level=level)
+        tuple_ = Tuple(request.subject, relation, request.object, level=level,
+                       actor=request.actor or None)
         success = self._rebac.write_tuple(tuple_)
         logger.info({}, "WriteTuple RPC done", success=success)
         return authz_pb2.WriteTupleResponse(success=success)
@@ -68,7 +69,8 @@ class PermissionServiceServicer(authz_pb2_grpc.PermissionServiceServicer):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "relation is required")
 
         logger.debug({}, "DeleteTuple RPC", subject=request.subject, relation=relation, object=request.object)
-        tuple_ = Tuple(request.subject, relation, request.object)
+        tuple_ = Tuple(request.subject, relation, request.object,
+                       actor=request.actor or None)
         success = self._rebac.delete_tuple(tuple_)
         logger.info({}, "DeleteTuple RPC done", success=success)
         return authz_pb2.DeleteTupleResponse(success=success)
