@@ -1,6 +1,4 @@
 """Neo4j GraphStore implementation with transitive ReBAC and HAS_PERMISSION levels."""
-import time
-
 from neo4j import GraphDatabase
 from typing import List
 from internal.types import Tuple
@@ -13,11 +11,6 @@ from internal.repositories.neo4j.schema import (
 )
 
 from shared.pkg.py_kit import logger
-
-
-def _now_ms() -> int:
-    """Wall-clock milliseconds, the unit used for every timestamp in the graph."""
-    return int(time.time() * 1000)
 
 
 class Neo4jStore:
@@ -37,17 +30,21 @@ class Neo4jStore:
         return self._write_plain_relation(tuple_)
 
     def _write_has_permission(self, tuple_: Tuple) -> bool:
-        """Create (subject)-[:HAS_PERMISSION {level: ...}]->(object)."""
+        """Create (subject)-[:HAS_PERMISSION {level: ...}]->(object).
+
+        Timestamps come from Neo4j's `timestamp()`, the transaction start time in
+        milliseconds, so every stamp in the graph is read off one clock.
+        """
         s_label = infer_node_label(tuple_.subject).value
         o_label = infer_node_label(tuple_.object).value
         query = """
         MERGE (subject:`%s` {id: $subject_id})
-          ON CREATE SET subject.created_at = $now
+          ON CREATE SET subject.created_at = timestamp()
         MERGE (object:`%s` {id: $object_id})
-          ON CREATE SET object.created_at = $now
+          ON CREATE SET object.created_at = timestamp()
         MERGE (subject)-[r:HAS_PERMISSION]->(object)
-          ON CREATE SET r.created_at = $now
-        SET r.level = $level, r.updated_at = $now, r.actor = $actor
+          ON CREATE SET r.created_at = timestamp()
+        SET r.level = $level, r.updated_at = timestamp(), r.actor = $actor
         RETURN r
         """ % (s_label, o_label)
         with self.driver.session() as session:
@@ -56,23 +53,25 @@ class Neo4jStore:
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
                 level=tuple_.level,
-                now=_now_ms(),
                 actor=tuple_.actor,
             )
             return result.single() is not None
 
     def _write_plain_relation(self, tuple_: Tuple) -> bool:
-        """Create (subject)-[:REL_TYPE]->(object) for MEMBER_OF, OWNER_OF, etc."""
+        """Create (subject)-[:REL_TYPE]->(object) for MEMBER_OF, OWNER_OF, etc.
+
+        Timestamps come from the database clock, as in `_write_has_permission`.
+        """
         s_label = infer_node_label(tuple_.subject).value
         o_label = infer_node_label(tuple_.object).value
         query = """
         MERGE (subject:`%s` {id: $subject_id})
-          ON CREATE SET subject.created_at = $now
+          ON CREATE SET subject.created_at = timestamp()
         MERGE (object:`%s` {id: $object_id})
-          ON CREATE SET object.created_at = $now
+          ON CREATE SET object.created_at = timestamp()
         MERGE (subject)-[rel:`%s`]->(object)
-          ON CREATE SET rel.created_at = $now
-        SET rel.updated_at = $now, rel.actor = $actor
+          ON CREATE SET rel.created_at = timestamp()
+        SET rel.updated_at = timestamp(), rel.actor = $actor
         RETURN rel
         """ % (s_label, o_label, tuple_.relation)
         logger.debug({}, "Neo4j write plain relation", tuple=str(tuple_))
@@ -81,7 +80,6 @@ class Neo4jStore:
                 query,
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
-                now=_now_ms(),
                 actor=tuple_.actor,
             )
             return result.single() is not None
