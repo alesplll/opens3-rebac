@@ -27,6 +27,8 @@ class AuditProducer:
                 "subject": tuple_.subject,
                 "relation": tuple_.relation,
                 "object": tuple_.object,
+                # None when the caller did not identify the initiator.
+                "actor": tuple_.actor,
             },
             # Patterns match auth_decision:{subject}:{action}:{object}
             "invalidation_hints": [

@@ -190,3 +190,42 @@ class TestPermissionServiceServicerHealthCheck:
         response = servicer.HealthCheck(MagicMock(), MagicMock())
 
         assert response.status == authz_pb2.HealthCheckResponse.NOT_SERVING
+
+
+class TestTupleActor:
+    """The initiator of a change travels from the request into the tuple."""
+
+    def test_actor_defaults_to_unknown(self):
+        assert Tuple("user:alice", "MEMBER_OF", "group:devops").actor is None
+
+    def test_actor_is_carried_when_supplied(self):
+        tuple_ = Tuple("user:alice", "MEMBER_OF", "group:devops", actor="user:root")
+        assert tuple_.actor == "user:root"
+
+    def test_write_tuple_request_carries_an_actor(self):
+        request = authz_pb2.WriteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+            actor="user:root",
+        )
+        assert request.actor == "user:root"
+
+    def test_write_tuple_request_actor_is_optional(self):
+        request = authz_pb2.WriteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+        )
+        # An omitted proto3 string is the empty string, which the servicer maps
+        # to None so that "unknown" stays distinct from "nobody".
+        assert request.actor == ""
+
+    def test_delete_tuple_request_carries_an_actor(self):
+        request = authz_pb2.DeleteTupleRequest(
+            subject="user:alice",
+            relation=authz_pb2.Relation.RELATION_MEMBER_OF,
+            object="group:devops",
+            actor="user:root",
+        )
+        assert request.actor == "user:root"

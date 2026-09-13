@@ -309,3 +309,50 @@ def test_rewrite_keeps_created_and_advances_updated(neo4j_store, clean_graph):
     assert record["created"] == first
     assert record["updated"] > first
     assert record["level"] == "admin"
+
+
+def test_write_records_the_actor(neo4j_store, clean_graph):
+    """The initiator of a change is stored on the edge."""
+    neo4j_store.write_tuple(
+        Tuple("user:alex", "MEMBER_OF", "group:devops", level=None, actor="user:root")
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.actor AS actor"
+        ).single()
+
+    assert record["actor"] == "user:root"
+
+
+def test_write_has_permission_records_the_actor(neo4j_store, clean_graph):
+    """Actor is recorded for permission grants too, where it matters most."""
+    neo4j_store.write_tuple(
+        Tuple(
+            "user:alex",
+            RelationType.HAS_PERMISSION.value,
+            "bucket:photos",
+            level="admin",
+            actor="user:alex",
+        )
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:HAS_PERMISSION]->() RETURN r.actor AS actor"
+        ).single()
+
+    # Subject granting itself admin: the signal this field exists to preserve.
+    assert record["actor"] == "user:alex"
+
+
+def test_absent_actor_leaves_no_property(neo4j_store, clean_graph):
+    """Unknown is distinct from empty: no actor means no property at all."""
+    neo4j_store.write_tuple(Tuple("user:alex", "MEMBER_OF", "group:devops", level=None))
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.actor AS actor"
+        ).single()
+
+    assert record["actor"] is None

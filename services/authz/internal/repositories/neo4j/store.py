@@ -47,7 +47,7 @@ class Neo4jStore:
           ON CREATE SET object.created_at = $now
         MERGE (subject)-[r:HAS_PERMISSION]->(object)
           ON CREATE SET r.created_at = $now
-        SET r.level = $level, r.updated_at = $now
+        SET r.level = $level, r.updated_at = $now, r.actor = $actor
         RETURN r
         """ % (s_label, o_label)
         with self.driver.session() as session:
@@ -57,6 +57,7 @@ class Neo4jStore:
                 object_id=tuple_.object,
                 level=tuple_.level,
                 now=_now_ms(),
+                actor=tuple_.actor,
             )
             return result.single() is not None
 
@@ -71,7 +72,7 @@ class Neo4jStore:
           ON CREATE SET object.created_at = $now
         MERGE (subject)-[rel:`%s`]->(object)
           ON CREATE SET rel.created_at = $now
-        SET rel.updated_at = $now
+        SET rel.updated_at = $now, rel.actor = $actor
         RETURN rel
         """ % (s_label, o_label, tuple_.relation)
         logger.debug({}, "Neo4j write plain relation", tuple=str(tuple_))
@@ -81,6 +82,7 @@ class Neo4jStore:
                 subject_id=tuple_.subject,
                 object_id=tuple_.object,
                 now=_now_ms(),
+                actor=tuple_.actor,
             )
             return result.single() is not None
 
