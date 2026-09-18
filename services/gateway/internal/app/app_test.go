@@ -1,0 +1,61 @@
+package app_test
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/alesplll/opens3-rebac/services/gateway/internal/app"
+	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
+)
+
+func TestRunServesHealthAndShutsDown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx, config.Config{
+			HTTPAddr:         address,
+			MetadataGRPCAddr: "127.0.0.1:1",
+			StorageGRPCAddr:  "127.0.0.1:1",
+		})
+	}()
+
+	client := &http.Client{Timeout: time.Second}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		response, err := client.Get("http://" + address + "/healthz")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("health status = %d, want 200", response.StatusCode)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Gateway did not start: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Gateway shutdown: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Gateway did not stop after cancellation")
+	}
+}

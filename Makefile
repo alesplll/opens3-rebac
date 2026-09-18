@@ -152,6 +152,9 @@ test-users:
 test-storage:
 	go test ./services/storage/... -count=1
 
+test-gateway:
+	cd services/gateway && go test ./... -count=1
+
 test-users-service:
 	go test ./services/users/internal/service/user/tests -count=1
 
@@ -165,6 +168,9 @@ test-metadata-integration-local: up-e2e
 
 up-services:
 	docker compose --profile services up -d
+
+up-gateway-mvp:
+	docker compose --profile services up --build -d gateway metadata storage
 
 up-e2e:
 	docker compose --env-file e2e/.env --profile e2e up -d --wait --force-recreate postgres-metadata-e2e
