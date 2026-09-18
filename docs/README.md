@@ -15,6 +15,7 @@
 | Metadata | buckets, keys и версии | [README](../services/metadata/README.md) |
 | Storage | blob bytes и multipart | [README](../services/storage/README.md) |
 | Quota | резервирование и учёт квот | [README](../services/quota/README.md) |
+| Gateway | локальный HTTP PUT/GET | [README](../services/gateway/README.md) |
 
 У всех сервисных README одинаковый порядок: назначение → архитектура → структура →
 API → данные/сценарии → конфигурация → запуск → примеры → диагностика → разработка/тесты →

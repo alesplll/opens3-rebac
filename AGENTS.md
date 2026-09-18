@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is a monorepo for several gRPC services. Main code lives under `services/`: Go services in `services/auth`, `services/users`, `services/metadata`, and `services/storage`; the Python ReBAC service in `services/authz`; and the Rust quota service in `services/quota`. Shared protobuf sources are in `shared/api`, generated clients/stubs live in `shared/pkg/go` and `shared/pkg/py`, infrastructure lives in `infra/`, and cross-service docs are in `docs/`.
+This repository is a monorepo for several gRPC services and a small HTTP Gateway. Main code lives under `services/`: Go services in `services/auth`, `services/users`, `services/metadata`, `services/storage`, and `services/gateway`; the Python ReBAC service in `services/authz`; and the Rust quota service in `services/quota`. Shared protobuf sources are in `shared/api`, generated clients/stubs live in `shared/pkg/go` and `shared/pkg/py`, infrastructure lives in `infra/`, and cross-service docs are in `docs/`.
 
 Go services follow the same layout: `cmd/server` for server entrypoints and `internal/` for app, config, handlers, services, and repositories. Additional maintenance binaries may live under `cmd/<name>`. AuthZ keeps runtime code in `entrypoints/` and `internal/`, with tests in `services/authz/tests/{unit,integration}`. Quota keeps Rust code in `services/quota/src`.
 
@@ -14,6 +14,8 @@ Go services follow the same layout: `cmd/server` for server entrypoints and `int
 - `make down` / `make down-volumes`: stop containers; the latter also removes persisted data.
 - `make generate`: regenerate shared Go and Python protobuf bindings from `shared/api`.
 - `go test ./...` from `services/auth`, `services/users`, `services/metadata`, or `services/storage`: run tests for one Go service module.
+- `make test-gateway`: run the Gateway Go tests.
+- `make up-gateway-mvp`: start Gateway, Metadata, one Storage node, and their local Compose dependencies.
 - `make test-metadata-integration`: run Metadata integration tests against the dedicated e2e PostgreSQL profile.
 - `make test-metadata-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata integration tests.
 - `python3 -m pytest tests/unit -v` from `services/authz`: run AuthZ unit tests.

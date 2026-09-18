@@ -301,9 +301,31 @@ services:
       retries: 10
       start_period: 10s
 
-  # gateway:
-  #   profiles: [services]
-  #   ...
+  gateway:
+    profiles: [services]
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      GATEWAY_HTTP_ADDR: ":8080"
+      METADATA_GRPC_ADDR: "metadata:50052"
+      STORAGE_GRPC_ADDR: "storage:50053"
+    networks:
+      - opens3-network
+    restart: unless-stopped
+    depends_on:
+      metadata:
+        condition: service_started
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   # ── Observability ──────────────────────────────────────────────────────────
   # docker compose --profile observability up

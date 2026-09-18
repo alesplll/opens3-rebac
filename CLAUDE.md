@@ -23,7 +23,7 @@ Repo: https://github.com/alesplll/opens3-rebac
 
 | Service | Lang | Port | Owner | Status |
 |---|---|---|---|---|
-| **Gateway** | Go | `:8080` HTTP | Max | ⚠️ Not implemented |
+| **Gateway** | Go | `:8080` HTTP | Max | 🟡 Local PUT/GET MVP; Auth/AuthZ/Quota pending |
 | **Auth** | Go | `:50050` gRPC | — | ✅ Complete |
 | **AuthZ (ReBAC)** | Python | `:50051` gRPC | Alexa | ✅ Complete |
 | **Metadata** | Go | `:50052` gRPC | Anya | ✅ Complete |
@@ -41,17 +41,15 @@ Proto source: `shared/api/`. Generated stubs: `shared/pkg/go/`, `shared/pkg/py/`
 ## Architecture
 
 ```
-Client (HTTP / S3 API)
+Client (local HTTP PUT/GET)
         │
         ▼
-   Gateway :8080       ← single entry point (NOT YET IMPLEMENTED)
-  /   |    |    \
-Auth AuthZ Meta Storage
-  │    │    │      │
-  │  Neo4j PostgreSQL filesystem
-  │  Redis  Kafka
-Users :50054 ── PostgreSQL
-Quota :50055 ── Redis ── Kafka
+   Gateway :8080
+      ├── Metadata :50052 ── PostgreSQL, Kafka
+      └── Storage  :50053 ── filesystem
+
+Auth, AuthZ, Users and Quota are separate running services; Gateway integration
+with authentication, authorization and quota is still planned.
 ```
 
 ---
