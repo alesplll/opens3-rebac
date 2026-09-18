@@ -2,6 +2,8 @@
 import json
 import logging
 import time
+from typing import Optional
+
 from confluent_kafka import Producer
 from internal.types import Tuple
 
@@ -18,15 +20,27 @@ class AuditProducer:
         self.topic = topic
         logger.info(f"Audit producer initialized: {bootstrap_servers}/{topic}")
 
-    def send_tuple_event(self, tuple_: Tuple, event_type: str = "tuple_written") -> None:
-        """Send tuple change event with correct Redis invalidation hints."""
+    def send_tuple_event(
+        self,
+        tuple_: Tuple,
+        event_type: str = "tuple_written",
+        timestamp_ms: Optional[int] = None,
+    ) -> None:
+        """Send tuple change event with correct Redis invalidation hints.
+
+        `timestamp_ms` is the time the graph recorded the change, so the event
+        and the edge it describes carry one time from one clock. It falls back
+        to the local clock only for a caller that has no such time.
+        """
         event = {
             "event_type": event_type,
-            "timestamp": int(1000 * time.time()),  # ms
+            "timestamp": int(1000 * time.time()) if timestamp_ms is None else timestamp_ms,  # ms
             "tuple": {
                 "subject": tuple_.subject,
                 "relation": tuple_.relation,
                 "object": tuple_.object,
+                # None when the caller did not identify the initiator.
+                "actor": tuple_.actor,
             },
             # Patterns match auth_decision:{subject}:{action}:{object}
             "invalidation_hints": [

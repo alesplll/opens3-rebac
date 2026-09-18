@@ -1,5 +1,6 @@
 """Integration tests for Neo4jStore: transitive ReBAC and HAS_PERMISSION."""
 import os
+import time
 
 import pytest
 
@@ -35,10 +36,10 @@ def test_write_member_of_and_has_permission(neo4j_store, clean_graph):
     """Alex MEMBER_OF DevOps, DevOps HAS_PERMISSION(admin) Server-1."""
     assert neo4j_store.write_tuple(
         Tuple("user:alex", "MEMBER_OF", "group:devops", level=None)
-    ) is True
+    ) is not None
     assert neo4j_store.write_tuple(
         Tuple("group:devops", RelationType.HAS_PERMISSION.value, "resource:server-1", level="admin")
-    ) is True
+    ) is not None
 
     # Transitive: Alex can admin Server-1
     assert neo4j_store.check("user:alex", "admin", "resource:server-1") is True
@@ -48,11 +49,11 @@ def test_write_member_of_and_has_permission(neo4j_store, clean_graph):
 
 def test_write_has_permission_requires_level(neo4j_store, clean_graph):
     """HAS_PERMISSION without level should fail (or be rejected)."""
-    # Store returns False when level is missing for HAS_PERMISSION
+    # Store records nothing when level is missing for HAS_PERMISSION
     result = neo4j_store.write_tuple(
         Tuple("group:g1", RelationType.HAS_PERMISSION.value, "resource:r1", level=None)
     )
-    assert result is False
+    assert result is None
 
 
 def test_read_tuples_returns_level(neo4j_store, clean_graph):
@@ -97,16 +98,16 @@ def test_delete_tuple_removes_relationship(neo4j_store, clean_graph):
 
     result = neo4j_store.delete_tuple(t)
 
-    assert result is True
+    assert result is not None
     assert not any(x.relation == "MEMBER_OF" for x in neo4j_store.read_tuples("user:alice"))
 
 
-def test_delete_nonexistent_tuple_returns_false(neo4j_store, clean_graph):
-    """Deleting a non-existent edge returns False."""
+def test_delete_nonexistent_tuple_records_nothing(neo4j_store, clean_graph):
+    """Deleting a non-existent edge records no change and reports no time."""
     result = neo4j_store.delete_tuple(
         Tuple("user:nobody", "MEMBER_OF", "group:nothing")
     )
-    assert result is False
+    assert result is None
 
 
 def test_check_returns_false_after_membership_deleted(neo4j_store, clean_graph):
@@ -258,3 +259,140 @@ def test_parent_of_does_not_propagate_permissions(neo4j_store, clean_graph):
     )
     # alice has read on bucket, but NOT automatically on the object
     assert neo4j_store.check("user:alice", "read", "object:photos/cat.jpg") is False
+
+
+def test_write_records_timestamps(neo4j_store, clean_graph):
+    """Every written relationship and node carries creation time in milliseconds."""
+    before = int(time.time() * 1000)
+    neo4j_store.write_tuple(Tuple("user:alex", "MEMBER_OF", "group:devops", level=None))
+    after = int(time.time() * 1000)
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            """
+            MATCH (s {id: 'user:alex'})-[r:MEMBER_OF]->(o {id: 'group:devops'})
+            RETURN r.created_at AS created, r.updated_at AS updated,
+                   s.created_at AS subject_created
+            """
+        ).single()
+
+    assert record is not None
+    assert before <= record["created"] <= after
+    assert record["updated"] >= record["created"]
+    assert before <= record["subject_created"] <= after
+
+
+def test_rewrite_keeps_created_and_advances_updated(neo4j_store, clean_graph):
+    """A re-grant must not look like a brand new relationship."""
+    neo4j_store.write_tuple(
+        Tuple("group:devs", RelationType.HAS_PERMISSION.value, "bucket:repo1", level="read")
+    )
+
+    with neo4j_store.driver.session() as session:
+        first = session.run(
+            "MATCH ()-[r:HAS_PERMISSION]->() RETURN r.created_at AS created"
+        ).single()["created"]
+
+    time.sleep(0.01)
+    neo4j_store.write_tuple(
+        Tuple("group:devs", RelationType.HAS_PERMISSION.value, "bucket:repo1", level="admin")
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            """
+            MATCH ()-[r:HAS_PERMISSION]->()
+            RETURN r.created_at AS created, r.updated_at AS updated, r.level AS level
+            """
+        ).single()
+
+    assert record["created"] == first
+    assert record["updated"] > first
+    assert record["level"] == "admin"
+
+
+def test_write_records_the_actor(neo4j_store, clean_graph):
+    """The initiator of a change is stored on the edge."""
+    neo4j_store.write_tuple(
+        Tuple("user:alex", "MEMBER_OF", "group:devops", level=None, actor="user:root")
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.actor AS actor"
+        ).single()
+
+    assert record["actor"] == "user:root"
+
+
+def test_write_has_permission_records_the_actor(neo4j_store, clean_graph):
+    """Actor is recorded for permission grants too, where it matters most."""
+    neo4j_store.write_tuple(
+        Tuple(
+            "user:alex",
+            RelationType.HAS_PERMISSION.value,
+            "bucket:photos",
+            level="admin",
+            actor="user:alex",
+        )
+    )
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:HAS_PERMISSION]->() RETURN r.actor AS actor"
+        ).single()
+
+    # Subject granting itself admin: the signal this field exists to preserve.
+    assert record["actor"] == "user:alex"
+
+
+def test_absent_actor_leaves_no_property(neo4j_store, clean_graph):
+    """Unknown is distinct from empty: no actor means no property at all."""
+    neo4j_store.write_tuple(Tuple("user:alex", "MEMBER_OF", "group:devops", level=None))
+
+    with neo4j_store.driver.session() as session:
+        record = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.actor AS actor"
+        ).single()
+
+    assert record["actor"] is None
+
+
+def test_write_returns_the_time_the_database_recorded(neo4j_store, clean_graph):
+    """The caller learns the edge's own time, so the audit log can reuse it."""
+    recorded = neo4j_store.write_tuple(Tuple("user:alex", "MEMBER_OF", "group:devops"))
+
+    with neo4j_store.driver.session() as session:
+        stored = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.updated_at AS updated"
+        ).single()["updated"]
+
+    assert recorded == stored
+
+
+def test_permission_write_returns_the_time_the_database_recorded(neo4j_store, clean_graph):
+    """Grants take the same path: the time comes back from the write itself."""
+    recorded = neo4j_store.write_tuple(
+        Tuple("group:devs", RelationType.HAS_PERMISSION.value, "bucket:repo1", level="read")
+    )
+
+    with neo4j_store.driver.session() as session:
+        stored = session.run(
+            "MATCH ()-[r:HAS_PERMISSION]->() RETURN r.updated_at AS updated"
+        ).single()["updated"]
+
+    assert recorded == stored
+
+
+def test_delete_returns_the_time_of_the_removal(neo4j_store, clean_graph):
+    """A revocation has no edge left to carry its time, so the store reports it."""
+    t = Tuple("user:alex", "MEMBER_OF", "group:devops")
+    neo4j_store.write_tuple(t)
+    with neo4j_store.driver.session() as session:
+        created = session.run(
+            "MATCH ()-[r:MEMBER_OF]->() RETURN r.created_at AS created"
+        ).single()["created"]
+
+    removed = neo4j_store.delete_tuple(t)
+
+    assert removed >= created

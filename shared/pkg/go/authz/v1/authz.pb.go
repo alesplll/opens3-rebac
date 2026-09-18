@@ -373,7 +373,16 @@ type WriteTupleRequest struct {
 	Object string `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
 	// Уровень прав. Обязателен при relation = HAS_PERMISSION.
 	// Иерархия (каждый уровень включает нижестоящие): admin > delete > create > write > read
-	Level         PermissionLevel `protobuf:"varint,4,opt,name=level,proto3,enum=opens3.authz.v1.PermissionLevel" json:"level,omitempty"`
+	Level PermissionLevel `protobuf:"varint,4,opt,name=level,proto3,enum=opens3.authz.v1.PermissionLevel" json:"level,omitempty"`
+	// Кто выполняет изменение. Заполняется вызывающим сервисом из разобранного
+	// токена доступа. Необязательно: пустая строка означает "инициатор неизвестен".
+	//
+	// Нужно для аудита. По кортежу отношения невозможно отличить право, выданное
+	// администратором, от права, которое субъект выдал сам себе, — а это основной
+	// признак эскалации привилегий. Поле только фиксирует происхождение изменения
+	// и не влияет на авторизацию: проверка прав на саму операцию записи
+	// по-прежнему возлагается на вызывающий сервис.
+	Actor         string `protobuf:"bytes,5,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -436,6 +445,13 @@ func (x *WriteTupleRequest) GetLevel() PermissionLevel {
 	return PermissionLevel_PERMISSION_LEVEL_UNSPECIFIED
 }
 
+func (x *WriteTupleRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
 type WriteTupleResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -481,10 +497,12 @@ func (x *WriteTupleResponse) GetSuccess() bool {
 }
 
 type DeleteTupleRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
-	Relation      Relation               `protobuf:"varint,2,opt,name=relation,proto3,enum=opens3.authz.v1.Relation" json:"relation,omitempty"`
-	Object        string                 `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Subject  string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	Relation Relation               `protobuf:"varint,2,opt,name=relation,proto3,enum=opens3.authz.v1.Relation" json:"relation,omitempty"`
+	Object   string                 `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
+	// См. WriteTupleRequest.actor.
+	Actor         string `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -536,6 +554,13 @@ func (x *DeleteTupleRequest) GetRelation() Relation {
 func (x *DeleteTupleRequest) GetObject() string {
 	if x != nil {
 		return x.Object
+	}
+	return ""
+}
+
+func (x *DeleteTupleRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
 	}
 	return ""
 }
@@ -845,18 +870,20 @@ const file_authz_proto_rawDesc = "" +
 	"\x06object\x18\x03 \x01(\tR\x06object\"A\n" +
 	"\rCheckResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xb4\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xca\x01\n" +
 	"\x11WriteTupleRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x125\n" +
 	"\brelation\x18\x02 \x01(\x0e2\x19.opens3.authz.v1.RelationR\brelation\x12\x16\n" +
 	"\x06object\x18\x03 \x01(\tR\x06object\x126\n" +
-	"\x05level\x18\x04 \x01(\x0e2 .opens3.authz.v1.PermissionLevelR\x05level\".\n" +
+	"\x05level\x18\x04 \x01(\x0e2 .opens3.authz.v1.PermissionLevelR\x05level\x12\x14\n" +
+	"\x05actor\x18\x05 \x01(\tR\x05actor\".\n" +
 	"\x12WriteTupleResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"}\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x93\x01\n" +
 	"\x12DeleteTupleRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x125\n" +
 	"\brelation\x18\x02 \x01(\x0e2\x19.opens3.authz.v1.RelationR\brelation\x12\x16\n" +
-	"\x06object\x18\x03 \x01(\tR\x06object\"/\n" +
+	"\x06object\x18\x03 \x01(\tR\x06object\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\tR\x05actor\"/\n" +
 	"\x13DeleteTupleResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"'\n" +
 	"\vReadRequest\x12\x18\n" +
