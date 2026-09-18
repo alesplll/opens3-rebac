@@ -90,3 +90,47 @@ func TestGetStreamsBeforeStorageEOF(t *testing.T) {
 		t.Fatalf("remaining body = %d, error = %v", n, err)
 	}
 }
+
+func TestClientCancellationStopsStorageRead(t *testing.T) {
+	server, state := newGateway(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stopped := make(chan struct{})
+	state.beforeNextChunk = func(ctx context.Context) error {
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	}
+	state.blobs["blob"] = []byte(strings.Repeat("x", 9*1024*1024))
+	state.meta["key"] = &metadatav1.GetObjectMetaResponse{BlobId: "blob", SizeBytes: 9 * 1024 * 1024}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/fixture/key", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("GET status %d", response.StatusCode)
+	}
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Storage stream survived HTTP client cancellation")
+	}
+}
+
+func TestMissingObjectReturnsNotFound(t *testing.T) {
+	server, _ := newGateway(t)
+	response, err := server.Client().Get(server.URL + "/fixture/missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET status %d, want 404", response.StatusCode)
+	}
+}
