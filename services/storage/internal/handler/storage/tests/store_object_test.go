@@ -98,7 +98,6 @@ func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
 			_, err := io.ReadAll(reader)
 			require.Error(t, err)
 			return nil, err
-			return nil, err
 		},
 	})
 
