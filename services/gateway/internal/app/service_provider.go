@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -15,43 +16,82 @@ import (
 )
 
 type serviceProvider struct {
-	metadataConn  *grpc.ClientConn
-	storageConn   *grpc.ClientConn
+	config *config.Config
+
+	metadataConn   *grpc.ClientConn
+	storageConn    *grpc.ClientConn
+	metadataClient metadatav1.MetadataServiceClient
+	storageClient  storagev1.DataStorageServiceClient
+
 	objectService service.ObjectService
 	objectHandler http.Handler
 }
 
-func newServiceProvider(cfg *config.Config) (*serviceProvider, error) {
-	metadataConn, err := grpc.NewClient(cfg.Metadata.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("metadata client: %w", err)
-	}
-	storageConn, err := grpc.NewClient(cfg.Storage.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		_ = metadataConn.Close()
-		return nil, fmt.Errorf("storage client: %w", err)
-	}
-	return &serviceProvider{metadataConn: metadataConn, storageConn: storageConn}, nil
+func newServiceProvider(cfg *config.Config) *serviceProvider {
+	return &serviceProvider{config: cfg}
 }
 
-func (s *serviceProvider) ObjectService() service.ObjectService {
+func (s *serviceProvider) MetadataClient() (metadatav1.MetadataServiceClient, error) {
+	if s.metadataClient == nil {
+		conn, err := grpc.NewClient(s.config.Metadata.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, fmt.Errorf("create Metadata client: %w", err)
+		}
+		s.metadataConn = conn
+		s.metadataClient = metadatav1.NewMetadataServiceClient(conn)
+	}
+	return s.metadataClient, nil
+}
+
+func (s *serviceProvider) StorageClient() (storagev1.DataStorageServiceClient, error) {
+	if s.storageClient == nil {
+		conn, err := grpc.NewClient(s.config.Storage.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, fmt.Errorf("create Storage client: %w", err)
+		}
+		s.storageConn = conn
+		s.storageClient = storagev1.NewDataStorageServiceClient(conn)
+	}
+	return s.storageClient, nil
+}
+
+func (s *serviceProvider) ObjectService() (service.ObjectService, error) {
 	if s.objectService == nil {
-		s.objectService = objectservice.NewService(
-			metadatav1.NewMetadataServiceClient(s.metadataConn),
-			storagev1.NewDataStorageServiceClient(s.storageConn),
-		)
+		metadata, err := s.MetadataClient()
+		if err != nil {
+			return nil, err
+		}
+		storage, err := s.StorageClient()
+		if err != nil {
+			return nil, err
+		}
+		s.objectService = objectservice.NewService(metadata, storage)
 	}
-	return s.objectService
+	return s.objectService, nil
 }
 
-func (s *serviceProvider) ObjectHandler() http.Handler {
+func (s *serviceProvider) ObjectHandler() (http.Handler, error) {
 	if s.objectHandler == nil {
-		s.objectHandler = httpapi.NewHandler(s.ObjectService())
+		objects, err := s.ObjectService()
+		if err != nil {
+			return nil, err
+		}
+		s.objectHandler = httpapi.NewHandler(objects)
 	}
-	return s.objectHandler
+	return s.objectHandler, nil
 }
 
-func (s *serviceProvider) Close() {
-	_ = s.storageConn.Close()
-	_ = s.metadataConn.Close()
+func (s *serviceProvider) Close() error {
+	var errs []error
+	if s.storageConn != nil {
+		if err := s.storageConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close Storage client: %w", err))
+		}
+	}
+	if s.metadataConn != nil {
+		if err := s.metadataConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close Metadata client: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }

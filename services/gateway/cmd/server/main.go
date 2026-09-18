@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/app"
-	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	"go.uber.org/zap"
 )
@@ -17,11 +16,7 @@ import (
 func main() {
 	configPath := flag.String("config-path", ".env", "path to config file")
 	flag.Parse()
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	a, err := app.NewApp(cfg)
+	a, err := app.NewApp(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}

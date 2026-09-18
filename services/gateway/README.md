@@ -23,9 +23,9 @@ PostgreSQL остаются зависимостями Metadata, но Gateway к
 ## Структура проекта
 
 ```text
-cmd/server/                 запуск процесса, загрузка настроек и обработка сигналов
+cmd/server/                 запуск процесса, выбор файла настроек и обработка сигналов
 internal/config/env/        загрузка настроек по компонентам из окружения
-internal/app/               сборка зависимостей и жизненный цикл HTTP-сервера
+internal/app/               загрузка настроек, сборка зависимостей и жизненный цикл HTTP-сервера
 internal/service/object/    сценарии PUT/GET с Metadata и Storage
 internal/handler/httpapi/   HTTP-маршруты, заголовки и коды ответов
 ```

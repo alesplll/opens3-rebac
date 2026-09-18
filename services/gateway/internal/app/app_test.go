@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/app"
-	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 )
 
 func TestRunServesHealthAndShutsDown(t *testing.T) {
@@ -26,11 +25,7 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 	t.Setenv("GATEWAY_HTTP_ADDR", address)
 	t.Setenv("METADATA_GRPC_ADDR", "127.0.0.1:1")
 	t.Setenv("STORAGE_GRPC_ADDR", "127.0.0.1:1")
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := app.NewApp(cfg)
+	a, err := app.NewApp(".env")
 	if err != nil {
 		t.Fatal(err)
 	}
