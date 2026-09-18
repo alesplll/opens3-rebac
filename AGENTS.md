@@ -17,7 +17,7 @@ Go services follow the same layout: `cmd/server` for server entrypoints and `int
 - `make test-gateway`: run the Gateway Go tests.
 - `make smoke-gateway-local`: build/start the Gateway MVP stack and run the real-service PUT/GET smoke; `make smoke-gateway` checks an already running stack.
 - `make up-gateway-mvp`: start Gateway, Metadata, one Storage node, and their local Compose dependencies.
-- `make test-metadata-integration`: run Metadata integration tests against the dedicated e2e PostgreSQL profile.
+- `make test-metadata-integration`: run Metadata integration tests sequentially (`-p 1`) against the dedicated e2e PostgreSQL profile; the suites reset a shared schema.
 - `make test-metadata-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata integration tests.
 - `python3 -m pytest tests/unit -v` from `services/authz`: run AuthZ unit tests.
 - `python3 -m pytest tests/integration -v -m integration` from `services/authz`: run Neo4j-backed integration tests.
