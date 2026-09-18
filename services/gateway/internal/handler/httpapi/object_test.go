@@ -26,6 +26,7 @@ import (
 )
 
 type fixture struct {
+	beforeNextChunk func(context.Context) error
 	sync.Mutex
 	blobs        map[string][]byte
 	meta         map[string]*metadatav1.GetObjectMetaResponse
@@ -130,6 +131,11 @@ func (s *storageServer) RetrieveObject(req *storagev1.RetrieveObjectRequest, str
 		return nil
 	}
 	for offset := 0; offset < len(data); offset += 8 * 1024 * 1024 {
+		if offset > 0 && s.state.beforeNextChunk != nil {
+			if err := s.state.beforeNextChunk(stream.Context()); err != nil {
+				return err
+			}
+		}
 		end := min(offset+8*1024*1024, len(data))
 		if err := stream.Send(&storagev1.RetrieveObjectResponse{Data: data[offset:end], TotalSize: int64(len(data))}); err != nil {
 			return err

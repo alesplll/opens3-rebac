@@ -15,6 +15,7 @@ Go services follow the same layout: `cmd/server` for server entrypoints and `int
 - `make generate`: regenerate shared Go and Python protobuf bindings from `shared/api`.
 - `go test ./...` from `services/auth`, `services/users`, `services/metadata`, or `services/storage`: run tests for one Go service module.
 - `make test-gateway`: run the Gateway Go tests.
+- `make smoke-gateway-local`: build/start the Gateway MVP stack and run the real-service PUT/GET smoke; `make smoke-gateway` checks an already running stack.
 - `make up-gateway-mvp`: start Gateway, Metadata, one Storage node, and their local Compose dependencies.
 - `make test-metadata-integration`: run Metadata integration tests against the dedicated e2e PostgreSQL profile.
 - `make test-metadata-integration-local`: start the dedicated e2e PostgreSQL container and then run Metadata integration tests.

@@ -24,6 +24,7 @@ PostgreSQL остаются зависимостями Metadata, но Gateway к
 
 ```text
 cmd/server/                 запуск процесса, выбор файла настроек и обработка сигналов
+cmd/smoke/                  проверка живого HTTP → Metadata/Storage контура
 internal/config/env/        загрузка настроек по компонентам из окружения
 internal/app/               загрузка настроек, сборка зависимостей и жизненный цикл HTTP-сервера
 internal/service/object/    сценарии PUT/GET с Metadata и Storage
@@ -88,7 +89,7 @@ docker compose --profile services ps gateway metadata storage
 ```
 
 Команда поднимает Gateway, Metadata, Storage и инфраструктурные зависимости
-Metadata. Bucket должен быть создан заранее через Metadata. Для запуска вне
+Metadata. Kafka запускается после проверки готовности ZooKeeper. Bucket должен быть создан заранее через Metadata. Для запуска вне
 Docker поднимите Metadata и Storage, затем:
 
 ```bash
@@ -124,10 +125,26 @@ curl -i http://127.0.0.1:8080/healthz
 
 ```bash
 make test-gateway
+make smoke-gateway-local  # собрать/поднять стенд и проверить PUT/GET
+# Для уже запущенного стенда: make smoke-gateway
 docker compose --profile services config --quiet
 ```
 
-Проверка полного пути требует поднятых Metadata и Storage и тестового bucket.
+Smoke сам создаёт уникальный bucket `gateway-smoke-<UUID>` и проверяет пустой
+объект, бинарные данные больше 20 MiB, chunked PUT без Content-Length и перезапись
+ключа. Каждый GET выполняется сразу после PUT, без повторов; проверяются SHA-256,
+MD5/ETag, размер, Content-Type и версия. Данные остаются в тестовом bucket для
+диагностики (около 21 MiB на запуск). Нужны Go 1.24.1 и Docker Compose; grpcurl
+для smoke не нужен. Общий таймаут smoke — 2 минуты, включая ожидание готовности.
+Адреса и таймаут можно задать флагами:
+
+```bash
+go run ./services/gateway/cmd/smoke -gateway http://127.0.0.1:8080 -metadata 127.0.0.1:50052 -timeout 3m
+```
+
+Тесты Gateway используют контролируемые gRPC-серверы, чтобы проверить передачу
+PUT до EOF, отсутствие записи Metadata до подтверждения Storage, ранний отказ
+Storage и обрыв неуспешного GET. Это дополняет smoke с настоящими сервисами.
 Изменение protobuf для этого первого среза не требуется.
 
 ## Ограничения и дальнейшие работы

@@ -152,6 +152,14 @@ test-users:
 test-storage:
 	go test ./services/storage/... -count=1
 
+# Requires the running Gateway MVP stack; creates a unique smoke bucket.
+.PHONY: test-gateway smoke-gateway smoke-gateway-local
+smoke-gateway:
+	go run ./services/gateway/cmd/smoke
+
+smoke-gateway-local: up-gateway-mvp
+	$(MAKE) smoke-gateway
+
 test-gateway:
 	cd services/gateway && go test ./... -count=1
 

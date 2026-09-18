@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/alesplll/opens3-rebac/shared v0.0.0-20260401221801-a711779ac92c
 	github.com/caarlos0/env/v11 v11.3.1
+	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.76.0
@@ -14,7 +15,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
