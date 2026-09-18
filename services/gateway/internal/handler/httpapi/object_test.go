@@ -27,10 +27,13 @@ import (
 
 type fixture struct {
 	sync.Mutex
-	blobs      map[string][]byte
-	meta       map[string]*metadatav1.GetObjectMetaResponse
-	storeCount int
-	failCreate bool
+	blobs        map[string][]byte
+	meta         map[string]*metadatav1.GetObjectMetaResponse
+	storeCount   int
+	failCreate   bool
+	beforeCommit func(context.Context) error
+	onChunk      func()
+	failStore    error
 }
 
 type metadataServer struct {
@@ -47,6 +50,9 @@ func (s *metadataServer) CreateObjectVersion(_ context.Context, req *metadatav1.
 	defer s.state.Unlock()
 	if s.state.failCreate {
 		return nil, status.Error(codes.Internal, "registration failed")
+	}
+	if _, ok := s.state.blobs[req.GetBlobId()]; !ok {
+		return nil, status.Error(codes.FailedPrecondition, "metadata published before blob commit")
 	}
 	s.state.meta[req.GetKey()] = &metadatav1.GetObjectMetaResponse{
 		BlobId:      req.GetBlobId(),
@@ -80,6 +86,9 @@ func (s *storageServer) StoreObject(stream storagev1.DataStorageService_StoreObj
 	if first.GetHeader() == nil {
 		return status.Error(codes.InvalidArgument, "missing header")
 	}
+	if s.state.failStore != nil {
+		return s.state.failStore
+	}
 	var content bytes.Buffer
 	for {
 		message, err := stream.Recv()
@@ -90,9 +99,17 @@ func (s *storageServer) StoreObject(stream storagev1.DataStorageService_StoreObj
 			return err
 		}
 		content.Write(message.GetChunk().GetData())
+		if s.state.onChunk != nil {
+			s.state.onChunk()
+		}
 	}
 	if first.GetHeader().Size != nil && *first.GetHeader().Size != int64(content.Len()) {
 		return status.Error(codes.InvalidArgument, "size mismatch")
+	}
+	if s.state.beforeCommit != nil {
+		if err := s.state.beforeCommit(stream.Context()); err != nil {
+			return err
+		}
 	}
 	s.state.Lock()
 	s.state.storeCount++

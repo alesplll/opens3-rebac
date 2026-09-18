@@ -32,7 +32,7 @@ func (s *objectService) Put(ctx context.Context, bucket, key string, body io.Rea
 	}
 	header := &storagev1.StoreObjectHeader{ContentType: contentType, Size: size}
 	if err := stream.Send(&storagev1.StoreObjectRequest{Payload: &storagev1.StoreObjectRequest_Header{Header: header}}); err != nil {
-		return service.PutResult{}, err
+		return service.PutResult{}, storeSendError(stream, err)
 	}
 
 	buf := make([]byte, uploadChunkSize)
@@ -41,7 +41,7 @@ func (s *objectService) Put(ctx context.Context, bucket, key string, body io.Rea
 		n, readErr := body.Read(buf)
 		if n > 0 {
 			if err := stream.Send(&storagev1.StoreObjectRequest{Payload: &storagev1.StoreObjectRequest_Chunk{Chunk: &storagev1.StoreObjectChunk{Data: buf[:n]}}}); err != nil {
-				return service.PutResult{}, err
+				return service.PutResult{}, storeSendError(stream, err)
 			}
 			total += int64(n)
 		}
@@ -67,4 +67,15 @@ func (s *objectService) Put(ctx context.Context, bucket, key string, body io.Rea
 		return service.PutResult{}, err
 	}
 	return service.PutResult{ETag: stored.GetChecksumMd5(), VersionID: version.GetVersionId()}, nil
+}
+
+// Send returns EOF when the server has rejected the stream. Receive its status
+// so an early rejection has the same HTTP mapping as a failure at CloseAndRecv.
+func storeSendError(stream storagev1.DataStorageService_StoreObjectClient, sendErr error) error {
+	if errors.Is(sendErr, io.EOF) {
+		if _, err := stream.CloseAndRecv(); err != nil {
+			return err
+		}
+	}
+	return sendErr
 }
