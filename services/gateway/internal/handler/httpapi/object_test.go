@@ -112,7 +112,13 @@ func (s *storageServer) RetrieveObject(req *storagev1.RetrieveObjectRequest, str
 	if len(data) == 0 {
 		return nil
 	}
-	return stream.Send(&storagev1.RetrieveObjectResponse{Data: data, TotalSize: int64(len(data))})
+	for offset := 0; offset < len(data); offset += 8 * 1024 * 1024 {
+		end := min(offset+8*1024*1024, len(data))
+		if err := stream.Send(&storagev1.RetrieveObjectResponse{Data: data[offset:end], TotalSize: int64(len(data))}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newGateway(t *testing.T) (*httptest.Server, *fixture) {
@@ -146,6 +152,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}{
 		{name: "nested key", body: "hello world"},
 		{name: "empty object", body: ""},
+		{name: "multiple storage chunks", body: strings.Repeat("0123456789abcdef", 1280*1024)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			key := strings.ReplaceAll(tc.name, " ", "-") + "/file.txt"
@@ -173,7 +180,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got.StatusCode != http.StatusOK || string(body) != tc.body || got.Header.Get("Content-Type") != "text/plain" {
-				t.Fatalf("GET response: status=%d body=%q type=%q", got.StatusCode, body, got.Header.Get("Content-Type"))
+				t.Fatalf("GET response: status=%d body length=%d type=%q", got.StatusCode, len(body), got.Header.Get("Content-Type"))
 			}
 			if got.Header.Get("ETag") != response.Header.Get("ETag") {
 				t.Fatalf("ETag changed between PUT and GET")
@@ -182,8 +189,8 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}
 	state.Lock()
 	defer state.Unlock()
-	if state.storeCount != 2 {
-		t.Fatalf("stored blobs = %d, want 2", state.storeCount)
+	if state.storeCount != 3 {
+		t.Fatalf("stored blobs = %d, want 3", state.storeCount)
 	}
 }
 
