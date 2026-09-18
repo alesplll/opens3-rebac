@@ -22,7 +22,13 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request, bucket, key 
 	w.Header().Set("ETag", strconv.Quote(result.ETag))
 	w.Header().Set("X-Object-Version-Id", result.VersionID)
 	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, result.Body); err != nil {
+	n, err := io.Copy(w, result.Body)
+	if err == nil && n != result.Size {
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
 		logger.Error(r.Context(), "object response interrupted", zap.String("bucket", bucket), zap.String("key", key), zap.Error(err))
+		// Headers may already be on the wire; abort instead of completing a successful response.
+		panic(http.ErrAbortHandler)
 	}
 }
