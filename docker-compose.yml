@@ -123,11 +123,19 @@ services:
     networks:
       - opens3-network
 
+    healthcheck:
+      test: ["CMD", "cub", "zk-ready", "localhost:2181", "5"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
   kafka:
     image: confluentinc/cp-kafka:7.7.0
     hostname: kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
