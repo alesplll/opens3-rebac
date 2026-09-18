@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/handler/httpapi"
+	objectservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/object"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"google.golang.org/grpc"
@@ -129,7 +131,9 @@ func newGateway(t *testing.T) (*httptest.Server, *fixture) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	server := httptest.NewServer(httpapi.NewHandler(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn)))
+	logger.SetNopLogger()
+	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn))
+	server := httptest.NewServer(httpapi.NewHandler(objects))
 	t.Cleanup(server.Close)
 	return server, state
 }

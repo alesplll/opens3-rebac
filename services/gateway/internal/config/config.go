@@ -1,26 +1,40 @@
 package config
 
 import (
+	"errors"
 	"os"
+
+	"github.com/alesplll/opens3-rebac/services/gateway/internal/config/env"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	HTTPAddr         string
-	MetadataGRPCAddr string
-	StorageGRPCAddr  string
+	HTTP     HTTPConfig
+	Metadata GRPCClientConfig
+	Storage  GRPCClientConfig
+	Logger   LoggerConfig
 }
 
-func Load() Config {
-	return Config{
-		HTTPAddr:         valueOrDefault("GATEWAY_HTTP_ADDR", "127.0.0.1:8080"),
-		MetadataGRPCAddr: valueOrDefault("METADATA_GRPC_ADDR", "localhost:50052"),
-		StorageGRPCAddr:  valueOrDefault("STORAGE_GRPC_ADDR", "localhost:50053"),
+// Load uses the process environment and, when present, a local .env file.
+func Load(path ...string) (*Config, error) {
+	if err := godotenv.Load(path...); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-}
-
-func valueOrDefault(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
+	httpConfig, err := env.NewHTTPConfig()
+	if err != nil {
+		return nil, err
 	}
-	return fallback
+	metadataConfig, err := env.NewMetadataConfig()
+	if err != nil {
+		return nil, err
+	}
+	storageConfig, err := env.NewStorageConfig()
+	if err != nil {
+		return nil, err
+	}
+	loggerConfig, err := env.NewLoggerConfig()
+	if err != nil {
+		return nil, err
+	}
+	return &Config{HTTP: httpConfig, Metadata: metadataConfig, Storage: storageConfig, Logger: loggerConfig}, nil
 }

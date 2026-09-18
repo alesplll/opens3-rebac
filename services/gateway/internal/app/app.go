@@ -3,44 +3,59 @@ package app
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
-	"github.com/alesplll/opens3-rebac/services/gateway/internal/handler/httpapi"
-	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
-	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
+	"go.uber.org/zap"
 )
 
-func Run(ctx context.Context, cfg config.Config) error {
-	metadataConn, err := grpc.NewClient(cfg.MetadataGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return err
-	}
-	defer metadataConn.Close()
-	storageConn, err := grpc.NewClient(cfg.StorageGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return err
-	}
-	defer storageConn.Close()
+const shutdownTimeout = 10 * time.Second
 
-	listener, err := net.Listen("tcp", cfg.HTTPAddr)
+type App struct {
+	config          *config.Config
+	serviceProvider *serviceProvider
+	httpServer      *http.Server
+}
+
+func NewApp(cfg *config.Config) (*App, error) {
+	a := &App{config: cfg}
+	if err := a.initDeps(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func (a *App) initDeps() error {
+	if err := logger.Init(a.config.Logger); err != nil {
+		return err
+	}
+	provider, err := newServiceProvider(a.config)
+	if err != nil {
+		return err
+	}
+	a.serviceProvider = provider
+	a.httpServer = &http.Server{
+		Handler:           provider.ObjectHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	return nil
+}
+
+func (a *App) Run(ctx context.Context) error {
+	defer a.serviceProvider.Close()
+	defer func() { _ = logger.Sync() }()
+	listener, err := net.Listen("tcp", a.config.HTTP.Address())
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
-	server := &http.Server{
-		Handler:           httpapi.NewHandler(metadatav1.NewMetadataServiceClient(metadataConn), storagev1.NewDataStorageServiceClient(storageConn)),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
 	served := make(chan error, 1)
-	go func() { served <- server.Serve(listener) }()
-	slog.Info("Gateway listening", "address", listener.Addr().String())
+	go func() { served <- a.httpServer.Serve(listener) }()
+	logger.Info(ctx, "Gateway listening", zap.String("address", listener.Addr().String()))
 
 	select {
 	case err := <-served:
@@ -49,15 +64,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 		return err
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			_ = server.Close()
+		if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+			_ = a.httpServer.Close()
 			return err
 		}
 		if err := <-served; !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
+		logger.Info(context.Background(), "Gateway stopped gracefully")
 		return nil
 	}
 }

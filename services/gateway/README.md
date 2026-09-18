@@ -23,10 +23,11 @@ PostgreSQL остаются зависимостями Metadata, но Gateway к
 ## Структура проекта
 
 ```text
-cmd/server/                 запуск процесса и обработка сигналов
-internal/config/            адреса HTTP и gRPC
-internal/app/               соединения и жизненный цикл HTTP-сервера
-internal/handler/httpapi/   PUT, GET и health endpoint
+cmd/server/                 запуск процесса, загрузка настроек и обработка сигналов
+internal/config/env/        загрузка настроек по компонентам из окружения
+internal/app/               сборка зависимостей и жизненный цикл HTTP-сервера
+internal/service/object/    сценарии PUT/GET с Metadata и Storage
+internal/handler/httpapi/   HTTP-маршруты, заголовки и коды ответов
 ```
 
 ## API
@@ -62,6 +63,17 @@ committed-версию. `pending/committed/aborted` orchestration, operation ID 
 | `GATEWAY_HTTP_ADDR` | `127.0.0.1:8080` | `:8080` |
 | `METADATA_GRPC_ADDR` | `localhost:50052` | `metadata:50052` |
 | `STORAGE_GRPC_ADDR` | `localhost:50053` | `storage:50053` |
+| `LOGGER_LEVEL` | `info` | `info` |
+| `LOGGER_AS_JSON` | `false` | `false` |
+| `LOGGER_ENABLE_OLTP` | `false` | `false` |
+| `OTEL_SERVICE_NAME` | `gateway` | `gateway` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | `localhost:4317` |
+| `OTEL_ENVIRONMENT` | `development` | `development` |
+
+Gateway читает переменные окружения и при наличии файл `.env` из текущего
+каталога. Другой файл можно указать через `-config-path`. Как и в Users,
+логирование настроено через общий модуль платформы; экспорт логов в OTLP
+по умолчанию выключен.
 
 Compose публикует HTTP-порт только на `127.0.0.1:8080`, поскольку в этом срезе
 пока нет клиентской аутентификации и авторизации.

@@ -23,13 +23,20 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	t.Setenv("GATEWAY_HTTP_ADDR", address)
+	t.Setenv("METADATA_GRPC_ADDR", "127.0.0.1:1")
+	t.Setenv("STORAGE_GRPC_ADDR", "127.0.0.1:1")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := app.NewApp(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
-		done <- app.Run(ctx, config.Config{
-			HTTPAddr:         address,
-			MetadataGRPCAddr: "127.0.0.1:1",
-			StorageGRPCAddr:  "127.0.0.1:1",
-		})
+		done <- a.Run(ctx)
 	}()
 
 	client := &http.Client{Timeout: time.Second}
