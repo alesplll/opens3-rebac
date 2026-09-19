@@ -122,6 +122,16 @@ Default ниже относится к коду, а не к development `.env`.
 | `RATE_LIMITER_PERIOD` | `1s` | [rate_limiter.go](internal/config/env/rate_limiter.go) |
 | `DATA_DIR` | `/data/blobs` | [storage.go](internal/config/env/storage.go) |
 | `MULTIPART_DIR` | `/data/staging` | [storage.go](internal/config/env/storage.go) |
+| `STORAGE_RETRIEVE_CHUNK_SIZE_BYTES` | `1048576` (1 MiB) | [storage.go](internal/config/env/storage.go) |
+
+`STORAGE_RETRIEVE_CHUNK_SIZE_BYTES` задаёт размер одного сообщения потока
+`RetrieveObject`. Значение ограничено диапазоном 1 byte–64 MiB. В Compose та же
+переменная передаётся Gateway, чтобы его gRPC receive limit всегда был больше
+чанка Storage. Для локального Compose значение можно переопределить один раз:
+
+```bash
+STORAGE_RETRIEVE_CHUNK_SIZE_BYTES=524288 make up-gateway-mvp
+```
 
 Основные значения находятся в `services/storage/.env`:
 

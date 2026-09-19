@@ -7,10 +7,15 @@ import (
 )
 
 type objectService struct {
-	metadata metadatav1.MetadataServiceClient
-	storage  storagev1.DataStorageServiceClient
+	metadata                      metadatav1.MetadataServiceClient
+	storage                       storagev1.DataStorageServiceClient
+	storageRetrieveChunkSizeBytes int
 }
 
-func NewService(metadata metadatav1.MetadataServiceClient, storage storagev1.DataStorageServiceClient) service.ObjectService {
-	return &objectService{metadata: metadata, storage: storage}
+func NewService(metadata metadatav1.MetadataServiceClient, storage storagev1.DataStorageServiceClient, storageRetrieveChunkSizeBytes int) service.ObjectService {
+	return &objectService{
+		metadata:                      metadata,
+		storage:                       storage,
+		storageRetrieveChunkSizeBytes: storageRetrieveChunkSizeBytes,
+	}
 }

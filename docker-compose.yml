@@ -271,6 +271,8 @@ services:
       - "50053:50053"
     env_file:
       - services/storage/.env
+    environment:
+      STORAGE_RETRIEVE_CHUNK_SIZE_BYTES: "${STORAGE_RETRIEVE_CHUNK_SIZE_BYTES:-1048576}"
     volumes:
       - storage-data:/data
     networks:
@@ -320,6 +322,7 @@ services:
       GATEWAY_HTTP_ADDR: ":8080"
       METADATA_GRPC_ADDR: "metadata:50052"
       STORAGE_GRPC_ADDR: "storage:50053"
+      STORAGE_RETRIEVE_CHUNK_SIZE_BYTES: "${STORAGE_RETRIEVE_CHUNK_SIZE_BYTES:-1048576}"
     networks:
       - opens3-network
     restart: unless-stopped

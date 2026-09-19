@@ -13,15 +13,20 @@ import (
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 )
 
-// Storage sends up to 8 MiB of data plus protobuf fields per response.
-const maxStorageMessageSize = 8*1024*1024 + 1024
+// The protobuf envelope is small, but the receive limit must be larger than
+// the configured data chunk rather than exactly equal to it.
+const storageMessageOverheadBytes = 64 * 1024
 
 func (s *objectService) Get(ctx context.Context, bucket, key string) (service.GetResult, error) {
 	meta, err := s.metadata.GetObjectMeta(ctx, &metadatav1.GetObjectMetaRequest{BucketName: bucket, Key: key})
 	if err != nil {
 		return service.GetResult{}, err
 	}
-	stream, err := s.storage.RetrieveObject(ctx, &storagev1.RetrieveObjectRequest{BlobId: meta.GetBlobId()}, grpc.MaxCallRecvMsgSize(maxStorageMessageSize))
+	stream, err := s.storage.RetrieveObject(
+		ctx,
+		&storagev1.RetrieveObjectRequest{BlobId: meta.GetBlobId()},
+		grpc.MaxCallRecvMsgSize(s.storageRetrieveChunkSizeBytes+storageMessageOverheadBytes),
+	)
 	if err != nil {
 		return service.GetResult{}, err
 	}

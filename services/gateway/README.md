@@ -64,6 +64,7 @@ committed-версию. `pending/committed/aborted` orchestration, operation ID 
 | `GATEWAY_HTTP_ADDR` | `127.0.0.1:8080` | `:8080` |
 | `METADATA_GRPC_ADDR` | `localhost:50052` | `metadata:50052` |
 | `STORAGE_GRPC_ADDR` | `localhost:50053` | `storage:50053` |
+| `STORAGE_RETRIEVE_CHUNK_SIZE_BYTES` | `1048576` (1 MiB) | `${STORAGE_RETRIEVE_CHUNK_SIZE_BYTES:-1048576}` |
 | `LOGGER_LEVEL` | `info` | `info` |
 | `LOGGER_AS_JSON` | `false` | `false` |
 | `LOGGER_ENABLE_OLTP` | `false` | `false` |
@@ -78,6 +79,11 @@ Gateway читает переменные окружения и при нали�
 
 Compose публикует HTTP-порт только на `127.0.0.1:8080`, поскольку в этом срезе
 пока нет клиентской аутентификации и авторизации.
+
+Размер чанка чтения настраивает Storage, а Gateway использует то же значение для
+своего gRPC receive limit с небольшим запасом под protobuf envelope. В Compose
+это один общий параметр окружения; при отдельном запуске процессов одинаковое
+значение нужно передать обоим сервисам.
 
 ## Запуск
 

@@ -40,7 +40,10 @@ func (s *serviceProvider) StorageService(ctx context.Context) service.StorageSer
 
 func (s *serviceProvider) StorageHandler(ctx context.Context) desc.DataStorageServiceServer {
 	if s.storageHandler == nil {
-		s.storageHandler = storageHandler.NewHandler(s.StorageService(ctx))
+		s.storageHandler = storageHandler.NewHandler(
+			s.StorageService(ctx),
+			config.AppConfig().Retrieval.ChunkSizeBytes(),
+		)
 	}
 
 	return s.storageHandler

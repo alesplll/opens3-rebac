@@ -13,6 +13,10 @@ type StorageConfig interface {
 	MultipartDir() string
 }
 
+type RetrievalConfig interface {
+	ChunkSizeBytes() int
+}
+
 type LoggerConfig interface {
 	LogLevel() string
 	AsJSON() bool

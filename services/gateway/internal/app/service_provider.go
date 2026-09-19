@@ -65,7 +65,11 @@ func (s *serviceProvider) ObjectService() (service.ObjectService, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.objectService = objectservice.NewService(metadata, storage)
+		s.objectService = objectservice.NewService(
+			metadata,
+			storage,
+			s.config.Storage.RetrieveChunkSizeBytes(),
+		)
 	}
 	return s.objectService, nil
 }

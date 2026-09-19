@@ -1,9 +1,11 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	handlerStorage "github.com/alesplll/opens3-rebac/services/storage/internal/handler/storage"
@@ -33,12 +35,34 @@ func TestRetrieveObject_ReturnsReadError(t *testing.T) {
 		ctx: context.Background(),
 	}
 
-	h := handlerStorage.NewHandler(svc)
+	h := handlerStorage.NewHandler(svc, 1<<20)
 	err := h.RetrieveObject(&desc.RetrieveObjectRequest{BlobId: "blob-1"}, stream)
 	require.ErrorIs(t, err, readErr)
 	require.Len(t, stream.sent, 1)
 	require.Equal(t, []byte("hello"), stream.sent[0].GetData())
 	require.Equal(t, int64(5), stream.sent[0].GetTotalSize())
+}
+
+func TestRetrieveObject_UsesConfiguredChunkSize(t *testing.T) {
+	t.Parallel()
+
+	const configuredChunkSize = 4
+	svc := testRetrieveStorageService{
+		retrieveObjectFn: func(context.Context, string, int64, int64) (io.ReadCloser, int64, error) {
+			return io.NopCloser(strings.NewReader("0123456789")), 10, nil
+		},
+	}
+	stream := &retrieveObjectServerMock{ctx: context.Background()}
+
+	h := handlerStorage.NewHandler(svc, configuredChunkSize)
+	err := h.RetrieveObject(&desc.RetrieveObjectRequest{BlobId: "blob-1"}, stream)
+	require.NoError(t, err)
+	require.Len(t, stream.sent, 3)
+	require.Equal(t, []byte("0123"), stream.sent[0].GetData())
+	require.Equal(t, int64(10), stream.sent[0].GetTotalSize())
+	require.Equal(t, []byte("4567"), stream.sent[1].GetData())
+	require.Zero(t, stream.sent[1].GetTotalSize())
+	require.Equal(t, []byte("89"), stream.sent[2].GetData())
 }
 
 type testRetrieveStorageService struct {
@@ -93,7 +117,10 @@ func (s *retrieveObjectServerMock) Context() context.Context {
 }
 
 func (s *retrieveObjectServerMock) Send(resp *desc.RetrieveObjectResponse) error {
-	s.sent = append(s.sent, resp)
+	s.sent = append(s.sent, &desc.RetrieveObjectResponse{
+		Data:      bytes.Clone(resp.GetData()),
+		TotalSize: resp.GetTotalSize(),
+	})
 	return nil
 }
 

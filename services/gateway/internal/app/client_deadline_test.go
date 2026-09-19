@@ -61,7 +61,7 @@ func TestDeadlineReachesMetadataAndStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn))
+	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn), 1<<20)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	expected, _ := ctx.Deadline()

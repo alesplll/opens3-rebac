@@ -60,7 +60,7 @@ func TestUploadPart_StreamsAllChunksToService(t *testing.T) {
 		requests: reqs,
 	}
 
-	h := handlerStorage.NewHandler(svc)
+	h := handlerStorage.NewHandler(svc, 1<<20)
 	err := h.UploadPart(stream)
 	require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestUploadPart_StreamsAllChunksToService(t *testing.T) {
 func TestUploadPart_EmptyStream(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.UploadPart(&uploadPartServerMock{
 		ctx: context.Background(),
 	})
@@ -135,7 +135,7 @@ func TestUploadPart_StartsStreamingBeforeClientStreamEnds(t *testing.T) {
 		},
 	}
 
-	h := handlerStorage.NewHandler(svc)
+	h := handlerStorage.NewHandler(svc, 1<<20)
 	go func() {
 		done <- h.UploadPart(stream)
 	}()
@@ -192,7 +192,7 @@ func TestUploadPart_RejectsHeaderAfterFirstMessage(t *testing.T) {
 		},
 	}
 
-	h := handlerStorage.NewHandler(svc)
+	h := handlerStorage.NewHandler(svc, 1<<20)
 	err := h.UploadPart(stream)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -204,7 +204,7 @@ func TestUploadPart_RejectsHeaderAfterFirstMessage(t *testing.T) {
 func TestUploadPart_RejectsChunkAsFirstMessage(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.UploadPart(&uploadPartServerMock{
 		ctx: context.Background(),
 		requests: []*desc.UploadPartRequest{
@@ -224,7 +224,7 @@ func TestUploadPart_RejectsChunkAsFirstMessage(t *testing.T) {
 func TestUploadPart_RequiresUploadIDInFirstMessage(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.UploadPart(&uploadPartServerMock{
 		ctx: context.Background(),
 		requests: []*desc.UploadPartRequest{
@@ -247,7 +247,7 @@ func TestUploadPart_RequiresUploadIDInFirstMessage(t *testing.T) {
 func TestUploadPart_RequiresPartNumberInFirstMessage(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.UploadPart(&uploadPartServerMock{
 		ctx: context.Background(),
 		requests: []*desc.UploadPartRequest{
@@ -285,7 +285,7 @@ func TestUploadPart_AllowsEmptyPartInHeaderOnly(t *testing.T) {
 			gotBody = body
 			return "md5-empty", nil
 		},
-	})
+	}, 1<<20)
 
 	stream := &uploadPartServerMock{
 		ctx: context.Background(),

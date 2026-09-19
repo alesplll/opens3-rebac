@@ -11,7 +11,7 @@ import (
 type Config struct {
 	HTTP     HTTPConfig
 	Metadata GRPCClientConfig
-	Storage  GRPCClientConfig
+	Storage  StorageClientConfig
 	Logger   LoggerConfig
 }
 

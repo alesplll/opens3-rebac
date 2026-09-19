@@ -37,6 +37,8 @@ type fixture struct {
 	failStore    error
 }
 
+const fixtureRetrieveChunkSize = 1 << 20
+
 type metadataServer struct {
 	metadatav1.UnimplementedMetadataServiceServer
 	state *fixture
@@ -130,13 +132,13 @@ func (s *storageServer) RetrieveObject(req *storagev1.RetrieveObjectRequest, str
 	if len(data) == 0 {
 		return nil
 	}
-	for offset := 0; offset < len(data); offset += 8 * 1024 * 1024 {
+	for offset := 0; offset < len(data); offset += fixtureRetrieveChunkSize {
 		if offset > 0 && s.state.beforeNextChunk != nil {
 			if err := s.state.beforeNextChunk(stream.Context()); err != nil {
 				return err
 			}
 		}
-		end := min(offset+8*1024*1024, len(data))
+		end := min(offset+fixtureRetrieveChunkSize, len(data))
 		if err := stream.Send(&storagev1.RetrieveObjectResponse{Data: data[offset:end], TotalSize: int64(len(data))}); err != nil {
 			return err
 		}
@@ -161,7 +163,7 @@ func newGateway(t *testing.T) (*httptest.Server, *fixture) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	logger.SetNopLogger()
-	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn))
+	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn), 1<<20)
 	server := httptest.NewServer(httpapi.NewHandler(objects))
 	t.Cleanup(server.Close)
 	return server, state
