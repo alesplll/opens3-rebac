@@ -5,13 +5,21 @@ import (
 	"net/http"
 	"strings"
 
+	_ "github.com/alesplll/opens3-rebac/services/gateway/docs"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
-type Handler struct{ objects service.ObjectService }
+type Handler struct {
+	objects service.ObjectService
+	swagger http.Handler
+}
 
 func NewHandler(objects service.ObjectService) http.Handler {
-	return &Handler{objects: objects}
+	return &Handler{
+		objects: objects,
+		swagger: httpSwagger.Handler(httpSwagger.URL("/swagger/doc.json")),
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -25,16 +33,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok\n")
 		return
 	}
-	bucket, key, ok := objectPath(r.URL.Path)
+	if strings.HasPrefix(r.URL.Path, "/swagger/") {
+		h.swagger.ServeHTTP(w, r)
+		return
+	}
+	_, _, ok := objectPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	switch r.Method {
 	case http.MethodPut:
-		h.putObject(w, r, bucket, key)
+		h.PutObject(w, r)
 	case http.MethodGet:
-		h.getObject(w, r, bucket, key)
+		h.GetObject(w, r)
 	default:
 		w.Header().Set("Allow", "GET, PUT")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

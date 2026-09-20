@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	metadataclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/metadata"
+	storageclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/storage"
 	objectservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/object"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
@@ -61,7 +63,10 @@ func TestDeadlineReachesMetadataAndStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn), 1<<20)
+	objects := objectservice.NewService(
+		metadataclient.NewClient(metadatav1.NewMetadataServiceClient(conn)),
+		storageclient.NewClient(storagev1.NewDataStorageServiceClient(conn), 1<<20),
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	expected, _ := ctx.Deadline()

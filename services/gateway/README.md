@@ -7,7 +7,8 @@
 
 Gateway принимает обычный PUT/GET объекта, передаёт байты в Storage и работает с
 каталогом Metadata. HTTP-сервер также предоставляет `GET /healthz` и завершает
-активные запросы при SIGINT/SIGTERM.
+активные запросы при SIGINT/SIGTERM. Для локальной разработки доступны Swagger
+UI, нормализованные HTTP-метрики и трассировка без bucket/key в labels.
 
 ## Архитектура и зависимости
 
@@ -27,8 +28,11 @@ cmd/server/                 запуск процесса, выбор файла
 cmd/smoke/                  проверка живого HTTP → Metadata/Storage контура
 internal/config/env/        загрузка настроек по компонентам из окружения
 internal/app/               загрузка настроек, сборка зависимостей и жизненный цикл HTTP-сервера
+internal/client/            адаптеры Metadata и Storage, streaming и trace propagation
 internal/service/object/    сценарии PUT/GET с Metadata и Storage
 internal/handler/httpapi/   HTTP-маршруты, заголовки и коды ответов
+internal/observability/     HTTP spans и метрики с нормализованными route
+docs/                       сгенерированная Swagger/OpenAPI 2.0 схема
 ```
 
 ## API
@@ -38,6 +42,8 @@ internal/handler/httpapi/   HTTP-маршруты, заголовки и код�
 | `PUT /{bucket}/{key}` | сохранить тело и зарегистрировать текущую версию; `200`, `ETag`, `X-Object-Version-Id` |
 | `GET /{bucket}/{key}` | вернуть байты текущей версии, `Content-Type`, `Content-Length`, `ETag` |
 | `GET /healthz` | `200 ok` при работающем HTTP-процессе |
+| `GET /swagger/index.html` | Swagger UI локального development API |
+| `GET /swagger/doc.json` | Swagger/OpenAPI 2.0 схема |
 
 `key` может содержать `/`. Пустые bucket/key не принимаются. GET по `version_id`,
 HTTP Range, HEAD, DELETE, multipart и S3 authentication пока отсутствуют. Health
@@ -68,14 +74,18 @@ committed-версию. `pending/committed/aborted` orchestration, operation ID 
 | `LOGGER_LEVEL` | `info` | `info` |
 | `LOGGER_AS_JSON` | `false` | `false` |
 | `LOGGER_ENABLE_OLTP` | `false` | `false` |
+| `OTEL_ENABLED` | `false` | `${GATEWAY_OTEL_ENABLED:-false}` |
 | `OTEL_SERVICE_NAME` | `gateway` | `gateway` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | `localhost:4317` |
-| `OTEL_ENVIRONMENT` | `development` | `development` |
+| `OTEL_SERVICE_VERSION` | `dev` | `${GATEWAY_SERVICE_VERSION:-dev}` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | `${GATEWAY_OTLP_ENDPOINT:-otel-collector:4317}` |
+| `OTEL_ENVIRONMENT` | `local` | `${GATEWAY_ENVIRONMENT:-local}` |
+| `OTEL_METRICS_PUSH_TIMEOUT` | `30s` | `${GATEWAY_METRICS_PUSH_TIMEOUT:-30s}` |
 
 Gateway читает переменные окружения и при наличии файл `.env` из текущего
 каталога. Другой файл можно указать через `-config-path`. Как и в Users,
-логирование настроено через общий модуль платформы; экспорт логов в OTLP
-по умолчанию выключен.
+логирование настроено через общий модуль платформы. `LOGGER_ENABLE_OLTP`
+управляет экспортом логов, а `OTEL_ENABLED` — экспортом метрик и трейсов; оба по
+умолчанию выключены.
 
 Compose публикует HTTP-порт только на `127.0.0.1:8080`, поскольку в этом срезе
 пока нет клиентской аутентификации и авторизации.
@@ -119,18 +129,23 @@ printf 'hello' | curl -i -X PUT -H 'Content-Type: text/plain' --data-binary @- \
   http://127.0.0.1:8080/gateway-demo/example.txt
 curl -i http://127.0.0.1:8080/gateway-demo/example.txt
 curl -i http://127.0.0.1:8080/healthz
+# Swagger UI: http://127.0.0.1:8080/swagger/index.html
 ```
 
 ## Наблюдаемость и диагностика
 
 Ошибки downstream gRPC отображаются в HTTP 400/404/503/507/504 или 502. При
 ошибке регистрации уже записанного blob Gateway пишет `blob_id` в лог для
-ручной диагностики. Для логов контейнера: `docker compose logs -f gateway`.
+ручной диагностики. Метрики `http_server_requests_total` и
+`http_server_request_duration_seconds` содержат HTTP method, нормализованный
+route и status. HTTP trace context передаётся в Metadata и streaming-вызовы
+Storage. Для логов контейнера: `docker compose logs -f gateway`.
 
 ## Разработка и тесты
 
 ```bash
 make test-gateway
+make -C services/gateway swagger  # после изменения HTTP-аннотаций
 make smoke-gateway-local  # собрать/поднять стенд и проверить PUT/GET
 # Для уже запущенного стенда: make smoke-gateway
 docker compose --profile services config --quiet

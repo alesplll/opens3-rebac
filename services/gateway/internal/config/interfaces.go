@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 type HTTPConfig interface{ Address() string }
 type GRPCClientConfig interface{ Address() string }
 type StorageClientConfig interface {
@@ -13,4 +15,13 @@ type LoggerConfig interface {
 	ServiceName() string
 	OTLPEndpoint() string
 	ServiceEnvironment() string
+}
+
+type TelemetryConfig interface {
+	LoggerConfig
+	Enabled() bool
+	ServiceVersion() string
+	Environment() string
+	CollectorEndpoint() string
+	PushTimeout() time.Duration
 }

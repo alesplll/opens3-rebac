@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 
+	metadataclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/metadata"
+	storageclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/storage"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/handler/httpapi"
 	objectservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/object"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/logger"
@@ -163,7 +165,10 @@ func newGateway(t *testing.T) (*httptest.Server, *fixture) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	logger.SetNopLogger()
-	objects := objectservice.NewService(metadatav1.NewMetadataServiceClient(conn), storagev1.NewDataStorageServiceClient(conn), 1<<20)
+	objects := objectservice.NewService(
+		metadataclient.NewClient(metadatav1.NewMetadataServiceClient(conn)),
+		storageclient.NewClient(storagev1.NewDataStorageServiceClient(conn), 1<<20),
+	)
 	server := httptest.NewServer(httpapi.NewHandler(objects))
 	t.Cleanup(server.Close)
 	return server, state

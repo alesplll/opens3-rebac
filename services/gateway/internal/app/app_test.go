@@ -61,3 +61,29 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 		t.Fatal("Gateway did not stop after cancellation")
 	}
 }
+
+func TestRunReturnsListenError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	t.Setenv("GATEWAY_HTTP_ADDR", listener.Addr().String())
+	t.Setenv("METADATA_GRPC_ADDR", "127.0.0.1:1")
+	t.Setenv("STORAGE_GRPC_ADDR", "127.0.0.1:1")
+	a, err := app.NewApp("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() should report occupied address")
+	}
+}
+
+func TestNewAppRejectsInvalidStorageChunkSize(t *testing.T) {
+	t.Setenv("STORAGE_RETRIEVE_CHUNK_SIZE_BYTES", "0")
+	if _, err := app.NewApp(""); err == nil {
+		t.Fatal("NewApp() should reject invalid storage chunk size")
+	}
+}

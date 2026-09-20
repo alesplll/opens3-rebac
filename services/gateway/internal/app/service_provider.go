@@ -4,11 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 
+	metadataclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/metadata"
+	storageclient "github.com/alesplll/opens3-rebac/services/gateway/internal/client/storage"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/config"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/handler/httpapi"
 	"github.com/alesplll/opens3-rebac/services/gateway/internal/service"
 	objectservice "github.com/alesplll/opens3-rebac/services/gateway/internal/service/object"
+	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/tracing"
 	metadatav1 "github.com/alesplll/opens3-rebac/shared/pkg/go/metadata/v1"
 	storagev1 "github.com/alesplll/opens3-rebac/shared/pkg/go/storage/v1"
 	"google.golang.org/grpc"
@@ -20,37 +24,46 @@ type serviceProvider struct {
 
 	metadataConn   *grpc.ClientConn
 	storageConn    *grpc.ClientConn
-	metadataClient metadatav1.MetadataServiceClient
-	storageClient  storagev1.DataStorageServiceClient
+	metadataClient metadataclient.Client
+	storageClient  storageclient.Client
 
 	objectService service.ObjectService
 	objectHandler http.Handler
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 func newServiceProvider(cfg *config.Config) *serviceProvider {
 	return &serviceProvider{config: cfg}
 }
 
-func (s *serviceProvider) MetadataClient() (metadatav1.MetadataServiceClient, error) {
+func (s *serviceProvider) MetadataClient() (metadataclient.Client, error) {
 	if s.metadataClient == nil {
-		conn, err := grpc.NewClient(s.config.Metadata.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(
+			s.config.Metadata.Address(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithUnaryInterceptor(tracing.UnaryClientInterceptor("gateway.metadata")),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("create Metadata client: %w", err)
 		}
 		s.metadataConn = conn
-		s.metadataClient = metadatav1.NewMetadataServiceClient(conn)
+		s.metadataClient = metadataclient.NewClient(metadatav1.NewMetadataServiceClient(conn))
 	}
 	return s.metadataClient, nil
 }
 
-func (s *serviceProvider) StorageClient() (storagev1.DataStorageServiceClient, error) {
+func (s *serviceProvider) StorageClient() (storageclient.Client, error) {
 	if s.storageClient == nil {
 		conn, err := grpc.NewClient(s.config.Storage.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, fmt.Errorf("create Storage client: %w", err)
 		}
 		s.storageConn = conn
-		s.storageClient = storagev1.NewDataStorageServiceClient(conn)
+		s.storageClient = storageclient.NewClient(
+			storagev1.NewDataStorageServiceClient(conn),
+			s.config.Storage.RetrieveChunkSizeBytes(),
+		)
 	}
 	return s.storageClient, nil
 }
@@ -68,7 +81,6 @@ func (s *serviceProvider) ObjectService() (service.ObjectService, error) {
 		s.objectService = objectservice.NewService(
 			metadata,
 			storage,
-			s.config.Storage.RetrieveChunkSizeBytes(),
 		)
 	}
 	return s.objectService, nil
@@ -86,16 +98,19 @@ func (s *serviceProvider) ObjectHandler() (http.Handler, error) {
 }
 
 func (s *serviceProvider) Close() error {
-	var errs []error
-	if s.storageConn != nil {
-		if err := s.storageConn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close Storage client: %w", err))
+	s.closeOnce.Do(func() {
+		var errs []error
+		if s.storageConn != nil {
+			if err := s.storageConn.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close Storage client: %w", err))
+			}
 		}
-	}
-	if s.metadataConn != nil {
-		if err := s.metadataConn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close Metadata client: %w", err))
+		if s.metadataConn != nil {
+			if err := s.metadataConn.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close Metadata client: %w", err))
+			}
 		}
-	}
-	return errors.Join(errs...)
+		s.closeErr = errors.Join(errs...)
+	})
+	return s.closeErr
 }
