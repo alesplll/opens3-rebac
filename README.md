@@ -14,10 +14,11 @@
 ## Текущее состояние
 
 В репозитории реализованы внутренние gRPC-сервисы Auth, Users, AuthZ, Metadata,
-Storage и Quota, а также минимальный HTTP Gateway для PUT/GET. Это ещё не S3
-endpoint для `aws-cli`, boto3 и других стандартных S3 клиентов: SigV4 и большая
-часть S3 API отсутствуют. Диаграммы распределённого хранения, репликации и части Kafka-flow
-в `docs/` и Wiki описывают проектируемую архитектуру.
+Storage и Quota, а также локальный экспериментальный HTTP Gateway для PUT/GET
+поверх Metadata и Storage. В Gateway пока нет Auth/AuthZ, квоты и SigV4, поэтому
+его нельзя открывать наружу и использовать как S3 endpoint для `aws-cli`, boto3
+и других стандартных S3 клиентов. Диаграммы распределённого хранения,
+репликации и части Kafka-flow в `docs/` и Wiki описывают проектируемую архитектуру.
 
 | Сервис | Реализация | Порт на хосте | Основные зависимости |
 |---|---|---:|---|
@@ -27,7 +28,7 @@ endpoint для `aws-cli`, boto3 и других стандартных S3 кл�
 | Storage | Go | 50053 | локальная файловая система |
 | Users | Go | 50054 | PostgreSQL |
 | Quota | Rust | 50055 | Redis |
-| Gateway | Go, минимальный PUT/GET | 8080 (localhost) | Metadata, Storage |
+| [Gateway](services/gateway/README.md) | Go, локальный PUT/GET | 8080 (localhost) | Metadata, Storage |
 
 Сервис Storage хранит immutable blobs и поддерживает внутренние RPC для обычной и
 multipart-загрузки. Metadata хранит buckets, objects и versions. Наличие этих RPC
@@ -152,8 +153,8 @@ make up-observability
 ## Статус roadmap
 
 Phase 0 (контракты, Compose и базовые сервисы) завершена частично в текущем
-checkout. Ближайшая цель — дополнить Gateway аутентификацией и согласовать запись с
-сильной read-after-write видимостью. Versioning, multipart orchestration,
+checkout. Ближайшая цель — довести экспериментальный Gateway до защищённого
+end-to-end flow, сохранив сильную read-after-write видимость. Versioning, multipart orchestration,
 репликация, надёжный outbox и полная S3-совместимость остаются дальнейшими этапами.
 
 ## Документация

@@ -2,6 +2,8 @@
 
 Эта инструкция поднимает текущие сервисы проекта, включая минимальный HTTP
 Gateway для PUT/GET. Полный S3 HTTP API и SigV4 ещё не реализованы.
+Gateway опубликован только на `127.0.0.1` и не должен открываться наружу до
+добавления аутентификации и авторизации.
 
 ## Требования
 
@@ -48,6 +50,7 @@ Kafka ожидает успешной проверки готовности ZooK
 | Users | `localhost:50054` |
 | Quota | `localhost:50055` |
 | Gateway HTTP | `127.0.0.1:8080` |
+| Gateway Swagger UI | `http://127.0.0.1:8080/swagger/index.html` |
 | PostgreSQL Users | `localhost:5432` |
 | PostgreSQL Metadata | `localhost:5433` |
 | Redis | `localhost:6379` |
