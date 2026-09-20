@@ -1,7 +1,9 @@
 # Getting Started
 
-Эта инструкция поднимает текущие внутренние сервисы проекта. Внешний S3 Gateway
-ещё не реализован, поэтому после запуска не появится S3 HTTP endpoint.
+Эта инструкция поднимает текущие сервисы проекта, включая минимальный HTTP
+Gateway для PUT/GET. Полный S3 HTTP API и SigV4 ещё не реализованы.
+Gateway опубликован только на `127.0.0.1` и не должен открываться наружу до
+добавления аутентификации и авторизации.
 
 ## Требования
 
@@ -25,8 +27,14 @@ docker compose ps
 Профиль `services` запускает:
 
 - одноразовые `migrator-users` и `migrator-metadata`;
-- `users`, `auth`, `authz`, `metadata`, `storage`, `quota`;
+- `users`, `auth`, `authz`, `metadata`, `storage`, `quota`, `gateway`;
 - PostgreSQL для Users и Metadata, Redis, Neo4j, ZooKeeper и Kafka.
+
+Для минимального стенда с одним Storage node и Gateway используйте
+`make up-gateway-mvp`. Команда также поднимет зависимости Metadata.
+Kafka ожидает успешной проверки готовности ZooKeeper перед запуском.
+Автоматическая проверка PUT/GET: `make smoke-gateway` (создаёт свой тестовый bucket). Перед ручным PUT
+создайте тестовый bucket по [инструкции Gateway](services/gateway/README.md#примеры-использования).
 
 Миграторы в норме завершаются с кодом 0. Долгоживущие контейнеры должны быть в
 состоянии Up/healthy согласно их Compose healthcheck.
@@ -41,6 +49,8 @@ docker compose ps
 | Storage | `localhost:50053` |
 | Users | `localhost:50054` |
 | Quota | `localhost:50055` |
+| Gateway HTTP | `127.0.0.1:8080` |
+| Gateway Swagger UI | `http://127.0.0.1:8080/swagger/index.html` |
 | PostgreSQL Users | `localhost:5432` |
 | PostgreSQL Metadata | `localhost:5433` |
 | Redis | `localhost:6379` |
@@ -58,6 +68,7 @@ docker compose ps
 docker compose logs -f metadata
 docker compose logs -f quota
 docker compose logs -f storage
+docker compose logs -f gateway
 ```
 
 Для другого сервиса замените имя в последней команде. Типичные причины сбоя:
@@ -86,6 +97,7 @@ docker compose --profile services down -v
 
 ```bash
 make up-services
+make up-gateway-mvp
 make down
 make down-volumes
 make rebuild
@@ -115,7 +127,7 @@ make up-observability
 
 | Компонент | Нужные инструменты | Инструкция |
 |---|---|---|
-| Go services | Go 1.24.1; зависимости в Docker | [Auth](services/auth/README.md#запуск), [Users](services/users/README.md#запуск), [Metadata](services/metadata/README.md#запуск), [Storage](services/storage/README.md#запуск) |
+| Go services | Go 1.24.1; зависимости в Docker | [Auth](services/auth/README.md#запуск), [Users](services/users/README.md#запуск), [Metadata](services/metadata/README.md#запуск), [Storage](services/storage/README.md#запуск), [Gateway](services/gateway/README.md#запуск) |
 | AuthZ | Python 3.12, venv, pip | [Setup и отдельный invalidator](services/authz/README.md#запуск) |
 | Quota | Rust (Docker build использует 1.95), protoc, Redis | [Запуск и tests](services/quota/README.md#запуск) |
 | Ручные RPC | grpcurl | раздел «Примеры использования» каждого сервиса |

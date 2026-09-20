@@ -14,10 +14,11 @@
 ## Текущее состояние
 
 В репозитории реализованы внутренние gRPC-сервисы Auth, Users, AuthZ, Metadata,
-Storage и Quota. Внешний HTTP Gateway ещё не реализован, поэтому текущий checkout
-не предоставляет готовый S3 endpoint для `aws-cli`, boto3 и других стандартных S3
-клиентов. Диаграммы распределённого хранения, Gateway, репликации и части Kafka-flow
-в `docs/` и Wiki описывают проектируемую архитектуру.
+Storage и Quota, а также локальный экспериментальный HTTP Gateway для PUT/GET
+поверх Metadata и Storage. В Gateway пока нет Auth/AuthZ, квоты и SigV4, поэтому
+его нельзя открывать наружу и использовать как S3 endpoint для `aws-cli`, boto3
+и других стандартных S3 клиентов. Диаграммы распределённого хранения,
+репликации и части Kafka-flow в `docs/` и Wiki описывают проектируемую архитектуру.
 
 | Сервис | Реализация | Порт на хосте | Основные зависимости |
 |---|---|---:|---|
@@ -27,12 +28,12 @@ Storage и Quota. Внешний HTTP Gateway ещё не реализован, 
 | Storage | Go | 50053 | локальная файловая система |
 | Users | Go | 50054 | PostgreSQL |
 | Quota | Rust | 50055 | Redis |
-| Gateway | планируется | 8080 | внутренние gRPC-сервисы |
+| [Gateway](services/gateway/README.md) | Go, локальный PUT/GET | 8080 (localhost) | Metadata, Storage |
 
 Сервис Storage хранит immutable blobs и поддерживает внутренние RPC для обычной и
 multipart-загрузки. Metadata хранит buckets, objects и versions. Наличие этих RPC
-само по себе не означает полной S3-совместимости: внешний HTTP-контракт, SigV4 и
-end-to-end orchestration входят в будущий Gateway.
+само по себе не означает полной S3-совместимости: Gateway пока не выполняет
+аутентификацию, авторизацию, квоты и S3 SigV4.
 
 ## Быстрый старт
 
@@ -49,6 +50,8 @@ docker compose ps
 
 ```bash
 make up-services
+make up-gateway-mvp
+make smoke-gateway  # автоматическая проверка PUT/GET на поднятом стенде
 make up-e2e
 make test-metadata-integration
 make test-metadata-integration-local
@@ -105,10 +108,16 @@ Storage записывает blob во временный файл, синхро
 ограничена одной записью и одним процессом Quota, поэтому сервис пока рассчитан на
 одну активную реплику.
 
+### Gateway
+
+Gateway предоставляет локальные PUT/GET по `/{bucket}/{key}` и `/healthz`.
+Он вызывает Storage и Metadata последовательно и возвращает успех записи только
+после регистрации текущей версии. Подробнее: [Gateway README](services/gateway/README.md).
+
 ## Структура репозитория
 
 ```text
-services/               # auth, users, authz, metadata, storage, quota
+services/               # auth, users, authz, metadata, storage, quota, gateway
 shared/api/              # исходные protobuf-контракты
 shared/pkg/go/           # сгенерированный Go-код
 shared/pkg/py/           # сгенерированный Python-код
@@ -144,8 +153,8 @@ make up-observability
 ## Статус roadmap
 
 Phase 0 (контракты, Compose и базовые сервисы) завершена частично в текущем
-checkout. Ближайшая цель — реализовать Gateway и согласовать end-to-end запись с
-сильной read-after-write видимостью. Versioning, multipart orchestration,
+checkout. Ближайшая цель — довести экспериментальный Gateway до защищённого
+end-to-end flow, сохранив сильную read-after-write видимость. Versioning, multipart orchestration,
 репликация, надёжный outbox и полная S3-совместимость остаются дальнейшими этапами.
 
 ## Документация

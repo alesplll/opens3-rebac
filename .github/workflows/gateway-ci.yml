@@ -1,0 +1,45 @@
+name: Gateway CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/gateway/**'
+      - 'services/metadata/**'
+      - 'services/storage/**'
+      - 'shared/**'
+      - 'go.work*'
+      - 'docker-compose.yml'
+      - 'Makefile'
+      - '.github/workflows/gateway-ci.yml'
+  pull_request:
+    paths:
+      - 'services/gateway/**'
+      - 'services/metadata/**'
+      - 'services/storage/**'
+      - 'shared/**'
+      - 'go.work*'
+      - 'docker-compose.yml'
+      - 'Makefile'
+      - '.github/workflows/gateway-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.1'
+          cache-dependency-path: '**/go.sum'
+      - name: Gateway race tests
+        run: go test -race ./services/gateway/... -count=1
+      - name: Real-service smoke
+        run: make smoke-gateway-local
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile services logs --no-color --tail 150
+      - name: Stop test stack
+        if: always()
+        run: docker compose --profile services down -v

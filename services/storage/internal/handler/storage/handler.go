@@ -7,11 +7,13 @@ import (
 
 type handler struct {
 	desc.UnimplementedDataStorageServiceServer
-	service service.StorageService
+	service                service.StorageService
+	retrieveChunkSizeBytes int
 }
 
-func NewHandler(service service.StorageService) desc.DataStorageServiceServer {
+func NewHandler(service service.StorageService, retrieveChunkSizeBytes int) desc.DataStorageServiceServer {
 	return &handler{
-		service: service,
+		service:                service,
+		retrieveChunkSizeBytes: retrieveChunkSizeBytes,
 	}
 }

@@ -241,7 +241,9 @@ make down-e2e
 ```
 
 Без автоматического запуска контейнера: `make up-e2e`, затем
-`make test-metadata-integration`. Suite пересоздаёт схему и чистит таблицы —
+`make test-metadata-integration`. Пакеты запускаются последовательно (`-p 1`),
+поскольку используют одну тестовую БД. Не запускайте несколько таких команд
+одновременно против этой БД. Suite пересоздаёт схему и чистит таблицы —
 используйте конфигурацию [e2e](../../e2e/README.md), а не development/рабочую БД.
 Тест выдачи version_number: [insert_version_integration_test.go](internal/repository/object/tests/insert_version_integration_test.go).
 

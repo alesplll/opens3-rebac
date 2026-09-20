@@ -64,7 +64,7 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 		requests: reqs,
 	}
 
-	h := handlerStorage.NewHandler(svc)
+	h := handlerStorage.NewHandler(svc, 1<<20)
 	err := h.StoreObject(stream)
 	require.NoError(t, err)
 
@@ -81,7 +81,7 @@ func TestStoreObject_StreamsAllChunksToService(t *testing.T) {
 func TestStoreObject_EmptyStream(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.StoreObject(&storeObjectServerMock{
 		ctx: context.Background(),
 	})
@@ -98,9 +98,8 @@ func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
 			_, err := io.ReadAll(reader)
 			require.Error(t, err)
 			return nil, err
-			return nil, err
 		},
-	})
+	}, 1<<20)
 
 	err := h.StoreObject(&storeObjectServerMock{
 		ctx: context.Background(),
@@ -134,7 +133,7 @@ func TestStoreObject_RejectsSizeOutsideFirstMessage(t *testing.T) {
 func TestStoreObject_RejectsChunkAsFirstMessage(t *testing.T) {
 	t.Parallel()
 
-	h := handlerStorage.NewHandler(testStorageService{})
+	h := handlerStorage.NewHandler(testStorageService{}, 1<<20)
 	err := h.StoreObject(&storeObjectServerMock{
 		ctx: context.Background(),
 		requests: []*desc.StoreObjectRequest{
@@ -169,7 +168,7 @@ func TestStoreObject_AllowsEmptyObjectInHeaderOnly(t *testing.T) {
 			gotBody = body
 			return &model.BlobMeta{BlobID: "blob-empty", ChecksumMD5: "md5-empty"}, nil
 		},
-	})
+	}, 1<<20)
 
 	stream := &storeObjectServerMock{
 		ctx: context.Background(),

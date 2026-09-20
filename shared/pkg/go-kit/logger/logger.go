@@ -2,10 +2,12 @@ package logger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx"
 	"github.com/alesplll/opens3-rebac/shared/pkg/go-kit/contextx/claimsctx"
@@ -105,6 +107,7 @@ func createOTLPLogger(endpoint string) (otelLog.Logger, error) {
 		otelSdkLog.WithResource(resource),
 		otelSdkLog.WithProcessor(otelSdkLog.NewBatchProcessor(exporter)),
 	)
+	otelProvider = provider
 
 	return provider.Logger(fmt.Sprintf("logger:%s", cfg.ServiceName())), nil
 }
@@ -159,6 +162,19 @@ func Sync() error {
 	}
 
 	return nil
+}
+
+// Shutdown flushes the local logger and closes its optional OTLP provider.
+func Shutdown(ctx context.Context) error {
+	var result error
+	if otelProvider != nil {
+		result = errors.Join(result, otelProvider.Shutdown(ctx))
+		otelProvider = nil
+	}
+	if err := Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.EBADF) {
+		result = errors.Join(result, err)
+	}
+	return result
 }
 
 func With(fields ...zap.Field) *logger {

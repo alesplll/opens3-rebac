@@ -152,19 +152,33 @@ test-users:
 test-storage:
 	go test ./services/storage/... -count=1
 
+# Requires the running Gateway MVP stack; creates a unique smoke bucket.
+.PHONY: test-gateway smoke-gateway smoke-gateway-local
+smoke-gateway:
+	go run ./services/gateway/cmd/smoke
+
+smoke-gateway-local: up-gateway-mvp
+	$(MAKE) smoke-gateway
+
+test-gateway:
+	cd services/gateway && go test ./... -count=1
+
 test-users-service:
 	go test ./services/users/internal/service/user/tests -count=1
 
 test-metadata-integration:
-	cd services/metadata && go test -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
+	cd services/metadata && go test -p 1 -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
 
 test-metadata-integration-local: up-e2e
-	cd services/metadata && go test -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
+	cd services/metadata && go test -p 1 -tags=integration ./internal/repository/bucket/tests ./internal/repository/object/tests -count=1
 
 # ── Docker ─────────────────────────────────────────────────────────────────────
 
 up-services:
 	docker compose --profile services up -d
+
+up-gateway-mvp:
+	docker compose --profile services up --build -d gateway metadata storage
 
 up-e2e:
 	docker compose --env-file e2e/.env --profile e2e up -d --wait --force-recreate postgres-metadata-e2e

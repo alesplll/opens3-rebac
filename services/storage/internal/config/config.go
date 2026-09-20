@@ -13,6 +13,7 @@ type config struct {
 	Logger      LoggerConfig
 	GRPC        GRPCConfig
 	Storage     StorageConfig
+	Retrieval   RetrievalConfig
 	Tracing     TracingConfig
 	Metrics     MetricsConfig
 	RateLimiter RateLimiterConfig
@@ -58,6 +59,7 @@ func Load(path ...string) error {
 		Logger:      loggerCfg,
 		GRPC:        grpcCfg,
 		Storage:     storageCfg,
+		Retrieval:   storageCfg,
 		Tracing:     tracingCfg,
 		Metrics:     metricsCfg,
 		RateLimiter: rateLimiterCfg,

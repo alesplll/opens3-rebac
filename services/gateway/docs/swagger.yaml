@@ -1,0 +1,101 @@
+basePath: /
+info:
+  contact: {}
+  description: Minimal object PUT/GET without authentication, authorization, quota
+    or S3 compatibility. Do not expose publicly.
+  title: OpenS3 Gateway (development API)
+  version: 0.1.0
+paths:
+  /{bucket}/{key}:
+    get:
+      description: Development-only API. Streams object bytes; range and version selection
+        are not supported.
+      parameters:
+      - description: Bucket name
+        in: path
+        name: bucket
+        required: true
+        type: string
+      - description: Object key (may contain slashes)
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "502":
+          description: Bad Gateway
+          schema:
+            type: string
+        "503":
+          description: Service Unavailable
+          schema:
+            type: string
+        "504":
+          description: Gateway Timeout
+          schema:
+            type: string
+      summary: Read the current object version
+      tags:
+      - objects
+    put:
+      consumes:
+      - application/octet-stream
+      description: Development-only API. No authentication, authorization or quota
+        enforcement. A failed response after Storage may have an unknown Metadata
+        outcome; do not retry blindly.
+      parameters:
+      - description: Bucket name
+        in: path
+        name: bucket
+        required: true
+        type: string
+      - description: Object key (may contain slashes)
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Raw object bytes
+        in: body
+        name: body
+        required: true
+        schema:
+          type: string
+      - description: MIME type
+        in: header
+        name: Content-Type
+        type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "503":
+          description: Service Unavailable
+          schema:
+            type: string
+        "507":
+          description: Insufficient Storage
+          schema:
+            type: string
+      summary: Store an object in an existing bucket
+      tags:
+      - objects
+schemes:
+- http
+swagger: "2.0"
