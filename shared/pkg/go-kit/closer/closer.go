@@ -38,6 +38,19 @@ var globalCloser = &Closer{
 	shutdownTimeout: defaultShutdownTimeout,
 }
 
+// New creates an independent closer without installing signal handlers.
+// The caller controls when shutdown begins.
+func New(logger Logger, shutdownTimeout time.Duration) *Closer {
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = defaultShutdownTimeout
+	}
+	return &Closer{
+		done:            make(chan struct{}),
+		logger:          logger,
+		shutdownTimeout: shutdownTimeout,
+	}
+}
+
 // Configure configures logger and shutdownTimeout
 // Configure configures the global closer to handle system signals
 func Configure(logger Logger, shutdownTimeout time.Duration, signals ...os.Signal) {
